@@ -2419,67 +2419,116 @@
   //  OSM COURSE DATA PIPELINE
   // ═══════════════════════════════════════════════════════════════
 
-  async function searchNearbyCoursesOSM(lat, lng) {
-    const query = `[out:json][timeout:12];
-(
-  node["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
-  way["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
-  relation["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
-);
-out center 15;`;
 
-    const url = 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query.trim());
+  async function fetchOverpass(query, signal) {
+    const endpoints = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+    ];
+
+    let lastError;
+
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(
+          `${endpoint}?data=${encodeURIComponent(query.trim())}`,
+          {
+            signal,
+            cache: 'no-store',
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Overpass HTTP ${response.status}`);
+        }
+
+        return await response.json();
+      } catch (error) {
+        // If the user pressed Cancel / Skip, do not try another server.
+        if (error?.name === 'AbortError') {
+          throw error;
+        }
+
+        lastError = error;
+        console.warn(`Overpass failed at ${endpoint}`, error);
+      }
+    }
+
+    throw lastError || new Error('All Overpass servers failed.');
+  }
+
+  async function searchNearbyCoursesOSM(lat, lng) {
+    const query = `
+  [out:json][timeout:20];
+  (
+    node["leisure"="golf_course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+    way["leisure"="golf_course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+    relation["leisure"="golf_course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+  
+    node["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+    way["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+    relation["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+  );
+  out center tags 25;
+  `;
+
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const timer = setTimeout(() => ctrl.abort(), 20000);
 
     try {
-      const res = await fetch(url, { signal: ctrl.signal });
+      const data = await fetchOverpass(query, ctrl.signal);
+
       clearTimeout(timer);
-      if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
-      const data = await res.json();
+
       const elements = Array.isArray(data.elements) ? data.elements : [];
       const seen = new Set();
 
-      const courses = elements
-        .filter(el => {
-          const name = (el.tags && el.tags.name) || '';
-          if (!name) return false;
-          const clat = el.lat ?? el.center?.lat;
-          const clng = el.lon ?? el.center?.lng;
-          if (!Number.isFinite(clat) || !Number.isFinite(clng)) return false;
+      return elements
+        .map((el) => {
+          const tags = el.tags || {};
+          const name = String(tags.name || '').trim();
+          const clat = Number(el.lat ?? el.center?.lat);
+          const clng = Number(el.lon ?? el.center?.lon);
+
+          if (!name || !Number.isFinite(clat) || !Number.isFinite(clng)) {
+            return null;
+          }
+
           const key = `${name.toLowerCase()}|${clat.toFixed(4)}|${clng.toFixed(4)}`;
-          if (seen.has(key)) return false;
+
+          if (seen.has(key)) {
+            return null;
+          }
+
           seen.add(key);
-          return true;
-        })
-        .map(el => {
-          const clat = el.lat ?? el.center?.lat;
-          const clng = el.lon ?? el.center?.lng;
-          const distM = geodesicInverse({ lat, lng }, { lat: clat, lng: clng }).s;
+
+          const distanceM = geodesicInverse(
+            { lat, lng },
+            { lat: clat, lng: clng }
+          ).s;
+
           return {
             id: `osm:${el.type}/${el.id}`,
-            name: (el.tags && el.tags.name) || 'Golf Course',
+            name,
             lat: clat,
             lng: clng,
             source: 'openstreetmap',
             osmType: el.type,
             osmId: el.id,
-            distanceM: distM,
-            distanceYd: distM * M_TO_YD,
-            tags: el.tags || {},
+            distanceM,
+            distanceYd: distanceM * M_TO_YD,
+            tags,
           };
         })
+        .filter(Boolean)
         .sort((a, b) => a.distanceM - b.distanceM)
         .slice(0, 10);
-
-      return courses;
-    } catch (err) {
+    } finally {
       clearTimeout(timer);
-      throw err;
     }
   }
 
-  async function fetchCourseOSM(courseNode) {
+  async function fetchCourseOSM(courseNode, controller = new AbortController()) {
     const lat = courseNode.lat;
     const lng = courseNode.lng;
     const radius = OSM_AROUND_M;
@@ -2497,15 +2546,11 @@ out center 15;`;
 );
 out geom;`;
 
-    const url = 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query.trim());
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), 30000);
 
     try {
-      const res = await fetch(url, { signal: ctrl.signal });
+      const data = await fetchOverpass(query, controller.signal);
       clearTimeout(timer);
-      if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
-      const data = await res.json();
       return {
         elements: Array.isArray(data.elements) ? data.elements : [],
         osmType: data.osm3s?.copyright || '',
@@ -2815,7 +2860,10 @@ out geom;`;
       const wait = state._osmLastCall + OSM_OVERPASS_DEBOUNCE - now;
       if (wait > 0) await new Promise(r => setTimeout(r, wait));
       state._osmLastCall = Date.now();
-      const osmData = await fetchCourseOSM(course);
+      const osmData = await fetchCourseOSM(
+        course,
+        state._osmAbortController
+      );
       const newCourse = buildCourseFromOSM(osmData, course);
       cacheOSMCourse(newCourse);
       state.selectedCourseTemplate = newCourse;
@@ -3282,7 +3330,10 @@ out geom;`;
       if (wait > 0) await new Promise(r => setTimeout(r, wait));
       state._osmLastCall = Date.now();
 
-      const osmData = await fetchCourseOSM(candidate);
+      const osmData = await fetchCourseOSM(
+        candidate,
+        state._osmAbortController
+      );
       clearTimeout(skipTimer);
       const course = buildCourseFromOSM(osmData, candidate);
       cacheOSMCourse(course);
@@ -3321,11 +3372,24 @@ out geom;`;
     state.nearbySearchRequested = true;
     state.nearbyCourseError = null;
 
-    if (!state.loc || state.locStale) {
-      setNotice('Getting a fresh GPS fix before searching for nearby courses.', 'greenish');
+    if (!state.loc) {
+      setNotice(
+        'Getting a GPS fix before searching for nearby courses.',
+        'greenish'
+      );
+
       if (!state.gpsRunning) startGPS();
-      if (els.nearbyCourseStatus) els.nearbyCourseStatus.textContent = 'Waiting for a fresh GPS location…';
+
+      if (els.nearbyCourseStatus) {
+        els.nearbyCourseStatus.textContent =
+          'Waiting for a GPS location…';
+      }
+
       return;
+    }
+
+    if (state.locStale && !state.gpsRunning) {
+      startGPS(true);
     }
 
     // Check cache
