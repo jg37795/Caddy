@@ -1,0 +1,9844 @@
+(() => {
+  'use strict';
+
+  const APP_VERSION = '1.10.0';  // OSM-only course pipeline
+  const ACCURACY_WARN_YD = 25;
+  const USABLE_ACC_M = 30;
+  const APPROX_ACC_M = 500;
+  const WEATHER_TTL = 10 * 60 * 1000;
+  const ELEV_TTL = 30 * 24 * 60 * 60 * 1000;
+  const ONBOARD_KEY = 'caddy:onboarded';
+  const COURSE_PROFILES_KEY = 'caddy:courseProfiles:v1';
+  const LAST_ROUND_SETUP_KEY = 'caddy:lastRoundSetup:v1';
+
+  // OSM CACHE KEYS
+  const NEARBY_COURSES_OSM_KEY = 'caddy:osm:nearby:v1';
+  const OSM_COURSE_CACHE_PREFIX = 'caddy:osm:course:';
+  const NEARBY_COURSES_TTL = 6 * 60 * 60 * 1000;      // 6 hours
+  const OSM_COURSE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+  const NEARBY_COURSE_RADIUS_M = 12000;
+  const OSM_OVERPASS_DEBOUNCE = 1500;  // ms between Overpass calls
+  const OSM_AROUND_M = 2500;            // radius for full course data query
+
+  const MAX_GPS_SPEED_MPS = 18;
+  const MAX_CONSECUTIVE_REJECTS = 3;
+  const REBASE_AFTER_MS = 20000;
+  const reduceMotion =
+    window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const DEFAULT_CLUBS = [
+    ['Driver', 275],
+    ['3 Wood', 250],
+    ['2 Hybrid', 230],
+    ['5 Iron', 200],
+    ['6 Iron', 190],
+    ['7 Iron', 180],
+    ['8 Iron', 165],
+    ['9 Iron', 150],
+    ['PW', 135],
+    ['GW', 120],
+    ['50°', 110],
+    ['54°', 95],
+  ].map(([name, yards]) => ({ id: cryptoId(), name, yards }));
+
+  const $ = (id) => document.getElementById(id);
+
+  const els = {
+    manifestLink: $('manifestLink'),
+    topSubtitle: $('topSubtitle'),
+    proToggle: $('proToggle'),
+    darkToggle: $('darkToggle'),
+    proToggleSheet: $('proToggleSheet'),
+    darkToggleSheet: $('darkToggleSheet'),
+    settingsBtn: $('settingsBtn'),
+    recenterBtn: $('recenterBtn'),
+    settingsSheet: $('settingsSheet'),
+    settingsScrim: $('settingsScrim'),
+    settingsDoneBtn: $('settingsDoneBtn'),
+    replayOnboardBtn: $('replayOnboardBtn'),
+    resetShotDataBtn: $('resetShotDataBtn'),
+    shotDataDesc: $('shotDataDesc'),
+    onboard: $('onboard'),
+    obStartBtn: $('obStartBtn'),
+    findNearbyCoursesBtn: $('findNearbyCoursesBtn'),
+    refreshOsmBtn: $('refreshOsmBtn'),              // NEW
+    nearbyCourseStatus: $('nearbyCourseStatus'),
+    nearbyCourseList: $('nearbyCourseList'),
+    roundMapScoreBtn: $('roundMapScoreBtn'),
+    roundScoreScrim: $('roundScoreScrim'),
+    roundScoreSheet: $('roundScoreSheet'),
+    roundScoreCloseBtn: $('roundScoreCloseBtn'),
+    roundScoreTitle: $('roundScoreTitle'),
+    roundScoreMeta: $('roundScoreMeta'),
+    roundScoreValue: $('roundScoreValue'),
+    roundScoreMinusBtn: $('roundScoreMinusBtn'),
+    roundScorePlusBtn: $('roundScorePlusBtn'),
+    roundPuttsOptions: $('roundPuttsOptions'),
+    roundFirOptions: $('roundFirOptions'),
+    roundGirOptions: $('roundGirOptions'),
+    roundScoreSaveBtn: $('roundScoreSaveBtn'),
+    roundScoreSaveNextBtn: $('roundScoreSaveNextBtn'),
+    roundMapHud: $('roundMapHud'),
+    roundMapCourse: $('roundMapCourse'),
+    roundMapHole: $('roundMapHole'),
+    roundMapScore: $('roundMapScore'),
+    roundMapStatus: $('roundMapStatus'),
+    roundMapPrevBtn: $('roundMapPrevBtn'),
+    roundMapNextBtn: $('roundMapNextBtn'),
+    roundSetupScrim: $('roundSetupScrim'),
+    roundSetupSheet: $('roundSetupSheet'),
+    roundSetupCloseBtn: $('roundSetupCloseBtn'),
+    roundSetupCourseSelect: $('roundSetupCourseSelect'),
+    roundSetupCourseName: $('roundSetupCourseName'),
+    roundSetupTeeName: $('roundSetupTeeName'),
+    roundSetupStartHole: $('roundSetupStartHole'),
+    roundSetupPars: $('roundSetupPars'),
+    roundSetupSaveCourse: $('roundSetupSaveCourse'),
+    roundSetupStartBtn: $('roundSetupStartBtn'),
+    roundCourseName: $('roundCourseName'),
+    roundHoleNumber: $('roundHoleNumber'),
+    roundHoleMeta: $('roundHoleMeta'),
+    roundScoreSummary: $('roundScoreSummary'),
+    roundHoleStrip: $('roundHoleStrip'),
+    roundPrevHoleBtn: $('roundPrevHoleBtn'),
+    gpsChip: $('gpsChip'),
+    gpsDot: $('gpsDot'),
+    gpsText: $('gpsText'),
+    roundFabWrap: $('roundFabWrap'),
+    roundFab: $('roundFab'),
+    roundFabIc: $('roundFabIc'),
+    roundFabText: $('roundFabText'),
+    roundFabClub: $('roundFabClub'),
+    roundFabClubName: $('roundFabClubName'),
+    roundClubPop: $('roundClubPop'),
+    roundLive: $('roundLive'),
+    roundLiveV: $('roundLiveV'),
+    roundLiveL: $('roundLiveL'),
+    advicePill: $('advicePill'),
+    advicePillIc: $('advicePillIc'),
+    advicePillCount: $('advicePillCount'),
+    advicePop: $('advicePop'),
+    advicePopScrim: $('advicePopScrim'),
+    advicePopClose: $('advicePopClose'),
+    advicePopBody: $('advicePopBody'),
+    advicePopTitle: $('advicePopTitle'),
+    rawYards: $('rawYards'),
+    rawLabel: $('rawLabel'),
+    playsLikeYards: $('playsLikeYards'),
+    rangeNotice: $('rangeNotice'),
+    weatherStatus: $('weatherStatus'),
+    windMetric: $('windMetric'),
+    windSubMetric: $('windSubMetric'),
+    tempMetric: $('tempMetric'),
+    elevMetric: $('elevMetric'),
+    clubChips: $('clubChips'),
+    caddyTips: $('caddyTips'),
+    proBreakdownWrap: $('proBreakdownWrap'),
+    rangeBreakdown: $('rangeBreakdown'),
+    rangeStamp: $('rangeStamp'),
+    clubRecommendation: $('clubRecommendation'),
+    clubRecommendationSub: $('clubRecommendationSub'),
+    shotAction: $('shotAction'),
+    shotPlanChips: $('shotPlanChips'),
+    shotDetailsBtn: $('shotDetailsBtn'),
+    shotDetailsLabel: $('shotDetailsLabel'),
+    inlineAdvice: $('inlineAdvice'),
+    clubsList: $('clubsList'),
+    resetClubsBtn: $('resetClubsBtn'),
+    newClubName: $('newClubName'),
+    newClubYards: $('newClubYards'),
+    addClubBtn: $('addClubBtn'),
+    manualYards: $('manualYards'),
+    manualClub: $('manualClub'),
+    manualBearing: $('manualBearing'),
+    manualElevDiff: $('manualElevDiff'),
+    manualAltitude: $('manualAltitude'),
+    manualTemp: $('manualTemp'),
+    manualRh: $('manualRh'),
+    manualWindSpeed: $('manualWindSpeed'),
+    manualWindDir: $('manualWindDir'),
+    manualCalcBtn: $('manualCalcBtn'),
+    prefillBtn: $('prefillBtn'),
+    manualRec: $('manualRec'),
+    manualRecSub: $('manualRecSub'),
+    manualBreakdown: $('manualBreakdown'),
+    roundRows: $('roundRows'),
+    clearRoundBtn: $('clearRoundBtn'),
+    roundStatusChip: $('roundStatusChip'),
+    roundShotHint: $('roundShotHint'),
+    roundShotReadout: $('roundShotReadout'),
+    roundActionBtn: $('roundActionBtn'),
+    roundSubActions: $('roundSubActions'),
+    roundDiscardBtn: $('roundDiscardBtn'),
+    roundNextHoleBtn: $('roundNextHoleBtn'),
+    roundEndBtn: $('roundEndBtn'),
+    roundShotList: $('roundShotList'),
+    statScore: $('statScore'),
+    statPutts: $('statPutts'),
+    statFir: $('statFir'),
+    statGir: $('statGir'),
+    statsBreakdown: $('statsBreakdown'),
+    saveRoundBtn: $('saveRoundBtn'),
+    themeColorMeta: $('themeColorMeta'),
+    pwaStatus: $('pwaStatus'),
+    rangeWrap: $('rangeWrap'),
+    layerSeg: $('layerSeg'),
+    segThumb: $('segThumb'),
+    sheet: $('sheet'),
+    sheetDrag: $('sheetDrag'),
+    fcbFront: $('fcbFront'),
+    fcbCenter: $('fcbCenter'),
+    fcbBack: $('fcbBack'),
+    setFrontBtn: $('setFrontBtn'),
+    setCenterBtn: $('setCenterBtn'),
+    setBackBtn: $('setBackBtn'),
+    clearFbBtn: $('clearFbBtn'),
+    modeToggle: $('modeToggle'),
+  };
+
+  const savedLoc = (() => {
+    const v = load('caddy:lastLocation', null);
+    if (
+      v &&
+      typeof v === 'object' &&
+      Number.isFinite(Number(v.lat)) &&
+      Number.isFinite(Number(v.lng)) &&
+      Math.abs(v.lat) <= 90 &&
+      Math.abs(v.lng) <= 180
+    ) {
+      return v;
+    }
+    return null;
+  })();
+
+  const state = {
+    prefs: load('caddy:prefs', {
+      dark: false,
+      pro: false,
+      selectedClubId: '',
+      activeTab: 'range',
+      mapLayer: '',
+      gpsEnabled: false,
+      mode: 'golf',
+    }),
+    nearbyCourses: [],
+    nearbyCourseLoading: false,
+    nearbyCourseLoadingScorecard: false,
+    nearbySearchRequested: false,
+    nearbyCourseError: null,
+    selectedNearbyCourse: null,
+    selectedCourseTemplate: null,
+    courseProfiles: load(COURSE_PROFILES_KEY, []),
+    clubs: load('caddy:clubs', DEFAULT_CLUBS),
+    round: load('caddy:round', emptyRound()),
+    history: load('caddy:history', []),
+    loc: savedLoc,
+    locStale: !!savedLoc,
+    watchId: null,
+    gpsDenied: false,
+    gpsRunning: false,
+    gpsStartedAt: 0,
+    preciseHintShown: false,
+    fixSamples: [],
+    smoothed: null,
+    lastRawFix: null,
+    lastAcceptedFix: null,
+    consecutiveRejects: 0,
+    currentAccuracy: null,
+    target: null,
+    greenCenter: null, // {lat,lng} — persistent green center for the hole
+    frontPt: null,
+    backPt: null,
+    twoTapA: null,
+    twoTapComplete: false,
+    placeMode: null,
+    context: {
+      weather: null,
+      elevation: null,
+      offlineWeather: false,
+      offlineElevation: false,
+      weatherTs: 0,
+      elevTs: 0,
+    },
+    contextSeq: 0,
+    lastCalc: null,
+    lastRecClubId: null,
+    roundSession: load('caddy:roundSession', null),
+    roundScoreDraft: null,
+    map: null,
+    layers: {},
+    markers: {},
+    mapReady: false,
+    pannedOnce: false,
+    followUser: false,
+    contextTimer: null,
+    sheet: null,
+    // OSM state
+    _osmLastCall: 0,               // timestamp of last Overpass call (debounce)
+    _osmAbortController: null,     // current Overpass fetch abort controller
+  };
+  const FollowMode = { IDLE: 'idle', LOCKED: 'locked' };
+  state.followMode = FollowMode.IDLE;
+  state.lockOffset = null; // {x, y} screen-pixel offset from map center, captured at lock
+  function emptyRound() {
+    return Array.from({ length: 18 }, (_, i) => ({
+      hole: i + 1,
+      score: '',
+      putts: '',
+      fir: '',
+      gir: '',
+      penalties: '',
+      notes: '',
+    }));
+  }
+
+  function defaultHole(number) {
+    return {
+      number,
+      par: 4,
+      handicap: '',
+      yards: '',
+
+      greenCenter: null,
+      front: null,
+      back: null,
+      teePoint: null,
+
+      hazards: [],
+      source: 'manual',
+    };
+  }
+  function defaultCourseHoles() {
+    return Array.from({ length: 18 }, (_, i) => defaultHole(i + 1));
+  }
+
+  function makeCasualCourse() {
+    return {
+      id: 'casual',
+      name: 'Casual Round',
+      teeName: 'Default tees',
+      source: 'manual',
+      updatedAt: Date.now(),
+
+      rating: '',
+      slope: '',
+      totalYards: '',
+      location: null,
+
+      holes: defaultCourseHoles(),
+    };
+  }
+
+  function normalizeCourse(course) {
+    const fallback = makeCasualCourse();
+    const raw = course && typeof course === 'object' ? course : {};
+
+    const location =
+      raw.location &&
+        Number.isFinite(Number(raw.location.lat)) &&
+        Number.isFinite(Number(raw.location.lng)) &&
+        Math.abs(Number(raw.location.lat)) <= 90 &&
+        Math.abs(Number(raw.location.lng)) <= 180
+        ? {
+          lat: Number(raw.location.lat),
+          lng: Number(raw.location.lng),
+        }
+        : null;
+
+    const rawHoles = Array.isArray(raw.holes) ? raw.holes : [];
+
+    return {
+      ...raw,
+      // Preserve importer-added keys
+      osmType: raw.osmType || undefined,
+      osmId: raw.osmId || undefined,
+      importReport: raw.importReport || undefined,
+      teeSets: raw.teeSets || undefined,
+      activeTeeSet: raw.activeTeeSet || undefined,
+
+      id:
+        typeof raw.id === 'string' && raw.id.trim()
+          ? raw.id
+          : `local:${cryptoId()}`,
+
+      name:
+        typeof raw.name === 'string' && raw.name.trim()
+          ? raw.name.trim()
+          : fallback.name,
+
+      teeName:
+        typeof raw.teeName === 'string' && raw.teeName.trim()
+          ? raw.teeName.trim()
+          : fallback.teeName,
+
+      source:
+        typeof raw.source === 'string' && raw.source ? raw.source : 'manual',
+
+      updatedAt: Number(raw.updatedAt) || Date.now(),
+
+      rating:
+        raw.rating === '' || raw.rating == null ? '' : num(raw.rating, ''),
+
+      slope:
+        raw.slope === '' || raw.slope == null
+          ? ''
+          : Math.max(1, Math.round(num(raw.slope, 0))),
+
+      totalYards:
+        raw.totalYards === '' || raw.totalYards == null
+          ? ''
+          : Math.max(1, Math.round(num(raw.totalYards, 0))),
+
+      location,
+
+      holes: Array.from({ length: 18 }, (_, index) => {
+        const sourceHole =
+          rawHoles[index] && typeof rawHoles[index] === 'object'
+            ? rawHoles[index]
+            : {};
+        return {
+          ...defaultHole(index + 1),
+          ...sourceHole,
+          number: index + 1,
+          par: clamp(Math.round(num(sourceHole.par, 4)), 3, 6),
+          yards:
+            sourceHole.yards === '' || sourceHole.yards == null
+              ? ''
+              : Math.max(1, Math.round(num(sourceHole.yards, 0))),
+        };
+      }),
+    };
+  }
+
+  function cloneCourse(course) {
+    return JSON.parse(JSON.stringify(normalizeCourse(course)));
+  }
+
+  function saveCourseProfiles() {
+    save(COURSE_PROFILES_KEY, state.courseProfiles);
+  }
+
+  // A fresh scorecard is identical to an empty round — one source of truth.
+  function scorecardForCourse() {
+    return emptyRound();
+  }
+
+  function getCurrentHoleNumber() {
+    const rs = state.roundSession;
+    return clamp(Math.round(num(rs?.hole || rs?.currentHole, 1)), 1, 18);
+  }
+
+  function getCurrentCourse() {
+    return state.roundSession?.course
+      ? normalizeCourse(state.roundSession.course)
+      : null;
+  }
+
+  function getCurrentHoleData() {
+    const course = getCurrentCourse();
+    const holeNumber = getCurrentHoleNumber();
+
+    if (!course?.holes?.length) return defaultHole(holeNumber);
+
+    return course.holes[holeNumber - 1] || defaultHole(holeNumber);
+  }
+
+  function getScorecardRows() {
+    if (state.roundSession && Array.isArray(state.roundSession.scorecard)) {
+      return state.roundSession.scorecard;
+    }
+
+    return state.round;
+  }
+
+  function syncRoundScorecard() {
+    if (!state.roundSession) return;
+
+    state.roundSession.scorecard = state.round;
+    state.roundSession.currentHole = state.roundSession.hole;
+
+    save('caddy:round', state.round);
+    saveRoundSession();
+  }
+
+  function roundScoreToPar() {
+    const course = getCurrentCourse();
+    const rows = getScorecardRows();
+
+    let strokes = 0;
+    let par = 0;
+    let holesPlayed = 0;
+
+    rows.forEach((row, index) => {
+      const score = Number(row.score);
+
+      if (!Number.isFinite(score) || score <= 0) return;
+
+      const holePar = clamp(
+        Math.round(num(course?.holes?.[index]?.par, 4)),
+        3,
+        6
+      );
+
+      strokes += score;
+      par += holePar;
+      holesPlayed += 1;
+    });
+
+    return {
+      strokes,
+      par,
+      holesPlayed,
+      toPar: strokes - par,
+    };
+  }
+
+  function formatToPar(value) {
+    if (!Number.isFinite(value) || value === 0) return 'E';
+    return value > 0 ? `+${value}` : String(value);
+  }
+
+  // Round session = the live tracking lifecycle.
+  // status: "idle" | "active" | "pending"
+  //   active  → between shots, ready to start the next one
+  //   pending → a shot is in flight (start captured, awaiting finish)
+  function emptyRoundSession(course = null, startHole = 1) {
+    const selectedCourse = normalizeCourse(course || makeCasualCourse());
+
+    return {
+      status: 'active',
+      hole: clamp(Math.round(num(startHole, 1)), 1, 18),
+      currentHole: clamp(Math.round(num(startHole, 1)), 1, 18),
+
+      startedAt: Date.now(),
+
+      course: selectedCourse,
+      scorecard: scorecardForCourse(selectedCourse),
+
+      pending: null,
+      chosenClubId: null,
+      shots: [],
+    };
+  }
+  function saveRoundSession() {
+    save('caddy:roundSession', state.roundSession);
+  }
+  function roundStatus() {
+    return state.roundSession ? state.roundSession.status : 'idle';
+  }
+  // Club the next shot will log against: explicit override wins,
+  // otherwise follow the live recommendation, otherwise longest club.
+  function roundActiveClubId() {
+    const rs = state.roundSession;
+    if (rs && rs.chosenClubId) {
+      // Drop a stale override if that club was deleted.
+      if (state.clubs.some((c) => c.id === rs.chosenClubId))
+        return rs.chosenClubId;
+    }
+    if (state.lastRecClubId) return state.lastRecClubId;
+    const d = sortedClubsDesc()[0];
+    return d ? d.id : null;
+  }
+
+  function cryptoId() {
+    try {
+      if (crypto && crypto.randomUUID) return crypto.randomUUID();
+    } catch { }
+    try {
+      if (crypto && crypto.getRandomValues) {
+        const b = new Uint8Array(16);
+        crypto.getRandomValues(b);
+        b[6] = (b[6] & 0x0f) | 0x40;
+        b[8] = (b[8] & 0x3f) | 0x80;
+        const h = [...b].map((x) => x.toString(16).padStart(2, '0'));
+        return (
+          h.slice(0, 4).join('') +
+          '-' +
+          h.slice(4, 6).join('') +
+          '-' +
+          h.slice(6, 8).join('') +
+          '-' +
+          h.slice(8, 10).join('') +
+          '-' +
+          h.slice(10, 16).join('')
+        );
+      }
+    } catch { }
+    return (
+      'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    );
+  }
+  function load(k, f) {
+    try {
+      const r = localStorage.getItem(k);
+      return r ? JSON.parse(r) : f;
+    } catch {
+      return f;
+    }
+  }
+  function save(k, v) {
+    try {
+      localStorage.setItem(k, JSON.stringify(v));
+    } catch { }
+  }
+  function clamp(n, mn, mx) {
+    return Math.min(mx, Math.max(mn, n));
+  }
+  function num(v, f = 0) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : f;
+  }
+  function fmt(n, d = 0) {
+    return Number.isFinite(n) ? n.toFixed(d) : '—';
+  }
+  function escapeHtml(s) {
+    return String(s).replace(
+      /[&<>"']/g,
+      (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;',
+      }[c])
+    );
+  }
+  function haptic(ms) {
+    try {
+      if (navigator.vibrate && !reduceMotion) navigator.vibrate(ms);
+    } catch { }
+  }
+
+  const d2r = (d) => (d * Math.PI) / 180,
+    r2d = (r) => (r * 180) / Math.PI,
+    norm = (d) => ((d % 360) + 360) % 360;
+
+  // ===== Onboarding =====
+  let lastFocusBeforeOnboard = null;
+  function shouldShowOnboard() {
+    try {
+      return localStorage.getItem(ONBOARD_KEY) !== '1';
+    } catch {
+      return true;
+    }
+  }
+  function showOnboard() {
+    lastFocusBeforeOnboard = document.activeElement;
+    els.onboard.hidden = false;
+    els.onboard.classList.remove('hide');
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(() => {
+      try {
+        els.obStartBtn.focus();
+      } catch { }
+    });
+  }
+  function dismissOnboard() {
+    try {
+      localStorage.setItem(ONBOARD_KEY, '1');
+    } catch { }
+    els.onboard.classList.add('hide');
+    haptic(10);
+    const done = () => {
+      els.onboard.hidden = true;
+      document.body.style.overflow = '';
+      if (lastFocusBeforeOnboard instanceof HTMLElement) {
+        try {
+          lastFocusBeforeOnboard.focus();
+        } catch { }
+      }
+      if (state.map) state.map.invalidateSize();
+      if (state.sheet) state.sheet.measure();
+      // Automatically start GPS so the user lands straight on the map
+      // with their location — no extra tap on the GPS pill needed.
+      if (!state.gpsRunning) startGPS();
+    };
+    if (reduceMotion) done();
+    else setTimeout(done, 520);
+  }
+  function trapOnboardFocus(e) {
+    if (e.key !== 'Tab' || els.onboard.hidden) return;
+    const focusables = [
+      ...els.onboard.querySelectorAll(
+        "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+      ),
+    ].filter((el) => el.offsetParent !== null);
+    if (!focusables.length) return;
+    const first = focusables[0],
+      last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+  function initOnboard() {
+    els.obStartBtn.addEventListener('click', dismissOnboard);
+    document.addEventListener('keydown', trapOnboardFocus);
+    if (shouldShowOnboard()) showOnboard();
+    else els.onboard.hidden = true;
+  }
+
+  function setManifest() {
+    const icon =
+      'data:image/svg+xml,' +
+      encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#0f7a43"/><circle cx="256" cy="256" r="168" fill="#eafff1"/><path d="M210 360V132h132v40h-82v52h73v40h-73v96z" fill="#0f7a43"/><circle cx="365" cy="132" r="30" fill="#fff"/></svg>`
+      );
+    const manifest = {
+      name: 'Caddy',
+      short_name: 'Caddy',
+      description: 'Free personal-use golf caddy PWA.',
+      start_url: '.',
+      scope: '.',
+      display: 'standalone',
+      orientation: 'portrait',
+      background_color: '#f5f7f4',
+      theme_color: '#0f7a43',
+      icons: [
+        {
+          src: icon,
+          sizes: '192x192',
+          type: 'image/svg+xml',
+          purpose: 'any maskable',
+        },
+        {
+          src: icon,
+          sizes: '512x512',
+          type: 'image/svg+xml',
+          purpose: 'any maskable',
+        },
+      ],
+    };
+    els.manifestLink.href =
+      'data:application/manifest+json,' +
+      encodeURIComponent(JSON.stringify(manifest));
+  }
+
+  async function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+      els.pwaStatus.textContent = 'Service workers not supported here.';
+      return;
+    }
+    if (!/^https?:$/.test(location.protocol)) {
+      els.pwaStatus.textContent =
+        'Offline worker skipped on file:// — host over http(s).';
+      return;
+    }
+    try {
+      await navigator.serviceWorker.register('./sw.js', { scope: './' });
+      els.pwaStatus.textContent =
+        'Offline support active. Previously-viewed map areas work offline.';
+    } catch {
+      els.pwaStatus.textContent =
+        'Service worker registration failed; app still runs online.';
+    }
+  }
+
+  function applyPrefs() {
+    document.body.classList.toggle('dark', !!state.prefs.dark);
+    document.documentElement.style.backgroundColor = state.prefs.dark
+      ? '#07100b'
+      : '#f5f7f4';
+    document.documentElement.style.colorScheme = state.prefs.dark
+      ? 'dark'
+      : 'light';
+    els.proToggle.checked = !!state.prefs.pro;
+    els.proToggleSheet.checked = !!state.prefs.pro;
+    els.darkToggleSheet.checked = !!state.prefs.dark;
+    els.proBreakdownWrap.style.display = state.prefs.pro ? 'block' : 'none';
+    els.themeColorMeta.setAttribute(
+      'content',
+      state.prefs.dark ? '#07100b' : '#0f7a43'
+    );
+    save('caddy:prefs', state.prefs);
+    if (state.sheet) requestAnimationFrame(() => state.sheet.measure());
+  }
+  function setPro(on) {
+    state.prefs.pro = on;
+    applyPrefs();
+    if (state.lastCalc) renderBreakdown(state.lastCalc, els.rangeBreakdown);
+  }
+  function setDark(on) {
+    state.prefs.dark = on;
+    applyPrefs();
+    haptic(5);
+  }
+  function applyMode() {
+    const m = state.prefs.mode || 'golf';
+    document.body.setAttribute('data-mode', m);
+
+    // Toggle buttons
+    const opts = els.modeToggle?.querySelectorAll('.mode-opt');
+    if (opts) {
+      opts.forEach((b) => {
+        b.classList.toggle('active', b.dataset.mode === m);
+        b.setAttribute('aria-checked', String(b.dataset.mode === m));
+      });
+    }
+
+    // Practice card → only in Range
+    const pc = document.getElementById('practiceCard');
+    if (pc) {
+      pc.style.display = m === 'range' ? '' : 'none';
+      if (m === 'range') renderPracticeSection();
+    }
+
+    // Update coach/caddy pill label
+    if (els.advicePillIc) {
+      els.advicePillIc.textContent = m === 'range' ? '📋' : '💡';
+    }
+    if (els.advicePopTitle) {
+      els.advicePopTitle.textContent =
+        m === 'range' ? 'Practice notes' : 'Why this shot';
+    }
+
+    // Close any open pop when switching
+    closeAdvice();
+
+    // Range mode hides the Round and Stats tabs — never leave one active.
+    if (m === 'range' && ['round', 'stats'].includes(state.prefs.activeTab)) {
+      state.prefs.activeTab = 'range';
+      showTab('range');
+    }
+
+    // Recalc if we have a target
+    if (state.target && state.loc) calculateRange();
+
+    save('caddy:prefs', state.prefs);
+    haptic(5);
+  }
+  function initModeToggle() {
+    if (!els.modeToggle) return;
+    els.modeToggle.querySelectorAll('.mode-opt').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.prefs.mode = btn.dataset.mode;
+        applyMode();
+      });
+    });
+  }
+  function initTabs() {
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.prefs.activeTab = btn.dataset.tab;
+        save('caddy:prefs', state.prefs);
+        showTab(btn.dataset.tab);
+        haptic(4);
+      });
+    });
+    showTab(state.prefs.activeTab || 'range');
+  }
+  function showTab(tab) {
+    const map = {
+      range: 'rangeScreen',
+      clubs: 'clubsScreen',
+      shot: 'shotScreen',
+      round: 'roundScreen',
+      stats: 'statsScreen',
+    };
+    document.body.setAttribute('data-tab', tab);
+    document
+      .querySelectorAll('.screen')
+      .forEach((s) => s.classList.remove('active'));
+    document
+      .querySelectorAll('.tab-btn')
+      .forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+    $(map[tab] || 'rangeScreen').classList.add('active');
+    const titles = {
+      range: 'Tap map for live yardage',
+      clubs: 'Stock carry distances',
+      shot: 'Plays-like calculator',
+      round: '18-hole scorecard',
+      stats: 'Local round stats',
+    };
+    els.topSubtitle.textContent = titles[tab] || 'Personal golf caddy';
+    if (tab === 'range') {
+      initMap();
+      setTimeout(() => {
+        if (state.map) {
+          state.map.invalidateSize();
+          if (state.sheet) state.sheet.measure();
+        }
+      }, 80);
+      setTimeout(() => {
+        if (state.sheet) state.sheet.measure();
+      }, 400);
+      if (state.prefs.gpsEnabled && !state.gpsRunning) startGPS(true);
+    } else if (tab !== 'round' && roundStatus() === 'idle') {
+      // Never kill GPS mid-round — a pending shot needs a live fix.
+      stopGPS();
+    } else if (state.prefs.gpsEnabled && !state.gpsRunning) {
+      // Keep GPS active in Round so nearby course recognition and
+      // shot tracking have a fresh location.
+      startGPS(true);
+    }
+    if (tab === 'stats') renderStats();
+  }
+
+  function migrateLayer(name) {
+    // Only "satellite" and "osmstd" (labeled "Course") remain.
+    // Everything legacy funnels to the OSM flat map.
+    if (name === 'satellite') return 'satellite';
+    return 'osmstd';
+  }
+
+  function initMap() {
+    if (state.mapReady) return;
+    if (!window.L) {
+      $('map').innerHTML =
+        "<div class='empty'>Leaflet failed to load. Check your connection.</div>";
+      return;
+    }
+    const start = state.loc ? [state.loc.lat, state.loc.lng] : [39.5, -98.35];
+    const zoom = state.loc ? 17 : 5;
+    state.map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false,
+      tap: true,
+      maxZoom: 21,
+      minZoom: 5,
+    }).setView(start, zoom);
+    L.control.zoom({ position: 'bottomright' }).addTo(state.map);
+    setTimeout(() => {
+      if (state.sheet) state.sheet.measure();
+    }, 60);
+
+    const esriImageryAttr =
+      'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, GIS User Community';
+    const imageryTiles =
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+
+    state.layers.satellite = L.layerGroup([
+      L.tileLayer(imageryTiles, {
+        attribution: esriImageryAttr,
+        maxZoom: 21,
+        maxNativeZoom: 19,
+        updateWhenIdle: true,
+        keepBuffer: 2,
+      }),
+    ]);
+
+    state.map.on('click', (e) =>
+      handleMapTap({ lat: e.latlng.lat, lng: e.latlng.lng })
+    );
+    state.map.on('dragstart', () => {
+      if (state.followMode !== FollowMode.IDLE) {
+        state.followMode = FollowMode.IDLE;
+        syncFollowFab();
+      }
+    });
+    state.mapReady = true;
+    // --- shot-line pane: above tiles/overlay, below markers (600) ---
+    if (!state.map.getPane('shotLinePane')) {
+      state.map.createPane('shotLinePane');
+      const p = state.map.getPane('shotLinePane');
+      p.style.zIndex = 410;
+      p.style.pointerEvents = 'none'; // never intercept map taps
+    }
+    const topUI = document.querySelector('.range-top-ui');
+    if (topUI && window.L && L.DomEvent) {
+      L.DomEvent.disableClickPropagation(topUI);
+      L.DomEvent.disableScrollPropagation(topUI);
+    }
+    if (window.L && L.DomEvent) {
+      L.DomEvent.disableClickPropagation(els.gpsChip);
+    }
+    if (window.L && L.DomEvent && els.roundMapHud) {
+      L.DomEvent.disableClickPropagation(els.roundMapHud);
+      L.DomEvent.disableScrollPropagation(els.roundMapHud);
+    }
+
+    const initial = migrateLayer(state.prefs.mapLayer || 'satellite');
+    setMapLayer(initial, true);
+    if (state.loc) updateUserMarker();
+  }
+
+  function setMapLayer(name, silent) {
+    if (!state.mapReady) return;
+    name = migrateLayer(name);
+    // Only "satellite" is handled here; "osmstd" is intercepted by the
+    // OSM patch wrapper before reaching this function.
+    const all = [state.layers.satellite, state.layers.osmstd];
+    all.forEach((l) => {
+      if (l && state.map.hasLayer(l)) state.map.removeLayer(l);
+    });
+    state.layers.satellite.addTo(state.map);
+    els.rangeWrap.classList.add('is-sat');
+    state.prefs.mapLayer = 'satellite';
+    save('caddy:prefs', state.prefs);
+    updateAimColor();
+    restyleShotLines();
+  }
+  function updateAimColor() {
+    const imagery = state.prefs.mapLayer === 'satellite';
+    document.documentElement.style.setProperty(
+      '--aim',
+      imagery ? '#ffffff' : '#1677ff'
+    );
+  }
+
+  const userIcon = () =>
+    L.divIcon({
+      className: '',
+      html: "<div class='user-pulse'></div>",
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
+  const targetIcon = () =>
+    L.divIcon({
+      className: '',
+      html: "<div class='target-pin'></div>",
+      iconSize: [26, 26],
+      iconAnchor: [13, 25],
+    });
+  const tapIcon = () =>
+    L.divIcon({
+      className: '',
+      html: "<div class='two-tap-pin'></div>",
+      iconSize: [19, 19],
+      iconAnchor: [9, 9],
+    });
+  const greenCenterIcon = () =>
+    L.divIcon({
+      className: '',
+      html: "<div class='green-center-dot'></div>",
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+  const fbIcon = (kind) =>
+    L.divIcon({
+      className: '',
+      html: `<div class='fb-dot ${kind}'></div>`,
+      iconSize: [15, 15],
+      iconAnchor: [7.5, 7.5],
+    });
+
+  function startGPS(silentResume) {
+    if (!navigator.geolocation) {
+      state.gpsDenied = true;
+      setNotice(
+        'This browser does not support geolocation. Tap two map points to measure.',
+        'danger'
+      );
+      updateGpsUI();
+      return;
+    }
+    initMap();
+    stopGPS();
+    state.prefs.gpsEnabled = true;
+    save('caddy:prefs', state.prefs);
+    state.gpsRunning = true;
+    state.gpsStartedAt = Date.now();
+    state.fixSamples = [];
+    state.lastAcceptedFix = null;
+    state.consecutiveRejects = 0;
+    kalman.reset();
+    updateGpsUI('searching');
+    if (!silentResume)
+      setNotice(
+        'Locating… On iPhone, allow Precise Location for the best yardages.',
+        'greenish'
+      );
+    try {
+      state.watchId = navigator.geolocation.watchPosition(
+        onPosition,
+        onPositionError,
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+      );
+    } catch {
+      state.gpsRunning = false;
+      setNotice(
+        'GPS could not start. Tap two map points to measure.',
+        'danger'
+      );
+    }
+  }
+  function stopGPS() {
+    if (state.watchId !== null) {
+      try {
+        navigator.geolocation.clearWatch(state.watchId);
+      } catch { }
+      state.watchId = null;
+    }
+    state.gpsRunning = false;
+    state.followMode = FollowMode.IDLE;
+    syncFollowFab();
+    if (state.loc) state.locStale = true;
+    updateGpsUI();
+  }
+
+  function onPositionError(err) {
+    state.gpsDenied = err && err.code === 1;
+    updateGpsUI();
+    const msg =
+      err && err.code === 1
+        ? 'GPS denied. Enable Location Services for your browser, allow Precise Location, then tap the GPS pill again. Last-known location is used if available; otherwise tap two map points to measure.'
+        : 'GPS unavailable right now. Move outdoors with a clear sky, or tap two map points to measure.';
+    setNotice(msg, 'danger');
+    if (state.loc) {
+      state.locStale = true;
+      updateUserMarker();
+      if (state.target) calculateRange();
+    }
+  }
+
+  function updateUserMarker() {
+    if (!state.mapReady || !state.loc) return;
+    const ll = [state.loc.lat, state.loc.lng];
+    if (!state.markers.user)
+      state.markers.user = L.marker(ll, {
+        icon: userIcon(),
+        zIndexOffset: 900,
+      }).addTo(state.map);
+    else state.markers.user.setLatLng(ll);
+    const radius = Math.max(1, state.loc.accuracy || 0);
+    const col = state.locStale ? '#d38713' : '#1677ff';
+    if (!state.markers.accuracy)
+      state.markers.accuracy = L.circle(ll, {
+        radius,
+        color: col,
+        weight: 1,
+        fillColor: col,
+        fillOpacity: 0.11,
+        interactive: false,
+      }).addTo(state.map);
+    else {
+      state.markers.accuracy.setLatLng(ll).setRadius(radius);
+      state.markers.accuracy.setStyle({ color: col, fillColor: col });
+    }
+    updateLine();
+  }
+
+  function handleMapTap(latlng) {
+    initMap();
+    if (state.placeMode && state.loc) {
+      if (state.placeMode === 'front') {
+        state.frontPt = latlng;
+      } else if (state.placeMode === 'back') {
+        state.backPt = latlng;
+      } else if (state.placeMode === 'center') {
+        state.greenCenter = latlng;
+        if (!state.markers.greenCenter)
+          state.markers.greenCenter = L.marker([latlng.lat, latlng.lng], {
+            icon: greenCenterIcon(),
+            interactive: false,
+            zIndexOffset: 840,
+          }).addTo(state.map);
+        else state.markers.greenCenter.setLatLng([latlng.lat, latlng.lng]);
+      }
+      disarmPlaceMode();
+      renderFcb();
+      updateLine();
+
+      // FCB changes the green context, so refresh the recommendation,
+      // smart-shot verdict, and caddy advice immediately.
+      if (state.target) {
+        calculateRange();
+        scheduleContextUpdate();
+      }
+
+      haptic(10);
+      return;
+    }
+    if (state.loc) {
+      // Tapping moves ONLY the aim point. Green F/C/B is never touched.
+      state.target = latlng;
+      state.twoTapA = null;
+      state.twoTapComplete = false;
+      clearTwoTapMarkers();
+      if (!state.markers.target)
+        state.markers.target = L.marker([latlng.lat, latlng.lng], {
+          icon: targetIcon(),
+          zIndexOffset: 850,
+        }).addTo(state.map);
+      else state.markers.target.setLatLng([latlng.lat, latlng.lng]);
+      save('caddy:lastTarget', state.target);
+      updateLine();
+      calculateRange();
+      scheduleContextUpdate();
+      haptic(8);
+      return;
+    }
+    if (state.twoTapComplete || !state.twoTapA) {
+      state.twoTapComplete = false;
+      state.twoTapA = latlng;
+      clearTwoTapMarkers();
+      state.markers.tapA = L.marker([latlng.lat, latlng.lng], {
+        icon: tapIcon(),
+      }).addTo(state.map);
+      els.rawYards.textContent = '—';
+      els.rawLabel.textContent = 'Tap second point';
+      els.playsLikeYards.textContent = '—';
+      return;
+    }
+    const a = state.twoTapA,
+      b = latlng;
+    clearTwoTapMarkers(true);
+    state.markers.tapB = L.marker([b.lat, b.lng], {
+      icon: tapIcon(),
+    }).addTo(state.map);
+    state.markers.twoTapLine = L.polyline(
+      [
+        [a.lat, a.lng],
+        [b.lat, b.lng],
+      ],
+      { color: '#18a45b', weight: 4, opacity: 0.85 }
+    ).addTo(state.map);
+    const yd = haversineMeters(a, b) * M_TO_YD;
+    els.rawYards.textContent = fmt(yd);
+    els.rawLabel.textContent = 'yards between taps';
+    els.playsLikeYards.textContent = fmt(yd);
+    const rec = recommendClub(yd);
+    els.clubRecommendation.textContent = rec.main;
+    els.clubRecommendationSub.textContent =
+      'Two-tap uses raw distance. Enable GPS for full plays-like.';
+    renderCaddyTips([]);
+    updateAdvice([], 'neutral');
+    state.twoTapComplete = true;
+  }
+  function armPlaceMode(mode) {
+    if (!state.loc) {
+      setNotice(
+        'Get a GPS fix first, then tap Set Front / Center / Back.',
+        'greenish'
+      );
+      return;
+    }
+    state.placeMode = state.placeMode === mode ? null : mode;
+    els.setFrontBtn.classList.toggle('armed', state.placeMode === 'front');
+    els.setCenterBtn.classList.toggle('armed', state.placeMode === 'center');
+    els.setBackBtn.classList.toggle('armed', state.placeMode === 'back');
+    if (state.sheet) state.sheet.half();
+    haptic(6);
+  }
+  function disarmPlaceMode() {
+    state.placeMode = null;
+    els.setFrontBtn.classList.remove('armed');
+    els.setCenterBtn.classList.remove('armed');
+    els.setBackBtn.classList.remove('armed');
+  }
+
+  function clearTwoTapMarkers(keepA) {
+    ['tapB', 'twoTapLine'].forEach((k) => {
+      if (state.markers[k]) {
+        try {
+          state.map.removeLayer(state.markers[k]);
+        } catch { }
+        state.markers[k] = null;
+      }
+    });
+    if (!keepA && state.markers.tapA) {
+      try {
+        state.map.removeLayer(state.markers.tapA);
+      } catch { }
+      state.markers.tapA = null;
+    }
+  }
+  function clearFbMarkers() {
+    ['frontMarker', 'backMarker', 'leg2', 'greenCenter'].forEach((k) => {
+      if (state.markers[k]) {
+        try {
+          state.map.removeLayer(state.markers[k]);
+        } catch { }
+        state.markers[k] = null;
+      }
+    });
+    els.fcbFront.textContent = '—';
+    els.fcbBack.textContent = '—';
+  }
+  function isImagery() {
+    return state.prefs.mapLayer === 'satellite';
+  }
+
+  function updateLine() {
+    if (!state.mapReady || !state.loc || !state.target) return;
+    const pts = [
+      [state.loc.lat, state.loc.lng],
+      [state.target.lat, state.target.lng],
+    ];
+    if (!state.markers.lineCasing)
+      state.markers.lineCasing = L.polyline(pts, {
+        color: '#0c1410',
+        weight: 9,
+        opacity: 0.32,
+        lineCap: 'round',
+        interactive: false,
+      }).addTo(state.map);
+    else state.markers.lineCasing.setLatLngs(pts);
+    if (!state.markers.lineHalo)
+      state.markers.lineHalo = L.polyline(pts, {
+        color: '#ffffff',
+        weight: 7,
+        opacity: 0.55,
+        lineCap: 'round',
+        interactive: false,
+      }).addTo(state.map);
+    else state.markers.lineHalo.setLatLngs(pts);
+    if (!state.markers.line)
+      state.markers.line = L.polyline(pts, {
+        color: '#1677ff',
+        weight: 3.5,
+        opacity: 1,
+        lineCap: 'round',
+        className: 'aim-core',
+        interactive: false,
+      }).addTo(state.map);
+    else state.markers.line.setLatLngs(pts);
+    restyleShotLines();
+  }
+  function restyleShotLines() {
+    const img = isImagery();
+    if (state.markers.line) {
+      state.markers.line.setStyle({
+        color: img ? '#ffffff' : '#1677ff',
+        weight: 3.5,
+        opacity: 1,
+      });
+      if (state.markers.lineHalo)
+        state.markers.lineHalo.setStyle({
+          color: img ? '#0c1410' : '#ffffff',
+          opacity: img ? 0.4 : 0.6,
+          weight: 7,
+        });
+      if (state.markers.lineCasing)
+        state.markers.lineCasing.setStyle({ opacity: 0.32, weight: 9 });
+    }
+    // --- Also restyle leg2 (leftover) line ---
+    if (
+      state.markers.leg2 &&
+      state.map &&
+      state.map.hasLayer(state.markers.leg2)
+    ) {
+      const lo =
+        state.greenCenter && state.target
+          ? leftoverToGreen(state.loc, state.target, state.greenCenter)
+          : null;
+      const col =
+        lo && lo.state === 'over' ? '#ff5252' : img ? '#ffffff' : '#1677ff';
+      state.markers.leg2.setStyle({ color: col });
+    }
+  }
+  function setNotice(text, kind = 'greenish') {
+    if (!els.rangeNotice) return; // ← ADD
+    els.rangeNotice.className = 'notice ' + kind;
+    els.rangeNotice.textContent = text;
+  }
+  function setVerdict(v) {
+    // Tint the rec card edge by trouble level.
+    const card = $('recCard');
+    if (!card) return;
+    card.classList.remove('v-go', 'v-manage', 'v-bail');
+    if (v === 'go') card.classList.add('v-go');
+    else if (v === 'manage') card.classList.add('v-manage');
+    else if (v === 'bail') card.classList.add('v-bail');
+  }
+
+  function scheduleContextUpdate() {
+    clearTimeout(state.contextTimer);
+    state.contextTimer = setTimeout(updateContext, 900);
+  }
+  async function cachedJSON(key, url, ttlMs) {
+    const fullKey = 'caddy:api:' + key,
+      cached = load(fullKey, null),
+      now = Date.now();
+    if (cached && now - cached.ts < ttlMs)
+      return { data: cached.data, offline: false, ts: cached.ts };
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8500);
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        cache: 'no-store',
+      });
+      clearTimeout(t);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      save(fullKey, { ts: now, data });
+      return { data, offline: false, ts: now };
+    } catch (e) {
+      if (cached) return { data: cached.data, offline: true, ts: cached.ts };
+      throw e;
+    }
+  }
+
+  function sortedClubsDesc() {
+    return [...state.clubs]
+      .map((c) => ({ ...c, yards: num(c.yards, 0) }))
+      .filter((c) => c.name && c.yards > 0)
+      .sort((a, b) => b.yards - a.yards);
+  }
+  function sortedClubsAsc() {
+    return sortedClubsDesc().reverse();
+  }
+
+  function renderCaddyTips(tips) {
+    if (!els.caddyTips) return;
+    els.caddyTips.innerHTML = (tips || [])
+      .map((t) => `<div class="tip">${escapeHtml(t)}</div>`)
+      .join('');
+  }
+  function renderShotPlan({
+    calc,
+    wind,
+    elevation,
+    accuracyYd,
+    smart,
+    verdict,
+  }) {
+    if (!els.shotAction || !els.shotPlanChips) return;
+
+    const chips = [];
+    const along = num(wind?.along, 0);
+    const cross = num(wind?.cross, 0);
+
+    let action = 'Aim center green and make a committed swing.';
+
+    // One primary instruction only.
+    if (Math.abs(calc.aimYd) >= 2) {
+      action = `Aim ${Math.abs(calc.aimYd)} yd ${calc.aimYd > 0 ? 'right' : 'left'
+        } of the target and let the wind move it back.`;
+    } else if (along > 5) {
+      action = 'Land it short of the flag — helping wind means more release.';
+    } else if (along < -5) {
+      action = 'Take enough club and make a full swing into the wind.';
+    } else if (calc.elevAdjYd >= 3) {
+      action = 'Commit to the uphill number — do not leave this one short.';
+    } else if (calc.elevAdjYd <= -3) {
+      action = 'Take less club and allow for extra release downhill.';
+    } else if (verdict === 'bail') {
+      action = 'Play to the safest part of the green or choose a layup target.';
+    }
+
+    if (smart && Number.isFinite(smart.pGreen)) {
+      chips.push({
+        label: `${Math.round(smart.pGreen * 100)}% green`,
+        tone: verdict || 'neutral',
+      });
+    }
+
+    if (Math.abs(along) >= 3) {
+      chips.push({
+        label: `${Math.round(Math.abs(along))} mph ${along > 0 ? 'helping' : 'into'
+          }`,
+        tone: 'wind',
+      });
+    } else if (Math.abs(cross) >= 3) {
+      chips.push({
+        label: `${Math.round(Math.abs(cross))} mph crosswind`,
+        tone: 'wind',
+      });
+    }
+
+    if (Math.abs(calc.elevAdjYd) >= 2) {
+      chips.push({
+        label: `${calc.elevAdjYd >= 0 ? '+' : ''}${Math.round(
+          calc.elevAdjYd
+        )} yd ${calc.elevAdjYd >= 0 ? 'uphill' : 'downhill'}`,
+        tone: 'elevation',
+      });
+    }
+
+    if (accuracyYd > ACCURACY_WARN_YD) {
+      chips.push({
+        label: `GPS ±${Math.round(accuracyYd)} yd`,
+        tone: 'warning',
+      });
+    }
+
+    els.shotAction.textContent = action;
+
+    els.shotPlanChips.innerHTML = chips
+      .slice(0, 3)
+      .map(
+        (chip) =>
+          `<span class="rec-chip rec-chip--${escapeHtml(
+            chip.tone
+          )}">${escapeHtml(chip.label)}</span>`
+      )
+      .join('');
+  }
+  // ===== Advice on the map: a pill that opens a popover =====
+  // Keeps the bottom sheet short by moving the tip list onto the map.
+  state.adviceTips = [];
+  function updateAdvice(tips, verdict, rec) {
+    state.adviceTips = Array.isArray(tips) ? tips.filter(Boolean) : [];
+    state.adviceRec = rec || null;
+    state.adviceVerdict = verdict || 'neutral';
+    if (!els.advicePill) return;
+
+    // The pill shows whenever there's a recommendation OR tips.
+    const hasContent = !!state.adviceRec || state.adviceTips.length > 0;
+    if (!hasContent) {
+      els.advicePill.hidden = true;
+      closeAdvice();
+      return;
+    }
+    els.advicePill.hidden = false;
+    const n = state.adviceTips.length;
+
+    // Always a lightbulb; the badge carries the dynamic tip count.
+    els.advicePillIc.textContent = state.prefs.mode === 'range' ? '📋' : '💡';
+    if (n > 0) {
+      els.advicePillCount.hidden = false;
+      els.advicePillCount.textContent = String(n);
+    } else {
+      els.advicePillCount.hidden = true;
+    }
+    els.advicePill.setAttribute(
+      'aria-label',
+      `Shot details — ${n} note${n === 1 ? '' : 's'}`
+    );
+
+    els.advicePill.classList.remove('v-go', 'v-manage', 'v-bail');
+    if (verdict === 'go') els.advicePill.classList.add('v-go');
+    else if (verdict === 'manage') els.advicePill.classList.add('v-manage');
+    else if (verdict === 'bail') els.advicePill.classList.add('v-bail');
+
+    // Keep whichever advice surface is open synchronized with new calculations.
+    if (els.advicePop && !els.advicePop.hidden) {
+      renderAdvicePop();
+    }
+
+    if (els.inlineAdvice && !els.inlineAdvice.hidden) {
+      renderInlineAdvice();
+    }
+  }
+  function renderAdvicePop() {
+    if (!els.advicePopBody) return;
+    const rec = state.adviceRec;
+    let html = '';
+
+    // Pinned headline: the club recommendation + plays-like number,
+    // matching what the full sheet shows.
+    if (rec) {
+      html += `<div class="advice-pop-rec">
+                <div class="advice-pop-rec-main">${escapeHtml(rec.main)}</div>
+                ${Number.isFinite(rec.plays)
+          ? `<div class="advice-pop-rec-plays">${fmt(
+            rec.plays
+          )} yd plays-like</div>`
+          : ''
+        }
+                ${rec.sub
+          ? `<div class="advice-pop-rec-sub">${escapeHtml(
+            rec.sub
+          )}</div>`
+          : ''
+        }
+              </div>`;
+    }
+
+    if (state.adviceTips.length) {
+      html += state.adviceTips
+        .map(
+          (t) =>
+            `<div class="advice-pop-tip">${escapeHtml(
+              t.replace(/^[🟢🟡🔴]\s*/u, '')
+            )}</div>`
+        )
+        .join('');
+    } else if (!rec) {
+      html = `<div class="advice-pop-empty">No advice for this shot — make your normal swing.</div>`;
+    }
+
+    els.advicePopBody.innerHTML = html;
+  }
+  function renderInlineAdvice() {
+    if (!els.inlineAdvice) return;
+
+    const rec = state.adviceRec;
+    const tips = Array.isArray(state.adviceTips)
+      ? state.adviceTips.filter(Boolean)
+      : [];
+
+    const parts = [];
+
+    if (rec && rec.sub) {
+      parts.push(
+        `<div class="inline-advice-headline">${escapeHtml(rec.sub)}</div>`
+      );
+    }
+
+    if (tips.length) {
+      parts.push(
+        tips
+          .map((tip) => {
+            const cleanTip = String(tip).replace(/^[🟢🟡🔴]\s*/u, '');
+            return `<div class="inline-advice-tip">${escapeHtml(
+              cleanTip
+            )}</div>`;
+          })
+          .join('')
+      );
+    }
+
+    if (!parts.length) {
+      parts.push(
+        `<div class="inline-advice-tip">No extra shot notes are available for this target.</div>`
+      );
+    }
+
+    els.inlineAdvice.innerHTML = parts.join('');
+  }
+
+  function openInlineAdvice() {
+    if (!els.inlineAdvice || !els.shotDetailsBtn) return;
+
+    renderInlineAdvice();
+    els.inlineAdvice.hidden = false;
+    els.shotDetailsBtn.setAttribute('aria-expanded', 'true');
+
+    if (els.shotDetailsLabel) {
+      els.shotDetailsLabel.textContent = 'Hide shot details';
+    }
+
+    haptic(5);
+  }
+
+  function closeInlineAdvice() {
+    if (!els.inlineAdvice || !els.shotDetailsBtn) return;
+
+    els.inlineAdvice.hidden = true;
+    els.shotDetailsBtn.setAttribute('aria-expanded', 'false');
+
+    if (els.shotDetailsLabel) {
+      els.shotDetailsLabel.textContent = 'Why this shot?';
+    }
+  }
+
+  function toggleInlineAdvice() {
+    if (!els.inlineAdvice) return;
+
+    if (els.inlineAdvice.hidden) openInlineAdvice();
+    else closeInlineAdvice();
+  }
+  function openAdvice() {
+    if (!els.advicePop || !state.adviceRec) return;
+
+    renderAdvicePop();
+    els.advicePopScrim.hidden = false;
+    els.advicePop.hidden = false;
+
+    void els.advicePop.offsetHeight;
+
+    els.advicePopScrim.classList.add('open');
+    els.advicePop.classList.add('open');
+    haptic(6);
+  }
+  function closeAdvice() {
+    if (!els.advicePop) return;
+    els.advicePopScrim.classList.remove('open');
+    els.advicePop.classList.remove('open');
+    const done = () => {
+      els.advicePop.hidden = true;
+      els.advicePopScrim.hidden = true;
+    };
+    if (reduceMotion) done();
+    else setTimeout(done, 260);
+  }
+  function initAdvice() {
+    if (els.shotDetailsBtn) {
+      els.shotDetailsBtn.addEventListener('click', () => {
+        const sheetIsExpanded =
+          document.body.getAttribute('data-detent') === 'full';
+
+        // In the full sheet, explanation belongs in the recommendation card.
+        if (sheetIsExpanded) {
+          toggleInlineAdvice();
+          return;
+        }
+
+        // In collapsed/half mode, use the map popover because the card is hidden.
+        if (els.advicePop && els.advicePop.hidden) openAdvice();
+        else closeAdvice();
+      });
+    }
+
+    if (els.advicePill) {
+      els.advicePill.addEventListener('click', () => {
+        if (els.advicePop.hidden) openAdvice();
+        else closeAdvice();
+      });
+    }
+
+    if (els.advicePopClose) {
+      els.advicePopClose.addEventListener('click', closeAdvice);
+    }
+
+    if (els.advicePopScrim) {
+      els.advicePopScrim.addEventListener('click', closeAdvice);
+    }
+
+    if (window.L && L.DomEvent) {
+      L.DomEvent.disableClickPropagation(els.advicePill);
+      L.DomEvent.disableClickPropagation(els.advicePop);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (els.advicePop && !els.advicePop.hidden) closeAdvice();
+        closeInlineAdvice();
+      }
+    });
+  }
+  function renderFcb() {
+    if (!state.loc) {
+      els.fcbFront.textContent = '—';
+      els.fcbCenter.textContent = '—';
+      els.fcbBack.textContent = '—';
+      return;
+    }
+    // Center = green center if set, otherwise aim target
+    const centerRef = state.greenCenter || state.target;
+    els.fcbCenter.textContent = centerRef
+      ? Math.round(haversineMeters(state.loc, centerRef) * M_TO_YD)
+      : '—';
+    if (state.frontPt) {
+      const fy = Math.round(
+        haversineMeters(state.loc, state.frontPt) * M_TO_YD
+      );
+      els.fcbFront.textContent = fy;
+      if (!state.markers.frontMarker)
+        state.markers.frontMarker = L.marker(
+          [state.frontPt.lat, state.frontPt.lng],
+          {
+            icon: fbIcon('front'),
+            interactive: false,
+            zIndexOffset: 820,
+          }
+        ).addTo(state.map);
+      else
+        state.markers.frontMarker.setLatLng([
+          state.frontPt.lat,
+          state.frontPt.lng,
+        ]);
+    } else {
+      els.fcbFront.textContent = '—';
+      if (state.markers.frontMarker) {
+        try {
+          state.map.removeLayer(state.markers.frontMarker);
+        } catch { }
+        state.markers.frontMarker = null;
+      }
+    }
+    if (state.backPt) {
+      const by = Math.round(haversineMeters(state.loc, state.backPt) * M_TO_YD);
+      els.fcbBack.textContent = by;
+      if (!state.markers.backMarker)
+        state.markers.backMarker = L.marker(
+          [state.backPt.lat, state.backPt.lng],
+          { icon: fbIcon('back'), interactive: false, zIndexOffset: 820 }
+        ).addTo(state.map);
+      else
+        state.markers.backMarker.setLatLng([
+          state.backPt.lat,
+          state.backPt.lng,
+        ]);
+    } else {
+      els.fcbBack.textContent = '—';
+      if (state.markers.backMarker) {
+        try {
+          state.map.removeLayer(state.markers.backMarker);
+        } catch { }
+        state.markers.backMarker = null;
+      }
+    }
+  }
+
+  function renderClubChips(playsYd) {
+    const desc = sortedClubsDesc();
+    els.clubChips.innerHTML =
+      `<button class="club-chip${state.prefs.selectedClubId === '' ? ' active' : ''
+      }" data-id="">Auto</button>` +
+      desc
+        .map(
+          (c) =>
+            `<button class="club-chip${state.prefs.selectedClubId === c.id ? ' active' : ''
+            }" data-id="${escapeHtml(c.id)}">${escapeHtml(c.name)}</button>`
+        )
+        .join('');
+    els.clubChips.querySelectorAll('.club-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        setSelectedClubId(chip.dataset.id, playsYd);
+      });
+    });
+  }
+  function setSelectedClubId(id, playsYdForChips) {
+    state.prefs.selectedClubId = id || '';
+    save('caddy:prefs', state.prefs);
+    renderManualClubSelect();
+    haptic(4);
+    if (state.target) calculateRange();
+    else renderClubChips(playsYdForChips || 0);
+  }
+
+  function renderClubs() {
+    const clubs = sortedClubsDesc();
+    els.clubsList.innerHTML = clubs
+      .map(
+        (c) => `
+        <div class="club-row" data-id="${escapeHtml(c.id)}">
+          <input class="club-name-input" value="${escapeHtml(
+          c.name
+        )}" aria-label="${escapeHtml(c.name)} name" />
+          <input class="club-yard-input" type="number" inputmode="numeric" value="${escapeHtml(
+          c.yards
+        )}" aria-label="${escapeHtml(c.name)} yards" />
+          <button class="small-btn delete-club" title="Delete">Delete</button>
+        </div>`
+      )
+      .join('');
+    els.clubsList.querySelectorAll('.club-row').forEach((row) => {
+      const id = row.dataset.id;
+      const nameInput = row.querySelector('.club-name-input');
+      const yardInput = row.querySelector('.club-yard-input');
+      nameInput.addEventListener('change', () =>
+        updateClub(id, { name: nameInput.value.trim() || 'Club' })
+      );
+      yardInput.addEventListener('change', () =>
+        updateClub(id, {
+          yards: Math.max(1, Math.round(num(yardInput.value, 1))),
+        })
+      );
+      row.querySelector('.delete-club').addEventListener('click', () => {
+        state.clubs = state.clubs.filter((c) => c.id !== id);
+        save('caddy:clubs', state.clubs);
+        renderClubs();
+        renderManualClubSelect();
+        if (state.target) calculateRange();
+      });
+    });
+    renderManualClubSelect();
+    if (typeof renderRoundShotUI === 'function') renderRoundShotUI();
+  }
+  function updateClub(id, patch) {
+    state.clubs = state.clubs.map((c) =>
+      c.id === id ? { ...c, ...patch } : c
+    );
+    save('caddy:clubs', state.clubs);
+    renderManualClubSelect();
+    if (state.target) calculateRange();
+  }
+  function renderManualClubSelect() {
+    const sel = state.prefs.selectedClubId || '';
+    els.manualClub.innerHTML =
+      `<option value="">Auto recommend</option>` +
+      sortedClubsDesc()
+        .map(
+          (c) =>
+            `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)} · ${fmt(
+              c.yards
+            )} yd</option>`
+        )
+        .join('');
+    els.manualClub.value = sel;
+  }
+  function initClubsEvents() {
+    els.resetClubsBtn.addEventListener('click', () => {
+      if (!confirm('Reset clubs to Caddy defaults?')) return;
+      state.clubs = DEFAULT_CLUBS.map((c) => ({ ...c, id: cryptoId() }));
+      state.prefs.selectedClubId = '';
+      save('caddy:clubs', state.clubs);
+      save('caddy:prefs', state.prefs);
+      renderClubs();
+      if (state.target) calculateRange();
+    });
+    els.addClubBtn.addEventListener('click', () => {
+      const name = els.newClubName.value.trim();
+      const yards = Math.round(num(els.newClubYards.value, 0));
+      if (!name || yards <= 0) {
+        alert('Enter a club name and a positive carry yardage.');
+        return;
+      }
+      state.clubs.push({ id: cryptoId(), name, yards });
+      save('caddy:clubs', state.clubs);
+      els.newClubName.value = '';
+      els.newClubYards.value = '';
+      renderClubs();
+    });
+    els.manualClub.addEventListener('change', () => {
+      setSelectedClubId(els.manualClub.value);
+    });
+  }
+
+  function renderRound() {
+    const course = getCurrentCourse();
+    const scoreRows = getScorecardRows();
+
+    els.roundRows.innerHTML = scoreRows
+      .map(
+        (r, i) => `
+        <div class="round-row" data-i="${i}">
+                    <div style="font-weight:900;">
+            ${i + 1}
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">
+              P${course?.holes?.[i]?.par || 4}
+            </div>
+          </div>
+          <input class="round-score" type="number" inputmode="numeric" value="${escapeHtml(
+          r.score
+        )}" aria-label="Hole ${i + 1} score" />
+          <input class="round-putts" type="number" inputmode="numeric" value="${escapeHtml(
+          r.putts
+        )}" aria-label="Hole ${i + 1} putts" />
+          <select class="round-fir" aria-label="Hole ${i + 1} FIR">
+            <option value="" ${r.fir === '' ? 'selected' : ''}>—</option>
+            <option value="Y" ${r.fir === 'Y' ? 'selected' : ''}>Y</option>
+            <option value="N" ${r.fir === 'N' ? 'selected' : ''}>N</option>
+            <option value="NA" ${r.fir === 'NA' ? 'selected' : ''}>NA</option>
+          </select>
+          <select class="round-gir" aria-label="Hole ${i + 1} GIR">
+            <option value="" ${r.gir === '' ? 'selected' : ''}>—</option>
+            <option value="Y" ${r.gir === 'Y' ? 'selected' : ''}>Y</option>
+            <option value="N" ${r.gir === 'N' ? 'selected' : ''}>N</option>
+          </select>
+        </div>`
+      )
+      .join('');
+    els.roundRows.querySelectorAll('.round-row').forEach((row) => {
+      const i = Number(row.dataset.i);
+      const sync = () => {
+        state.round[i] = {
+          ...state.round[i],
+          hole: i + 1,
+          score: sanitizeInt(row.querySelector('.round-score').value),
+          putts: sanitizeInt(row.querySelector('.round-putts').value),
+          fir: row.querySelector('.round-fir').value,
+          gir: row.querySelector('.round-gir').value,
+        };
+        syncRoundScorecard();
+        renderStats();
+        renderRoundHoleHeader();
+        renderRoundMapHud();
+      };
+      row
+        .querySelectorAll('input,select')
+        .forEach((el) => el.addEventListener('change', sync));
+    });
+  }
+  function sanitizeInt(v) {
+    if (v === '' || v == null) return '';
+    const n = Math.max(0, Math.round(num(v, 0)));
+    return String(n);
+  }
+  function initRoundEvents() {
+    els.clearRoundBtn.addEventListener('click', () => {
+      if (!confirm('Clear all scorecard entries for this round?')) return;
+
+      state.round = emptyRound();
+
+      if (state.roundSession) {
+        state.roundSession.scorecard = state.round;
+        saveRoundSession();
+      }
+
+      save('caddy:round', state.round);
+
+      renderRound();
+      renderRoundShotUI();
+      renderStats();
+    });
+  }
+  // ===== Round mode (minimal): GPS-measured shot tracking =====
+  const ROUND_MIN_SHOT_YD = 8; // below this it's a putt/tap — ignore
+  const ROUND_GPS_OK_M = 15; // need a fix at least this good to capture
+
+  function startRound() {
+    // Course setup is available.
+    if (
+      els.roundSetupSheet &&
+      els.roundSetupScrim &&
+      typeof openRoundSetup === 'function'
+    ) {
+      openRoundSetup();
+      return;
+    }
+
+    // Safety fallback if setup UI is unavailable.
+    beginRound(makeCasualCourse(), 1);
+  }
+  function endRound() {
+    if (!confirm('End round mode? Logged shots stay in your club data.'))
+      return;
+    state.roundSession = null;
+    state.holeGeoKey = null;
+    saveRoundSession();
+    renderRoundShotUI();
+    haptic(8);
+  }
+
+  // Capture the start of a shot: snapshot position + recommended club +
+  // intended bearing (to the current aim, if any) for future lateral calc.
+  function startShot() {
+    const rs = state.roundSession;
+    if (!rs) return;
+    if (!fixIsUsable()) {
+      setNotice(
+        `Need a GPS fix better than ±${Math.round(
+          ROUND_GPS_OK_M
+        )} m to start a shot. Wait for a green dot.`,
+        'danger'
+      );
+      haptic(12);
+      return;
+    }
+    const clubId = roundActiveClubId();
+    const intendedBearing =
+      state.target && state.loc
+        ? initialBearingDeg(state.loc, state.target)
+        : null;
+    rs.pending = {
+      clubId,
+      startPt: { lat: state.loc.lat, lng: state.loc.lng },
+      startAcc: gpsAccMeters(), // ← ADD THIS LINE
+      intendedBearing,
+      ts: Date.now(),
+    };
+    rs.status = 'pending';
+    saveRoundSession();
+    renderRoundShotUI();
+    setNotice(
+      'Shot started. Walk to your ball, then tap Finish shot.',
+      'greenish'
+    );
+    haptic(8);
+  }
+
+  function nextHole() {
+    const rs = state.roundSession;
+
+    if (!rs) return;
+
+    if (rs.status === 'pending') {
+      setNotice(
+        'Finish or discard the current shot before changing holes.',
+        'danger'
+      );
+      haptic(12);
+      return;
+    }
+
+    if (rs.hole >= 18) {
+      setNotice(
+        'You are already on Hole 18. End the round when you are finished.',
+        'greenish'
+      );
+      return;
+    }
+
+    rs.hole += 1;
+    rs.currentHole = rs.hole;
+
+    saveRoundSession();
+    renderRoundShotUI();
+    renderRound();
+
+    haptic(8);
+  }
+
+  function previousHole() {
+    const rs = state.roundSession;
+
+    if (!rs) return;
+
+    if (rs.status === 'pending') {
+      setNotice(
+        'Finish or discard the current shot before changing holes.',
+        'danger'
+      );
+      haptic(12);
+      return;
+    }
+
+    if (rs.hole <= 1) {
+      setNotice('You are already on Hole 1.', 'greenish');
+      return;
+    }
+
+    rs.hole -= 1;
+    rs.currentHole = rs.hole;
+
+    saveRoundSession();
+    renderRoundShotUI();
+    renderRound();
+
+    haptic(6);
+  }
+  function renderRoundHoleHeader() {
+    if (!els.roundHoleStrip) return;
+
+    const rs = state.roundSession;
+
+    if (!rs) {
+      els.roundHoleStrip.hidden = true;
+      return;
+    }
+
+    const course = getCurrentCourse();
+    const hole = getCurrentHoleData();
+    const score = roundScoreToPar();
+
+    els.roundHoleStrip.hidden = false;
+
+    els.roundCourseName.textContent = course?.name || 'Casual Round';
+
+    els.roundHoleNumber.textContent = `Hole ${getCurrentHoleNumber()}`;
+
+    const holeMeta = [
+      `Par ${hole.par || 4}`,
+      hole.yards ? `${hole.yards} yd` : null,
+      course?.teeName || null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    els.roundHoleMeta.textContent = holeMeta;
+
+    if (!score.holesPlayed) {
+      els.roundScoreSummary.textContent = 'E through 0';
+    } else {
+      els.roundScoreSummary.textContent = `${formatToPar(
+        score.toPar
+      )} through ${score.holesPlayed}`;
+    }
+  }
+  // Push the current hole's imported geometry onto the map: green centre,
+  // front/back edges, and an initial aim target. Keyed so it runs once per
+  // hole change, not on every GPS tick.
+  function applyHoleGeometryToMap() {
+    const hole = getCurrentHoleData();
+    if (!hole) return;
+
+    const pt = (p) =>
+      p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))
+        ? { lat: Number(p.lat), lng: Number(p.lng) }
+        : null;
+
+    const center = pt(hole.greenCenter);
+    const front = pt(hole.front);
+    const back = pt(hole.back);
+
+    if (!center && !front && !back) return;
+
+    disarmPlaceMode();
+    clearFbMarkers();
+
+    state.greenCenter = center;
+    state.frontPt = front;
+    state.backPt = back;
+
+    if (center && state.mapReady) {
+      state.markers.greenCenter = L.marker([center.lat, center.lng], {
+        icon: greenCenterIcon(),
+        interactive: false,
+        zIndexOffset: 840,
+      }).addTo(state.map);
+    }
+
+    // Default the aim point to green centre for the new hole.
+    if (center && state.mapReady) {
+      state.target = center;
+      save('caddy:lastTarget', state.target);
+
+      if (!state.markers.target) {
+        state.markers.target = L.marker([center.lat, center.lng], {
+          icon: targetIcon(),
+          zIndexOffset: 850,
+        }).addTo(state.map);
+      } else {
+        state.markers.target.setLatLng([center.lat, center.lng]);
+      }
+    }
+
+    renderFcb();
+    updateLine();
+
+    if (state.target && state.loc) {
+      calculateRange();
+      scheduleContextUpdate();
+    }
+  }
+
+  function syncHoleGeometry() {
+    if (!state.roundSession || !state.mapReady) return;
+
+    const key = `${state.roundSession.course?.id || ''
+      }:${getCurrentHoleNumber()}`;
+    if (key === state.holeGeoKey) return;
+
+    state.holeGeoKey = key;
+    applyHoleGeometryToMap();
+  }
+
+  function renderRoundShotUI() {
+    if (!els.roundActionBtn) return;
+    const rs = state.roundSession;
+    const status = roundStatus();
+    renderRoundHoleHeader();
+    syncHoleGeometry();
+
+    // Status chip
+    const chipText =
+      status === 'idle'
+        ? 'Not started'
+        : status === 'pending'
+          ? `Hole ${rs.hole} · shot in flight`
+          : `Hole ${rs.hole} · ready`;
+    els.roundStatusChip.textContent = chipText;
+
+    // Primary morphing button
+    if (status === 'idle') {
+      els.roundActionBtn.textContent = 'Start round';
+      els.roundActionBtn.className = 'primary-btn';
+    } else if (status === 'active') {
+      els.roundActionBtn.textContent = 'Start shot';
+      els.roundActionBtn.className = 'primary-btn';
+    } else {
+      els.roundActionBtn.textContent = 'Finish shot';
+      els.roundActionBtn.className = 'primary-btn';
+    }
+
+    // Sub-actions + end button visibility
+    const inRound = status !== 'idle';
+    els.roundSubActions.style.display = inRound ? 'grid' : 'none';
+    els.roundEndBtn.style.display = inRound ? 'block' : 'none';
+    els.roundDiscardBtn.style.display = status === 'pending' ? 'block' : 'none';
+    els.roundNextHoleBtn.disabled = status === 'pending';
+    els.roundNextHoleBtn.style.opacity = status === 'pending' ? '0.5' : '1';
+
+    // Live readout while a shot is pending
+    if (status === 'pending' && rs.pending) {
+      const club = state.clubs.find((c) => c.id === rs.pending.clubId);
+      let live = '—';
+      if (fixIsUsable()) {
+        const d =
+          haversineMeters(rs.pending.startPt, {
+            lat: state.loc.lat,
+            lng: state.loc.lng,
+          }) * M_TO_YD;
+        live = `${Math.round(d)} yd`;
+      }
+      els.roundShotReadout.style.display = 'block';
+      els.roundShotReadout.innerHTML = `<div class="v">${live}</div><div class="l">from start${club ? ` · ${escapeHtml(club.name)}` : ''
+        } · walk to your ball</div>`;
+    } else {
+      els.roundShotReadout.style.display = 'none';
+    }
+
+    // Hint
+    if (status === 'idle')
+      els.roundShotHint.textContent =
+        "Start a round to track your shots. Caddy measures each shot's distance from GPS and learns how far you really hit each club.";
+    else if (status === 'active')
+      els.roundShotHint.textContent =
+        'Stand at your ball, pick your club on the Range tab, then tap Start shot.';
+    else
+      els.roundShotHint.textContent =
+        'Shot in flight. Walk up to your ball and tap Finish shot — Caddy measures how far it actually went.';
+
+    renderRoundShotList();
+    renderRoundFab();
+    renderRoundMapHud();
+  }
+  function renderRoundMapHud() {
+    if (!els.roundMapHud) return;
+
+    const rs = state.roundSession;
+
+    if (!rs || roundStatus() === 'idle') {
+      els.roundMapHud.hidden = true;
+      return;
+    }
+
+    const course = getCurrentCourse();
+    const hole = getCurrentHoleData();
+    const score = roundScoreToPar();
+    const pending = roundStatus() === 'pending';
+
+    els.roundMapHud.hidden = false;
+
+    els.roundMapCourse.textContent = course?.name || 'Casual Round';
+
+    els.roundMapHole.textContent = [
+      `Hole ${getCurrentHoleNumber()}`,
+      `Par ${hole.par || 4}`,
+      hole.yards ? `${hole.yards} yd` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    els.roundMapScore.textContent = score.holesPlayed
+      ? `${formatToPar(score.toPar)}`
+      : 'E';
+
+    els.roundMapStatus.textContent = pending
+      ? 'Shot in flight'
+      : 'Ready for next shot';
+
+    if (els.roundMapPrevBtn) {
+      els.roundMapPrevBtn.disabled = pending || rs.hole <= 1;
+    }
+
+    if (els.roundMapNextBtn) {
+      els.roundMapNextBtn.disabled = pending || rs.hole >= 18;
+    }
+
+    if (els.roundMapScoreBtn) {
+      els.roundMapScoreBtn.disabled = pending;
+      els.roundMapScoreBtn.style.opacity = pending ? '0.5' : '1';
+    }
+  }
+
+  // The on-map round action FAB. Mirrors the Round-tab state machine so
+  // the live shot loop never requires leaving the Range view.
+  function renderRoundFab() {
+    if (!els.roundFabWrap) return;
+    const status = roundStatus();
+
+    // Hidden entirely outside an active round.
+    if (status === 'idle') {
+      els.roundFabWrap.hidden = true;
+      els.roundLive.hidden = true;
+      return;
+    }
+    els.roundFabWrap.hidden = false;
+
+    const usable = fixIsUsable();
+
+    if (status === 'active') {
+      els.roundFab.classList.remove('pending');
+      els.roundFabText.textContent = usable ? 'Start shot' : 'GPS…';
+      els.roundFab.classList.toggle('waiting', !usable);
+      els.roundLive.hidden = true;
+      // Show which club this shot will log against.
+      const club = state.clubs.find((c) => c.id === roundActiveClubId());
+      if (club && els.roundFabClub) {
+        els.roundFabClub.hidden = false;
+        els.roundFabClubName.textContent = club.name;
+      } else if (els.roundFabClub) {
+        els.roundFabClub.hidden = true;
+      }
+      return;
+    }
+
+    // status === "pending" — no club editing mid-flight.
+    if (els.roundFabClub) els.roundFabClub.hidden = true;
+    closeClubPop();
+    els.roundFab.classList.add('pending');
+    els.roundFab.classList.toggle('waiting', !usable);
+    els.roundFabText.textContent = usable ? 'Finish shot' : 'GPS…';
+
+    const rs = state.roundSession;
+    if (rs && rs.pending && usable) {
+      const d =
+        haversineMeters(rs.pending.startPt, {
+          lat: state.loc.lat,
+          lng: state.loc.lng,
+        }) * M_TO_YD;
+      els.roundLiveV.textContent = Math.round(d);
+      els.roundLiveL.textContent = 'yd from start';
+      els.roundLive.hidden = false;
+    } else {
+      els.roundLive.hidden = true;
+    }
+  }
+
+  function renderClubPop() {
+    if (!els.roundClubPop) return;
+    const activeId = roundActiveClubId();
+    els.roundClubPop.innerHTML = sortedClubsDesc()
+      .map(
+        (c) =>
+          `<button class="round-club-opt${c.id === activeId ? ' active' : ''
+          }" data-id="${escapeHtml(c.id)}" type="button">${escapeHtml(
+            c.name
+          )}<span class="yd">${fmt(c.yards)}</span></button>`
+      )
+      .join('');
+    els.roundClubPop.querySelectorAll('.round-club-opt').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (state.roundSession) {
+          state.roundSession.chosenClubId = b.dataset.id;
+          saveRoundSession();
+        }
+        closeClubPop();
+        renderRoundFab();
+        haptic(6);
+      });
+    });
+  }
+  function openClubPop() {
+    if (!els.roundClubPop) return;
+    renderClubPop();
+    els.roundClubPop.hidden = false;
+  }
+  function closeClubPop() {
+    if (els.roundClubPop) els.roundClubPop.hidden = true;
+  }
+  function toggleClubPop() {
+    if (!els.roundClubPop) return;
+    if (els.roundClubPop.hidden) openClubPop();
+    else closeClubPop();
+  }
+
+  function renderRoundShotList() {
+    const rs = state.roundSession;
+    if (!rs || !rs.shots.length) {
+      els.roundShotList.innerHTML = '';
+      return;
+    }
+    const rows = [...rs.shots]
+      .slice(-12)
+      .reverse()
+      .map((sh) => {
+        const club = state.clubs.find((c) => c.id === sh.clubId);
+        const name = club ? club.name : 'Shot';
+        let tag = sh.counted
+          ? 'logged'
+          : sh.discarded
+            ? 'discarded'
+            : 'uncounted';
+        return `<div class="shot-item${sh.discarded ? ' discarded' : ''}">
+                <span>H${sh.hole} · ${escapeHtml(name)}</span>
+                <span><b>${sh.distanceYd
+          } yd</b> <span class="tag">${tag}</span></span>
+              </div>`;
+      })
+      .join('');
+    const counted = rs.shots.filter((s) => s.counted).length;
+    els.roundShotList.innerHTML =
+      `<div class="hint" style="margin:4px 0 6px;font-weight:800">Shots this round · ${rs.shots.length} (${counted} logged)</div>` +
+      rows;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  OSM COURSE DATA PIPELINE
+  // ═══════════════════════════════════════════════════════════════
+
+  async function searchNearbyCoursesOSM(lat, lng) {
+    const query = `[out:json][timeout:12];
+(
+  node["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+  way["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+  relation["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+);
+out center 15;`;
+
+    const url = 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query.trim());
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+      const data = await res.json();
+      const elements = Array.isArray(data.elements) ? data.elements : [];
+      const seen = new Set();
+
+      const courses = elements
+        .filter(el => {
+          const name = (el.tags && el.tags.name) || '';
+          if (!name) return false;
+          const clat = el.lat ?? el.center?.lat;
+          const clng = el.lon ?? el.center?.lng;
+          if (!Number.isFinite(clat) || !Number.isFinite(clng)) return false;
+          const key = `${name.toLowerCase()}|${clat.toFixed(4)}|${clng.toFixed(4)}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map(el => {
+          const clat = el.lat ?? el.center?.lat;
+          const clng = el.lon ?? el.center?.lng;
+          const distM = geodesicInverse({ lat, lng }, { lat: clat, lng: clng }).s;
+          return {
+            id: `osm:${el.type}/${el.id}`,
+            name: (el.tags && el.tags.name) || 'Golf Course',
+            lat: clat,
+            lng: clng,
+            source: 'openstreetmap',
+            osmType: el.type,
+            osmId: el.id,
+            distanceM: distM,
+            distanceYd: distM * M_TO_YD,
+            tags: el.tags || {},
+          };
+        })
+        .sort((a, b) => a.distanceM - b.distanceM)
+        .slice(0, 10);
+
+      return courses;
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
+  }
+
+  async function fetchCourseOSM(courseNode) {
+    const lat = courseNode.lat;
+    const lng = courseNode.lng;
+    const radius = OSM_AROUND_M;
+
+    const query = `[out:json][timeout:25];
+(
+  way["golf"="hole"](around:${radius},${lat},${lng});
+  way["golf"="green"](around:${radius},${lat},${lng});
+  way["golf"="bunker"](around:${radius},${lat},${lng});
+  way["golf"="water_hazard"](around:${radius},${lat},${lng});
+  way["natural"="water"](around:${radius},${lat},${lng});
+  way["golf"="tee"](around:${radius},${lat},${lng});
+  node["golf"="tee"](around:${radius},${lat},${lng});
+  way["golf"="fairway"](around:${radius},${lat},${lng});
+);
+out geom;`;
+
+    const url = 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query.trim());
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+      const data = await res.json();
+      return {
+        elements: Array.isArray(data.elements) ? data.elements : [],
+        osmType: data.osm3s?.copyright || '',
+      };
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
+  }
+
+  function polygonCentroid(coords) {
+    if (!coords || coords.length < 3) return null;
+    let area = 0, cx = 0, cy = 0;
+    const n = coords.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const xi = coords[i].lng, yi = coords[i].lat;
+      const xj = coords[j].lng, yj = coords[j].lat;
+      const cross = xi * yj - xj * yi;
+      area += cross;
+      cx += (xi + xj) * cross;
+      cy += (yi + yj) * cross;
+    }
+    area /= 2;
+    if (Math.abs(area) < 1e-12) return { lat: coords[0].lat, lng: coords[0].lng };
+    return { lat: cy / (6 * area), lng: cx / (6 * area) };
+  }
+
+  function rayIntersectPolygon(origin, bearingDeg, coords) {
+    if (!coords || coords.length < 3) return null;
+    const farPoint = geodesicDirect(origin, bearingDeg, 10000);
+    const fr = enuFrame(origin);
+    const rs = toENU(fr, origin);
+    const re = toENU(fr, farPoint);
+    const rdx = re.e - rs.e, rdy = re.n - rs.n;
+
+    const intersections = [];
+    const n = coords.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ss = toENU(fr, coords[i]);
+      const se = toENU(fr, coords[j]);
+      const sdx = se.e - ss.e, sdy = se.n - ss.n;
+      const denom = rdx * sdy - rdy * sdx;
+      if (Math.abs(denom) < 1e-12) continue;
+      const t = ((ss.e - rs.e) * sdy - (ss.n - rs.n) * sdx) / denom;
+      const u = ((ss.e - rs.e) * rdy - (ss.n - rs.n) * rdx) / denom;
+      if (t >= 0 && u >= 0 && u <= 1) {
+        const ix = rs.e + t * rdx, iy = rs.n + t * rdy;
+        const latlng = fromENU(fr, ix, iy);
+        const distM = geodesicInverse(origin, latlng).s;
+        intersections.push({ ...latlng, distM });
+      }
+    }
+    if (intersections.length < 2) return intersections.length === 1 ? [intersections[0], intersections[0]] : null;
+    intersections.sort((a, b) => a.distM - b.distM);
+    return [intersections[0], intersections[intersections.length - 1]];
+  }
+
+  function computeGreenFCB(greenCoords, teePoint) {
+    if (!greenCoords || greenCoords.length < 3 || !teePoint) return null;
+    const center = polygonCentroid(greenCoords);
+    if (!center) return null;
+    const bearing = initialBearingDeg(teePoint, center);
+    const inters = rayIntersectPolygon(teePoint, bearing, greenCoords);
+    if (!inters) return { center, front: center, back: center, depthYd: 0 };
+    const depthM = geodesicInverse(inters[0], inters[1]).s;
+    return { center, front: inters[0], back: inters[1], depthYd: depthM * M_TO_YD };
+  }
+
+  function osmWayCoords(way) {
+    if (!way || !Array.isArray(way.geometry)) return [];
+    return way.geometry.map(pt => ({ lat: pt.lat, lng: pt.lon }));
+  }
+
+  function osmTeeCentroid(el) {
+    if (el.type === 'node') return { lat: el.lat, lng: el.lon };
+    const coords = osmWayCoords(el);
+    return polygonCentroid(coords) || (coords.length > 0 ? coords[0] : null);
+  }
+
+  function buildCourseFromOSM(osmData, courseNode) {
+    const elements = Array.isArray(osmData?.elements) ? osmData.elements : [];
+    const holes = [], greens = [], bunkers = [], waters = [], tees = [], fairways = [];
+
+    for (const el of elements) {
+      const tags = el.tags || {};
+      const gTag = tags.golf || '';
+      if (el.type === 'way' || el.type === 'relation') {
+        if (gTag === 'hole') holes.push(el);
+        else if (gTag === 'green') greens.push(el);
+        else if (gTag === 'bunker') bunkers.push(el);
+        else if (gTag === 'water_hazard') waters.push(el);
+        else if (tags.natural === 'water') waters.push(el);
+        else if (gTag === 'tee') tees.push(el);
+        else if (gTag === 'fairway') fairways.push(el);
+      } else if (el.type === 'node' && gTag === 'tee') {
+        tees.push(el);
+      }
+    }
+
+    const holeMap = new Map();
+    for (const h of holes) {
+      const ref = parseInt((h.tags && h.tags.ref) || '0', 10);
+      if (ref >= 1 && ref <= 18 && !holeMap.has(ref)) holeMap.set(ref, h);
+    }
+
+    const holeGreenMap = new Map();
+    for (const g of greens) {
+      const coords = osmWayCoords(g);
+      const gc = polygonCentroid(coords);
+      if (!gc) continue;
+      let bestHole = null, bestDist = Infinity;
+      for (const [ref, h] of holeMap) {
+        const hcoords = osmWayCoords(h);
+        const hc = polygonCentroid(hcoords);
+        if (!hc) continue;
+        const dist = geodesicInverse(gc, hc).s;
+        if (dist < bestDist) { bestDist = dist; bestHole = ref; }
+      }
+      if (bestHole !== null && bestDist < 500) holeGreenMap.set(bestHole, g);
+    }
+
+    const holeTeeMap = new Map();
+    for (const t of tees) {
+      const tc = osmTeeCentroid(t);
+      if (!tc) continue;
+      let bestHole = null, bestDist = Infinity;
+      for (const [ref, h] of holeMap) {
+        const hcoords = osmWayCoords(h);
+        const hc = polygonCentroid(hcoords);
+        if (!hc) continue;
+        const dist = geodesicInverse(tc, hc).s;
+        if (dist < bestDist) { bestDist = dist; bestHole = ref; }
+      }
+      if (bestHole !== null && bestDist < 800) holeTeeMap.set(bestHole, tc);
+    }
+
+    const holeHazardsMap = new Map();
+    const allHazards = [...bunkers.map(b => ({ ...b, hazType: 'bunker' })),
+    ...waters.map(w => ({ ...w, hazType: 'water' }))];
+    for (const haz of allHazards) {
+      const coords = osmWayCoords(haz);
+      const centroid = polygonCentroid(coords);
+      if (!centroid) continue;
+      let bestHole = null, bestDist = Infinity;
+      for (const [ref, h] of holeMap) {
+        const greenWay = holeGreenMap.get(ref);
+        const target = greenWay ? polygonCentroid(osmWayCoords(greenWay)) : polygonCentroid(osmWayCoords(h));
+        if (!target) continue;
+        const dist = geodesicInverse(centroid, target).s;
+        if (dist < bestDist) { bestDist = dist; bestHole = ref; }
+      }
+      if (bestHole !== null && bestDist < 400) {
+        const arr = holeHazardsMap.get(bestHole) || [];
+        arr.push({ type: haz.hazType, lat: centroid.lat, lng: centroid.lng });
+        holeHazardsMap.set(bestHole, arr);
+      }
+    }
+
+    const courseHoles = [];
+    let holesMapped = 0, parsImported = 0, parsEstimated = 0;
+    let yardsFromTag = 0, yardsEstimated = 0;
+    let greensFound = 0, fcbFound = 0, hazardsFound = 0, teesFound = 0;
+
+    for (let i = 1; i <= 18; i++) {
+      const holeWay = holeMap.get(i);
+      const tags = holeWay?.tags || {};
+      const greenWay = holeGreenMap.get(i);
+      const teePoint = holeTeeMap.get(i) || null;
+      const hazards = holeHazardsMap.get(i) || [];
+
+      const parTag = parseInt(tags.par, 10);
+      const par = (parTag >= 3 && parTag <= 6) ? parTag : 4;
+      if (holeWay) parsImported += (parTag >= 3 && parTag <= 6) ? 1 : 0;
+      if (holeWay && !(parTag >= 3 && parTag <= 6)) parsEstimated++;
+
+      let yards = '', yardageSource = 'none';
+      if (tags.distance && Number(tags.distance) > 0) {
+        yards = Math.round(Number(tags.distance));
+        yardageSource = 'osm:distance';
+        yardsFromTag++;
+      } else {
+        const greenCoords = greenWay ? osmWayCoords(greenWay) : null;
+        const greenCenter = greenCoords ? polygonCentroid(greenCoords) : null;
+        const effectiveTee = teePoint || (holeWay ? polygonCentroid(osmWayCoords(holeWay)) : null);
+        if (effectiveTee && greenCenter) {
+          const distYd = geodesicInverse(effectiveTee, greenCenter).s * M_TO_YD;
+          yards = Math.round(distYd);
+          yardageSource = 'estimated';
+          yardsEstimated++;
+        }
+      }
+
+      let greenCenter = null, front = null, back = null, greenDepthYds = null;
+      const greenCoords = greenWay ? osmWayCoords(greenWay) : null;
+      if (greenCoords && greenCoords.length >= 3) {
+        greensFound++;
+        const fcb = teePoint ? computeGreenFCB(greenCoords, teePoint) : null;
+        if (fcb && fcb.depthYd >= 3) {
+          greenCenter = fcb.center;
+          front = fcb.front;
+          back = fcb.back;
+          greenDepthYds = Math.round(fcb.depthYd);
+          fcbFound++;
+        } else {
+          greenCenter = polygonCentroid(greenCoords);
+        }
+      }
+
+      const handicap = tags.handicap || '';
+      if (teePoint) teesFound++;
+      hazardsFound += hazards.length;
+      const source = holeWay ? 'openstreetmap' : 'manual';
+
+      courseHoles.push({
+        number: i, par, yards, yardageSource, handicap,
+        greenCenter, front, back, greenDepthYds,
+        teePoint, hazards, source,
+        strokeIndex: handicap ? parseInt(handicap, 10) : undefined,
+      });
+      if (holeWay || yards) holesMapped++;
+    }
+
+    const report = {
+      holesMapped, parsImported, parsEstimated,
+      yardsFromTag, yardsEstimated,
+      greensFound, fcbFound, hazardsFound, teesFound,
+      source: 'openstreetmap',
+      osmId: `${courseNode.osmType}/${courseNode.osmId}`,
+    };
+
+    return normalizeCourse({
+      id: `osm:${courseNode.osmType}/${courseNode.osmId}`,
+      name: courseNode.name,
+      teeName: 'Default tees',
+      source: 'openstreetmap',
+      osmType: courseNode.osmType,
+      osmId: courseNode.osmId,
+      location: { lat: courseNode.lat, lng: courseNode.lng },
+      updatedAt: Date.now(),
+      importReport: report,
+      holes: courseHoles,
+    });
+  }
+
+  function cacheOSMCourse(course) {
+    if (!course || !course.osmId) return;
+    const key = OSM_COURSE_CACHE_PREFIX + course.osmId;
+    save(key, { ts: Date.now(), course: course });
+  }
+
+  function getCachedOSMCourse(osmType, osmId) {
+    const key = OSM_COURSE_CACHE_PREFIX + `${osmType}/${osmId}`;
+    const cached = load(key, null);
+    if (cached && Date.now() - cached.ts < OSM_COURSE_CACHE_TTL) return cached.course;
+    return null;
+  }
+
+  function invalidateOSMCourseCache(osmType, osmId) {
+    try { localStorage.removeItem(OSM_COURSE_CACHE_PREFIX + `${osmType}/${osmId}`); } catch { }
+  }
+
+  function describeOSMImport(course) {
+    const r = course && course.importReport;
+    if (!r) return 'No OSM data was found; add pars and yardages manually.';
+    const parts = [`${r.holesMapped}/18 holes mapped via OpenStreetMap`];
+    if (r.parsImported || r.parsEstimated) {
+      const bits = [];
+      if (r.parsImported) bits.push(`${r.parsImported} par tags`);
+      if (r.parsEstimated) bits.push(`${r.parsEstimated} estimated`);
+      parts.push(bits.join(' + '));
+    }
+    if (r.yardsFromTag || r.yardsEstimated) {
+      const bits = [];
+      if (r.yardsFromTag) bits.push(`${r.yardsFromTag} distance tags`);
+      if (r.yardsEstimated) bits.push(`${r.yardsEstimated} estimated`);
+      parts.push(bits.join(' + '));
+    }
+    if (r.greensFound) parts.push(`${r.greensFound} green polygons`);
+    if (r.fcbFound) parts.push(`${r.fcbFound} front/back computed`);
+    if (r.hazardsFound) parts.push(`${r.hazardsFound} hazards`);
+    if (r.teesFound) parts.push(`${r.teesFound} tee boxes`);
+    parts.push('source: OpenStreetMap');
+    return parts.join(' · ');
+  }
+
+  function updateRefreshButton() {
+    if (!els.refreshOsmBtn) return;
+    const course = state.selectedNearbyCourse;
+    const hasOSMCourse = course && course.source === 'openstreetmap' && course.osmType && course.osmId;
+    els.refreshOsmBtn.hidden = !hasOSMCourse;
+    els.refreshOsmBtn.style.display = hasOSMCourse ? '' : 'none';
+  }
+
+  async function refreshSelectedOSMCourse() {
+    const course = state.selectedNearbyCourse;
+    if (!course || !course.osmType || !course.osmId) return;
+    invalidateOSMCourseCache(course.osmType, course.osmId);
+    state.nearbyCourseLoadingScorecard = true;
+    state._osmAbortController = new AbortController();
+    renderNearbyCourses();
+    els.nearbyCourseStatus.textContent = `Refreshing OSM data for ${escapeHtml(course.name)}…`;
+
+    try {
+      const now = Date.now();
+      const wait = state._osmLastCall + OSM_OVERPASS_DEBOUNCE - now;
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      state._osmLastCall = Date.now();
+      const osmData = await fetchCourseOSM(course);
+      const newCourse = buildCourseFromOSM(osmData, course);
+      cacheOSMCourse(newCourse);
+      state.selectedCourseTemplate = newCourse;
+      els.roundSetupCourseName.value = newCourse.name;
+      els.roundSetupTeeName.value = newCourse.teeName;
+      renderRoundSetupHoles(newCourse.holes);
+      updateRefreshButton();
+      els.nearbyCourseStatus.textContent = `Refreshed ${newCourse.name}. ${describeOSMImport(newCourse)}.`;
+    } catch (error) {
+      console.warn('OSM refresh failed:', error);
+      els.nearbyCourseStatus.textContent = `Refresh failed for ${escapeHtml(course.name)}. Try again later.`;
+    } finally {
+      state.nearbyCourseLoadingScorecard = false;
+      renderNearbyCourses();
+      haptic(8);
+    }
+  }
+
+  function openRoundSetup() {
+    state.selectedNearbyCourse = null;
+    state.selectedCourseTemplate = null;
+
+    if (!els.roundSetupSheet || !els.roundSetupScrim) return;
+
+    const savedSetup = load(LAST_ROUND_SETUP_KEY, {
+      courseName: 'Casual Round',
+      teeName: 'Default tees',
+      startHole: 1,
+      holes: defaultCourseHoles(),
+    });
+
+    renderRoundSetupCourseSelect();
+    renderRoundSetupStartHoleOptions();
+
+    els.roundSetupCourseName.value = savedSetup.courseName || 'Casual Round';
+    els.roundSetupTeeName.value = savedSetup.teeName || 'Default tees';
+    els.roundSetupStartHole.value = String(clamp(Math.round(num(savedSetup.startHole, 1)), 1, 18));
+    els.roundSetupSaveCourse.checked = !!savedSetup.courseName && savedSetup.courseName !== 'Casual Round';
+
+    renderRoundSetupHoles(
+      Array.isArray(savedSetup.holes) ? savedSetup.holes : defaultCourseHoles()
+    );
+
+    // Show “Searching…” instead of “No courses found” while we wait
+    // for a GPS fix or for the Overpass query to complete.
+    if (!state.nearbyCourses.length && !state.nearbyCourseLoading) {
+      state.nearbyCourseLoading = true;
+    }
+    renderNearbyCourses();
+
+    if (!state.loc || state.locStale) {
+      if (!state.gpsRunning) startGPS(true);
+      state.nearbySearchRequested = true;
+    } else if (!state.nearbyCourses.length) {
+      findNearbyCourses();
+    }
+
+    updateRefreshButton();  // show/hide refresh button
+
+    els.roundSetupSheet.classList.add('open');
+    els.roundSetupScrim.classList.add('open');
+    els.roundSetupSheet.setAttribute('aria-hidden', 'false');
+    haptic(6);
+  }
+
+  function closeRoundSetup() {
+    if (!els.roundSetupSheet || !els.roundSetupScrim) return;
+    // Abort any in-progress Overpass fetch
+    if (state._osmAbortController) {
+      state._osmAbortController.abort();
+      state._osmAbortController = null;
+    }
+    state.nearbyCourseLoadingScorecard = false;
+
+    els.roundSetupSheet.classList.remove('open');
+    els.roundSetupScrim.classList.remove('open');
+    els.roundSetupSheet.setAttribute('aria-hidden', 'true');
+  }
+
+  function renderRoundSetupStartHoleOptions() {
+    if (!els.roundSetupStartHole) return;
+
+    els.roundSetupStartHole.innerHTML = Array.from(
+      { length: 18 },
+      (_, i) => `<option value="${i + 1}">Hole ${i + 1}</option>`
+    ).join('');
+  }
+
+  function renderRoundSetupCourseSelect() {
+    if (!els.roundSetupCourseSelect) return;
+
+    const profiles = Array.isArray(state.courseProfiles)
+      ? state.courseProfiles
+      : [];
+
+    els.roundSetupCourseSelect.innerHTML =
+      `<option value="">New casual round</option>` +
+      profiles
+        .map(
+          (course) =>
+            `<option value="${escapeHtml(course.id)}">${escapeHtml(
+              course.name
+            )} · ${escapeHtml(course.teeName || 'Default tees')}</option>`
+        )
+        .join('');
+  }
+
+  function renderRoundSetupHoles(holes) {
+    if (!els.roundSetupPars) return;
+
+    const normalized = normalizeCourse({
+      name: 'Temporary',
+      teeName: 'Temporary',
+      holes,
+    }).holes;
+
+    els.roundSetupPars.innerHTML = normalized
+      .map((hole) => {
+        const badges =
+          (hole.source === 'openstreetmap'
+            ? `<span class="hole-badge osm">OSM</span>`
+            : hole.source === 'opengolfapi'
+              ? `<span class="hole-badge osm">API</span>`
+              : `<span class="hole-badge manual">—</span>`) +
+          (hole.yardageSource === 'estimated'
+            ? `<span class="hole-badge est">est</span>`
+            : '') +
+          (hole.greenDepthYds
+            ? `<span class="hole-badge fcb">${Math.round(hole.greenDepthYds)}yd</span>`
+            : '');
+
+        return `
+        <div class="round-setup-hole" data-hole="${hole.number}">
+          <div class="round-setup-hole-number">
+            ${hole.number}${badges}
+          </div>
+          <input
+            class="setup-hole-par"
+            type="number"
+            inputmode="numeric"
+            min="3"
+            max="6"
+            value="${escapeHtml(hole.par)}"
+            aria-label="Hole ${hole.number} par" />
+          <input
+            class="setup-hole-yards"
+            type="number"
+            inputmode="numeric"
+            placeholder="yd"
+            value="${escapeHtml(hole.yards)}"
+            aria-label="Hole ${hole.number} yards" />
+        </div>`;
+      })
+      .join('');
+  }
+
+  function readRoundSetupCourse() {
+    const template = state.selectedCourseTemplate;
+    const nearby = state.selectedNearbyCourse;
+
+    const templateHoles = Array.isArray(template?.holes) ? template.holes : [];
+
+    const holes = [
+      ...els.roundSetupPars.querySelectorAll('.round-setup-hole'),
+    ].map((row, index) => {
+      const parInput = row.querySelector('.setup-hole-par');
+      const yardsInput = row.querySelector('.setup-hole-yards');
+
+      // Start from the imported hole so geometry survives, then let the
+      // visible inputs win for par / yards only.
+      const base =
+        templateHoles[index] && typeof templateHoles[index] === 'object'
+          ? templateHoles[index]
+          : {};
+
+      return {
+        ...base,
+
+        number: index + 1,
+
+        par: clamp(Math.round(num(parInput.value, num(base.par, 4))), 3, 6),
+
+        yards:
+          yardsInput.value.trim() === ''
+            ? ''
+            : Math.max(1, Math.round(num(yardsInput.value, 0))),
+      };
+    });
+
+    const location =
+      template?.location ||
+      (nearby && Number.isFinite(nearby.lat) && Number.isFinite(nearby.lng)
+        ? {
+          lat: nearby.lat,
+          lng: nearby.lng,
+        }
+        : null);
+
+    return normalizeCourse({
+      ...(template || {}),
+
+      id: template?.id || `local:${cryptoId()}`,
+
+      name:
+        els.roundSetupCourseName.value.trim() ||
+        template?.name ||
+        'Casual Round',
+
+      teeName:
+        els.roundSetupTeeName.value.trim() ||
+        template?.teeName ||
+        'Default tees',
+
+      source: template?.source || nearby?.source || 'manual',
+
+      location,
+
+      updatedAt: Date.now(),
+
+      holes,
+    });
+  }
+
+  function saveCourseProfile(course) {
+    const normalized = normalizeCourse(course);
+
+    const existingIndex = state.courseProfiles.findIndex(
+      (item) =>
+        String(item?.name || '').toLowerCase() ===
+        normalized.name.toLowerCase() &&
+        String(item?.teeName || '').toLowerCase() ===
+        normalized.teeName.toLowerCase()
+    );
+
+    if (existingIndex >= 0) {
+      normalized.id = state.courseProfiles[existingIndex].id;
+      state.courseProfiles[existingIndex] = normalized;
+    } else {
+      state.courseProfiles.push(normalized);
+    }
+
+    saveCourseProfiles();
+  }
+
+  function beginRound(course, startHole) {
+    const normalizedCourse = normalizeCourse(course);
+
+    state.roundSession = emptyRoundSession(normalizedCourse, startHole);
+
+    // Keep legacy scorecard consumers working while course-aware round data
+    // remains stored inside the active round session.
+    state.round = state.roundSession.scorecard;
+
+    save('caddy:round', state.round);
+    saveRoundSession();
+
+    if (!state.gpsRunning) {
+      startGPS();
+    }
+
+    renderRound();
+    renderRoundShotUI();
+    renderRoundHoleHeader();
+
+    // Move the map to the selected course if it came from nearby-course search
+    // or a saved course profile with a stored location.
+    if (
+      normalizedCourse.location &&
+      Number.isFinite(normalizedCourse.location.lat) &&
+      Number.isFinite(normalizedCourse.location.lng)
+    ) {
+      initMap();
+
+      if (state.mapReady) {
+        state.map.setView(
+          [normalizedCourse.location.lat, normalizedCourse.location.lng],
+          16,
+          { animate: !reduceMotion }
+        );
+
+        // A course-selected map location should not be immediately replaced
+        // by the first incoming GPS fix.
+        state.pannedOnce = true;
+      }
+    }
+
+    haptic(10);
+  }
+  function nearbyCourseDistanceYd(course) {
+    if (course.distanceYd != null && Number.isFinite(course.distanceYd)) return course.distanceYd;
+    if (!state.loc || !course) return null;
+    return haversineMeters(state.loc, course) * M_TO_YD;
+  }
+
+  function formatNearbyCourseDistance(course) {
+    const yd = nearbyCourseDistanceYd(course);
+
+    if (!Number.isFinite(yd)) return '';
+
+    if (yd < 1760) return `${Math.round(yd)} yd away`;
+
+    return `${fmt(yd / 1760, 1)} mi away`;
+  }
+
+  function getSavedCourseMatch(name) {
+    const needle = String(name || '')
+      .trim()
+      .toLowerCase();
+
+    if (!needle) return null;
+
+    return state.courseProfiles.find((course) => {
+      const candidate = String(course.name || '')
+        .trim()
+        .toLowerCase();
+
+      return candidate === needle;
+    });
+  }
+
+
+
+  function renderNearbyCourses() {
+    if (!els.nearbyCourseList || !els.nearbyCourseStatus) return;
+
+    const courses = Array.isArray(state.nearbyCourses) ? state.nearbyCourses : [];
+
+    if (state.nearbyCourseLoading) {
+      els.nearbyCourseStatus.textContent = 'Searching OpenStreetMap around your location…';
+      els.nearbyCourseList.innerHTML = `<div class="hint">Looking for nearby golf courses on OSM…</div>`;
+      updateRefreshButton();
+      return;
+    }
+
+    if (!state.loc) {
+      els.nearbyCourseStatus.textContent = 'Enable GPS first to find nearby courses.';
+      els.nearbyCourseList.innerHTML = '';
+      updateRefreshButton();
+      return;
+    }
+
+    if (state.nearbyCourseError) {
+      els.nearbyCourseStatus.textContent = state.nearbyCourseError;
+      els.nearbyCourseList.innerHTML = '';
+      updateRefreshButton();
+      return;
+    }
+
+    if (!courses.length) {
+      els.nearbyCourseStatus.textContent = 'No mapped courses found nearby on OpenStreetMap. You can add them to OSM or create one manually.';
+      els.nearbyCourseList.innerHTML = '';
+      updateRefreshButton();
+      return;
+    }
+
+    if (state.nearbyCourseLoadingScorecard) {
+      els.nearbyCourseStatus.textContent = 'Course selected — loading OSM map data…';
+    } else if (!state.selectedNearbyCourse) {
+      els.nearbyCourseStatus.textContent = `${courses.length} nearby course${courses.length === 1 ? '' : 's'} found on OpenStreetMap.`;
+    }
+
+    els.nearbyCourseList.innerHTML = courses
+      .map((course, index) => {
+        const saved = getSavedCourseMatch(course.name);
+        const distance = formatNearbyCourseDistance(course);
+        const selected = state.selectedNearbyCourse && state.selectedNearbyCourse.id === course.id;
+        const label = saved ? 'Saved scorecard' : selected ? 'Loading…' : 'Tap to select';
+
+        return `
+          <button class="nearby-course-option${selected ? ' selected' : ''}" type="button" data-index="${index}" aria-pressed="${selected ? 'true' : 'false'}">
+            <span class="nearby-course-name">${escapeHtml(course.name)}</span>
+            <span class="nearby-course-meta">${escapeHtml(distance)}${distance ? ' · ' : ''}${escapeHtml(label)}</span>
+          </button>`;
+      })
+      .join('');
+
+    els.nearbyCourseList.querySelectorAll('.nearby-course-option').forEach((button) => {
+      button.addEventListener('click', () => {
+        const course = state.nearbyCourses[Number(button.dataset.index)];
+        if (course) selectNearbyCourse(course);
+      });
+    });
+
+    updateRefreshButton();
+  }
+
+
+
+  async function selectNearbyCourse(candidate) {
+    if (!candidate) return;
+
+    state.selectedNearbyCourse = {
+      id: candidate.id,
+      name: candidate.name,
+      lat: Number(candidate.lat),
+      lng: Number(candidate.lng),
+      source: candidate.source || 'openstreetmap',
+      osmType: candidate.osmType,
+      osmId: candidate.osmId,
+    };
+
+    state.selectedCourseTemplate = null;
+
+    // Check saved profiles first
+    const saved = getSavedCourseMatch(candidate.name);
+    if (saved) {
+      const course = normalizeCourse({
+        ...saved,
+        location: saved.location || { lat: state.selectedNearbyCourse.lat, lng: state.selectedNearbyCourse.lng },
+      });
+      state.selectedCourseTemplate = course;
+      els.roundSetupCourseSelect.value = course.id;
+      els.roundSetupCourseName.value = course.name;
+      els.roundSetupTeeName.value = course.teeName;
+      els.roundSetupSaveCourse.checked = true;
+      renderRoundSetupHoles(course.holes);
+      updateRefreshButton();
+      els.nearbyCourseStatus.textContent = `Selected ${course.name}. Saved scorecard loaded.`;
+      renderNearbyCourses();
+      haptic(8);
+      return;
+    }
+
+    // Check OSM cache
+    if (candidate.osmType && candidate.osmId) {
+      const cached = getCachedOSMCourse(candidate.osmType, candidate.osmId);
+      if (cached) {
+        const course = normalizeCourse(cached);
+        state.selectedCourseTemplate = course;
+        els.roundSetupCourseSelect.value = '';
+        els.roundSetupCourseName.value = course.name;
+        els.roundSetupTeeName.value = course.teeName || 'Default tees';
+        els.roundSetupSaveCourse.checked = true;
+        renderRoundSetupHoles(course.holes);
+        updateRefreshButton();
+        els.nearbyCourseStatus.textContent = `Selected ${course.name}. ${describeOSMImport(course)}.`;
+        renderNearbyCourses();
+        haptic(8);
+        return;
+      }
+    }
+
+    // Fetch from OSM
+    els.roundSetupCourseSelect.value = '';
+    els.roundSetupCourseName.value = candidate.name;
+    els.roundSetupTeeName.value = 'Default tees';
+    els.roundSetupSaveCourse.checked = true;
+
+    state.nearbyCourseLoadingScorecard = true;
+    state._osmAbortController = new AbortController();
+    renderNearbyCourses();
+
+    const skipTimer = setTimeout(() => {
+      if (state.nearbyCourseLoadingScorecard) {
+        els.nearbyCourseStatus.innerHTML = `Loading OSM data for ${escapeHtml(candidate.name)}… <button class="ghost-btn" id="skipOsmBtn" style="margin-left:8px;font-size:11px;padding:4px 10px;">Skip &amp; enter manually</button>`;
+        const skipBtn = document.getElementById('skipOsmBtn');
+        if (skipBtn) skipBtn.addEventListener('click', () => { if (state._osmAbortController) state._osmAbortController.abort(); });
+      }
+    }, 6000);
+
+    try {
+      const now = Date.now();
+      const wait = state._osmLastCall + OSM_OVERPASS_DEBOUNCE - now;
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      state._osmLastCall = Date.now();
+
+      const osmData = await fetchCourseOSM(candidate);
+      clearTimeout(skipTimer);
+      const course = buildCourseFromOSM(osmData, candidate);
+      cacheOSMCourse(course);
+      state.selectedCourseTemplate = course;
+      els.roundSetupCourseName.value = course.name;
+      els.roundSetupTeeName.value = course.teeName;
+      renderRoundSetupHoles(course.holes);
+      updateRefreshButton();
+      els.nearbyCourseStatus.textContent = `Selected ${course.name}. ${describeOSMImport(course)}. Review flagged holes before starting.`;
+    } catch (error) {
+      clearTimeout(skipTimer);
+      if (error && error.name === 'AbortError') {
+        console.warn('OSM course lookup was cancelled by user.');
+      } else {
+        console.warn('OSM course lookup failed:', error);
+      }
+      state.selectedCourseTemplate = normalizeCourse({
+        id: `local:${cryptoId()}`,
+        name: candidate.name,
+        teeName: 'Default tees',
+        source: 'openstreetmap',
+        location: { lat: candidate.lat, lng: candidate.lng },
+        holes: defaultCourseHoles(),
+      });
+      renderRoundSetupHoles(state.selectedCourseTemplate.holes);
+      updateRefreshButton();
+      els.nearbyCourseStatus.textContent = `Selected ${candidate.name}. OSM data lookup was unavailable; add pars and yardages manually.`;
+    } finally {
+      state.nearbyCourseLoadingScorecard = false;
+      renderNearbyCourses();
+      haptic(8);
+    }
+  }
+
+  async function findNearbyCourses() {
+    state.nearbySearchRequested = true;
+    state.nearbyCourseError = null;
+
+    if (!state.loc || state.locStale) {
+      setNotice('Getting a fresh GPS fix before searching for nearby courses.', 'greenish');
+      if (!state.gpsRunning) startGPS();
+      if (els.nearbyCourseStatus) els.nearbyCourseStatus.textContent = 'Waiting for a fresh GPS location…';
+      return;
+    }
+
+    // Check cache
+    const cache = load(NEARBY_COURSES_OSM_KEY, null);
+    const now = Date.now();
+    const cacheIsNearby = cache && Number.isFinite(Number(cache.lat)) && Number.isFinite(Number(cache.lng)) &&
+      haversineMeters(state.loc, { lat: Number(cache.lat), lng: Number(cache.lng) }) <= NEARBY_COURSE_RADIUS_M;
+
+    if (cacheIsNearby && Array.isArray(cache.courses) && Number.isFinite(cache.ts) && now - cache.ts < NEARBY_COURSES_TTL) {
+      state.nearbyCourses = cache.courses;
+      state.nearbyCourseError = null;
+      state.nearbySearchRequested = false;
+      renderNearbyCourses();
+      return;
+    }
+
+    state.nearbyCourseLoading = true;
+    renderNearbyCourses();
+
+    const { lat, lng } = state.loc;
+
+    try {
+      const courses = await searchNearbyCoursesOSM(lat, lng);
+      state.nearbyCourses = courses;
+      state.nearbyCourseError = null;
+      if (courses.length > 0) {
+        save(NEARBY_COURSES_OSM_KEY, { ts: now, lat, lng, courses });
+      }
+    } catch (error) {
+      console.warn('Nearby course search via OSM failed:', error);
+      state.nearbyCourses = [];
+      state.nearbyCourseError = error.name === 'AbortError'
+        ? 'Nearby course search timed out. Try again.'
+        : 'Nearby course search is unavailable right now. Try again or enter the course manually.';
+      if (els.nearbyCourseStatus) {
+        els.nearbyCourseStatus.textContent = state.nearbyCourseError;
+      }
+    } finally {
+      state.nearbyCourseLoading = false;
+      state.nearbySearchRequested = false;
+      renderNearbyCourses();
+    }
+  }
+  function initRoundSetup() {
+    if (
+      !els.roundSetupSheet ||
+      !els.roundSetupScrim ||
+      !els.roundSetupStartBtn ||
+      !els.roundSetupCourseSelect ||
+      !els.roundSetupCourseName ||
+      !els.roundSetupTeeName ||
+      !els.roundSetupStartHole ||
+      !els.roundSetupPars ||
+      !els.roundSetupSaveCourse
+    ) {
+      console.warn(
+        'Round setup was not initialized: one or more setup HTML elements are missing.'
+      );
+      return;
+    }
+
+    if (els.roundSetupCloseBtn) {
+      els.roundSetupCloseBtn.addEventListener('click', closeRoundSetup);
+    }
+
+    els.roundSetupScrim.addEventListener('click', closeRoundSetup);
+
+    if (els.findNearbyCoursesBtn) {
+      els.findNearbyCoursesBtn.addEventListener('click', findNearbyCourses);
+    }
+
+    if (els.refreshOsmBtn) {
+      els.refreshOsmBtn.addEventListener('click', refreshSelectedOSMCourse);
+    }
+
+    els.roundSetupCourseSelect.addEventListener('change', () => {
+      const selectedId = els.roundSetupCourseSelect.value;
+
+      state.selectedNearbyCourse = null;
+      state.selectedCourseTemplate = null;
+
+      if (!selectedId) {
+        els.roundSetupCourseName.value = 'Casual Round';
+        els.roundSetupTeeName.value = 'Default tees';
+        els.roundSetupSaveCourse.checked = false;
+
+        renderRoundSetupHoles(defaultCourseHoles());
+        renderNearbyCourses();
+        return;
+      }
+
+      const selected = state.courseProfiles.find(
+        (course) => course.id === selectedId
+      );
+
+      if (!selected) return;
+
+      const course = normalizeCourse(selected);
+
+      state.selectedCourseTemplate = course;
+
+      els.roundSetupCourseName.value = course.name;
+      els.roundSetupTeeName.value = course.teeName;
+      els.roundSetupSaveCourse.checked = true;
+
+      renderRoundSetupHoles(course.holes);
+
+
+      if (course.location) {
+        els.nearbyCourseStatus.textContent = `Selected saved course: ${course.name}.`;
+      }
+
+      renderNearbyCourses();
+    });
+
+    els.roundSetupStartBtn.addEventListener('click', () => {
+      const course = readRoundSetupCourse();
+      const startHole = clamp(
+        Math.round(num(els.roundSetupStartHole.value, 1)),
+        1,
+        18
+      );
+
+      save(LAST_ROUND_SETUP_KEY, {
+        courseName: course.name,
+        teeName: course.teeName,
+        startHole,
+        holes: course.holes,
+      });
+
+      if (els.roundSetupSaveCourse.checked && course.name !== 'Casual Round') {
+        saveCourseProfile(course);
+      }
+
+      closeRoundSetup();
+      beginRound(course, startHole);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (
+        event.key === 'Escape' &&
+        els.roundSetupSheet.classList.contains('open')
+      ) {
+        closeRoundSetup();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (
+        event.key === 'Escape' &&
+        els.roundScoreSheet?.classList.contains('open')
+      ) {
+        closeRoundScoreSheet();
+      }
+    });
+  }
+  function getRoundScoreDraft() {
+    const holeNumber = getCurrentHoleNumber();
+    const row = getScorecardRows()[holeNumber - 1] || {};
+
+    const hole = getCurrentHoleData();
+    const fallbackScore = Math.max(1, Number(hole.par) || 4);
+
+    return {
+      hole: holeNumber,
+      score:
+        row.score !== '' && Number.isFinite(Number(row.score))
+          ? Math.max(1, Math.round(Number(row.score)))
+          : fallbackScore,
+
+      putts:
+        row.putts !== '' && Number.isFinite(Number(row.putts))
+          ? Math.max(0, Math.round(Number(row.putts)))
+          : '',
+
+      fir: row.fir || '',
+      gir: row.gir || '',
+    };
+  }
+
+  function renderRoundScoreSheet() {
+    if (!els.roundScoreSheet || !state.roundScoreDraft) return;
+
+    const draft = state.roundScoreDraft;
+    const hole = getCurrentHoleData();
+
+    els.roundScoreTitle.textContent = `Score Hole ${draft.hole}`;
+
+    els.roundScoreMeta.textContent = [
+      `Par ${hole.par || 4}`,
+      hole.yards ? `${hole.yards} yd` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    els.roundScoreValue.textContent = String(draft.score);
+
+    if (els.roundPuttsOptions) {
+      els.roundPuttsOptions.querySelectorAll('button').forEach((button) => {
+        const value = Number(button.dataset.putts);
+
+        const active =
+          draft.putts !== '' &&
+          (value === 4
+            ? Number(draft.putts) >= 4
+            : Number(draft.putts) === value);
+
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    }
+
+    if (els.roundFirOptions) {
+      els.roundFirOptions.querySelectorAll('button').forEach((button) => {
+        const active = draft.fir === button.dataset.fir;
+
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    }
+
+    if (els.roundGirOptions) {
+      els.roundGirOptions.querySelectorAll('button').forEach((button) => {
+        const active = draft.gir === button.dataset.gir;
+
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    }
+
+    const canAdvance =
+      getCurrentHoleNumber() < 18 && roundStatus() !== 'pending';
+
+    if (els.roundScoreSaveNextBtn) {
+      els.roundScoreSaveNextBtn.disabled = !canAdvance;
+      els.roundScoreSaveNextBtn.style.opacity = canAdvance ? '1' : '0.5';
+      els.roundScoreSaveNextBtn.textContent =
+        getCurrentHoleNumber() >= 18 ? 'Save Hole 18' : 'Save & Next';
+    }
+  }
+
+  function openRoundScoreSheet() {
+    if (
+      !els.roundScoreSheet ||
+      !els.roundScoreScrim ||
+      roundStatus() === 'idle'
+    ) {
+      return;
+    }
+
+    if (roundStatus() === 'pending') {
+      setNotice(
+        'Finish or discard the current shot before scoring this hole.',
+        'danger'
+      );
+      haptic(12);
+      return;
+    }
+
+    state.roundScoreDraft = getRoundScoreDraft();
+
+    renderRoundScoreSheet();
+
+    els.roundScoreScrim.classList.add('open');
+    els.roundScoreSheet.classList.add('open');
+    els.roundScoreSheet.setAttribute('aria-hidden', 'false');
+
+    haptic(6);
+  }
+
+  function closeRoundScoreSheet() {
+    if (!els.roundScoreSheet || !els.roundScoreScrim) return;
+
+    els.roundScoreSheet.classList.remove('open');
+    els.roundScoreScrim.classList.remove('open');
+    els.roundScoreSheet.setAttribute('aria-hidden', 'true');
+
+    state.roundScoreDraft = null;
+  }
+
+  function saveRoundScoreDraft(andNext = false) {
+    const draft = state.roundScoreDraft;
+    const rs = state.roundSession;
+
+    if (!draft || !rs) return;
+
+    const holeIndex = draft.hole - 1;
+
+    state.round[holeIndex] = {
+      ...state.round[holeIndex],
+      hole: draft.hole,
+      score: String(Math.max(1, Math.round(draft.score))),
+      putts:
+        draft.putts === '' ? '' : String(Math.max(0, Math.round(draft.putts))),
+      fir: draft.fir || '',
+      gir: draft.gir || '',
+    };
+
+    syncRoundScorecard();
+
+    const shouldAdvance = andNext && rs.hole < 18 && rs.status !== 'pending';
+
+    if (shouldAdvance) {
+      rs.hole += 1;
+      rs.currentHole = rs.hole;
+      saveRoundSession();
+    }
+
+    closeRoundScoreSheet();
+
+    renderRound();
+    renderRoundShotUI();
+    renderRoundHoleHeader();
+    renderRoundMapHud();
+    renderStats();
+
+    if (shouldAdvance) {
+      setNotice(
+        `Hole ${draft.hole} saved. Now playing Hole ${rs.hole}.`,
+        'greenish'
+      );
+    } else {
+      setNotice(`Hole ${draft.hole} saved.`, 'greenish');
+    }
+
+    haptic(10);
+  }
+  function initRoundMode() {
+    if (els.roundMapScoreBtn) {
+      els.roundMapScoreBtn.addEventListener('click', openRoundScoreSheet);
+    }
+
+    if (els.roundScoreCloseBtn) {
+      els.roundScoreCloseBtn.addEventListener('click', closeRoundScoreSheet);
+    }
+
+    if (els.roundScoreScrim) {
+      els.roundScoreScrim.addEventListener('click', closeRoundScoreSheet);
+    }
+
+    if (els.roundScoreMinusBtn) {
+      els.roundScoreMinusBtn.addEventListener('click', () => {
+        if (!state.roundScoreDraft) return;
+
+        state.roundScoreDraft.score = Math.max(
+          1,
+          state.roundScoreDraft.score - 1
+        );
+
+        renderRoundScoreSheet();
+        haptic(4);
+      });
+    }
+
+    if (els.roundScorePlusBtn) {
+      els.roundScorePlusBtn.addEventListener('click', () => {
+        if (!state.roundScoreDraft) return;
+
+        state.roundScoreDraft.score = Math.min(
+          15,
+          state.roundScoreDraft.score + 1
+        );
+
+        renderRoundScoreSheet();
+        haptic(4);
+      });
+    }
+
+    if (els.roundPuttsOptions) {
+      els.roundPuttsOptions.querySelectorAll('button').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!state.roundScoreDraft) return;
+
+          const value = Number(button.dataset.putts);
+
+          state.roundScoreDraft.putts = value === 4 ? 4 : value;
+
+          renderRoundScoreSheet();
+          haptic(4);
+        });
+      });
+    }
+
+    if (els.roundFirOptions) {
+      els.roundFirOptions.querySelectorAll('button').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!state.roundScoreDraft) return;
+
+          const value = button.dataset.fir;
+
+          state.roundScoreDraft.fir =
+            state.roundScoreDraft.fir === value ? '' : value;
+
+          renderRoundScoreSheet();
+          haptic(4);
+        });
+      });
+    }
+
+    if (els.roundGirOptions) {
+      els.roundGirOptions.querySelectorAll('button').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!state.roundScoreDraft) return;
+
+          const value = button.dataset.gir;
+
+          state.roundScoreDraft.gir =
+            state.roundScoreDraft.gir === value ? '' : value;
+
+          renderRoundScoreSheet();
+          haptic(4);
+        });
+      });
+    }
+
+    if (els.roundScoreSaveBtn) {
+      els.roundScoreSaveBtn.addEventListener('click', () => {
+        saveRoundScoreDraft(false);
+      });
+    }
+
+    if (els.roundScoreSaveNextBtn) {
+      els.roundScoreSaveNextBtn.addEventListener('click', () => {
+        saveRoundScoreDraft(true);
+      });
+    }
+    if (els.roundMapPrevBtn) {
+      els.roundMapPrevBtn.addEventListener('click', previousHole);
+    }
+
+    if (els.roundMapNextBtn) {
+      els.roundMapNextBtn.addEventListener('click', nextHole);
+    }
+    if (els.roundActionBtn) {
+      els.roundActionBtn.addEventListener('click', () => {
+        const status = roundStatus();
+
+        if (status === 'idle') {
+          startRound();
+        } else if (status === 'active') {
+          startShot();
+        } else {
+          finishShot(false);
+        }
+      });
+    }
+
+    if (els.roundDiscardBtn) {
+      els.roundDiscardBtn.addEventListener('click', () => finishShot(true));
+    }
+
+    if (els.roundPrevHoleBtn) {
+      els.roundPrevHoleBtn.addEventListener('click', previousHole);
+    }
+
+    if (els.roundNextHoleBtn) {
+      els.roundNextHoleBtn.addEventListener('click', nextHole);
+    }
+
+    if (els.roundEndBtn) {
+      els.roundEndBtn.addEventListener('click', endRound);
+    }
+
+    if (els.roundFab) {
+      els.roundFab.addEventListener('click', () => {
+        const status = roundStatus();
+
+        if (status === 'active') {
+          startShot();
+        } else if (status === 'pending') {
+          finishShot(false);
+        }
+      });
+    }
+
+    if (els.roundFabClub) {
+      els.roundFabClub.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleClubPop();
+        haptic(5);
+      });
+    }
+
+    if (window.L && L.DomEvent && els.roundFabWrap) {
+      L.DomEvent.disableClickPropagation(els.roundFabWrap);
+    }
+
+    renderRoundShotUI();
+  }
+
+  function initStatsEvents() {
+    els.saveRoundBtn.addEventListener('click', () => {
+      const s = summarizeRound(state.round);
+      if (!s.played) {
+        alert('Enter at least one hole score before saving.');
+        return;
+      }
+      state.history.push({ date: new Date().toISOString(), ...s });
+      save('caddy:history', state.history);
+      if (confirm('Round saved to history. Start a fresh scorecard?')) {
+        state.round = emptyRound();
+        if (state.roundSession) {
+          state.roundSession.scorecard = state.round;
+          saveRoundSession();
+        }
+        save('caddy:round', state.round);
+        renderRound();
+        renderRoundShotUI();
+      }
+      renderStats();
+    });
+  }
+
+  function initLayerSeg() {
+    const seg = els.layerSeg,
+      thumb = els.segThumb,
+      opts = [...seg.querySelectorAll('.seg-opt')];
+    function moveThumb(btn) {
+      if (!btn) return;
+      thumb.style.width = btn.offsetWidth + 'px';
+      thumb.style.transform = `translateX(${btn.offsetLeft - 3}px)`;
+    }
+    function select(btn) {
+      opts.forEach((o) => {
+        o.classList.remove('active');
+        o.setAttribute('aria-checked', 'false');
+      });
+      btn.classList.add('active');
+      btn.setAttribute('aria-checked', 'true');
+      moveThumb(btn);
+      initMap();
+      setMapLayer(btn.dataset.layer);
+      haptic(6);
+    }
+    opts.forEach((o) => o.addEventListener('click', () => select(o)));
+    const saved = migrateLayer(state.prefs.mapLayer || 'satellite');
+    const target = opts.find((o) => o.dataset.layer === saved) || opts[0];
+    requestAnimationFrame(() => {
+      opts.forEach((o) => {
+        o.classList.remove('active');
+        o.setAttribute('aria-checked', 'false');
+      });
+      target.classList.add('active');
+      target.setAttribute('aria-checked', 'true');
+      moveThumb(target);
+    });
+    window.addEventListener('resize', () =>
+      moveThumb(seg.querySelector('.active') || opts[0])
+    );
+  }
+
+  function initSettingsSheet() {
+    const refreshShotDataDesc = () => {
+      if (!els.shotDataDesc) return;
+      const { total, clubs } = shotDataSummary();
+      els.shotDataDesc.textContent = total
+        ? `${total} shot${total === 1 ? '' : 's'} logged across ${clubs} club${clubs === 1 ? '' : 's'
+        }. Resets dispersion to the formula default.`
+        : 'No shots logged yet. Track shots in Round mode to teach Caddy your distances.';
+    };
+    const open = () => {
+      refreshShotDataDesc();
+      els.settingsSheet.classList.add('open');
+      els.settingsScrim.classList.add('open');
+      els.settingsSheet.setAttribute('aria-hidden', 'false');
+      haptic(6);
+    };
+    const close = () => {
+      els.settingsSheet.classList.remove('open');
+      els.settingsScrim.classList.remove('open');
+      els.settingsSheet.setAttribute('aria-hidden', 'true');
+    };
+    els.settingsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      open();
+    });
+    els.settingsScrim.addEventListener('click', close);
+    els.settingsDoneBtn.addEventListener('click', close);
+    els.proToggleSheet.addEventListener('change', () =>
+      setPro(els.proToggleSheet.checked)
+    );
+    els.darkToggleSheet.addEventListener('change', () =>
+      setDark(els.darkToggleSheet.checked)
+    );
+    if (els.replayOnboardBtn) {
+      els.replayOnboardBtn.addEventListener('click', () => {
+        close();
+        try {
+          localStorage.removeItem(ONBOARD_KEY);
+        } catch { }
+        showOnboard();
+      });
+    }
+    if (els.resetShotDataBtn) {
+      els.resetShotDataBtn.addEventListener('click', () => {
+        const { total } = shotDataSummary();
+        if (!total) {
+          refreshShotDataDesc();
+          return;
+        }
+        if (
+          !confirm(
+            `Delete all ${total} logged shot distance${total === 1 ? '' : 's'
+            }? Recommendations will fall back to the formula. This can't be undone.`
+          )
+        )
+          return;
+        clearShotData();
+        refreshShotDataDesc();
+        haptic(12);
+        // Recompute with formula-only dispersion.
+        if (state.target && state.loc) calculateRange();
+      });
+    }
+    els.settingsSheet
+      .querySelector('.sheet-handle')
+      ?.addEventListener('click', close);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && els.settingsSheet.classList.contains('open'))
+        close();
+    });
+  }
+
+  function initSheet() {
+    const sheet = els.sheet,
+      drag = els.sheetDrag,
+      wrap = els.rangeWrap;
+    const fcbBlock = sheet.querySelector('.fcb-block');
+    const scrollArea = sheet.querySelector('.sheet-scroll');
+    let H = 0,
+      maxY = 0,
+      curY = 0,
+      startY = 0,
+      startT = 0,
+      dragging = false,
+      lastY = 0,
+      lastT = 0,
+      vel = 0,
+      moved = 0,
+      followRafPending = false;
+    const clmp = (v, a, b) => Math.min(b, Math.max(a, v));
+    const clamp01 = (v) => Math.min(1, Math.max(0, v));
+    const invLerp = (a, b, v) => (a === b ? 1 : (v - a) / (b - a));
+
+    function headerH() {
+      return drag.offsetHeight || 130;
+    }
+    function tabTotalPx() {
+      const tabs = document.querySelector('.bottom-tabs');
+      return tabs ? tabs.getBoundingClientRect().height : 78;
+    }
+
+    let cachedFcbH = 150;
+    function measureFcbHeight() {
+      if (!fcbBlock) return 150;
+      const prevMax = fcbBlock.style.maxHeight;
+      const prevOpacity = fcbBlock.style.opacity;
+      fcbBlock.style.maxHeight = 'none';
+      fcbBlock.style.opacity = '1';
+      const h = fcbBlock.scrollHeight;
+      fcbBlock.style.maxHeight = prevMax;
+      fcbBlock.style.opacity = prevOpacity;
+      cachedFcbH = h || 150;
+      return cachedFcbH;
+    }
+
+    function detents() {
+      const dragH = headerH();
+      const fcbH = cachedFcbH;
+      const collapsed = clmp(H - dragH, 0, maxY);
+      const half = clmp(H - (dragH + fcbH + 10), 0, maxY);
+      const full = 0;
+      return { collapsed, half, full };
+    }
+    function nearestName(y) {
+      const d = detents();
+      const arr = [
+        ['collapsed', d.collapsed],
+        ['half', d.half],
+        ['full', d.full],
+      ];
+      arr.sort((a, b) => Math.abs(a[1] - y) - Math.abs(b[1] - y));
+      return arr[0][0];
+    }
+    function applyDetentAttr(name) {
+      document.body.setAttribute('data-detent', name);
+    }
+
+    function setReveal(y) {
+      const d = detents();
+      const fcbR = clamp01(invLerp(d.collapsed, d.half, y));
+      const detailR = clamp01(invLerp(d.half, d.full, y));
+      sheet.style.setProperty('--fcb-reveal', fcbR.toFixed(3));
+      sheet.style.setProperty('--detail-reveal', detailR.toFixed(3));
+      // Mirror onto the wrap so the floating pills (siblings of the sheet)
+      // can fade live during the drag.
+      wrap.style.setProperty('--detail-reveal', detailR.toFixed(3));
+    }
+    function followFrameDuringDrag() {
+      if (!state.followUser || !state.loc || !state.map || followRafPending)
+        return;
+      followRafPending = true;
+      requestAnimationFrame(() => {
+        followRafPending = false;
+        if (!state.followUser || !state.loc || !state.map) return;
+        // Only LOCKED exists now.
+        holdLockedView({ lat: state.loc.lat, lng: state.loc.lng }, false);
+      });
+    }
+    function revealForDetent(name) {
+      if (name === 'collapsed') return { fcb: 0, detail: 0 };
+      if (name === 'half') return { fcb: 1, detail: 0 };
+      return { fcb: 1, detail: 1 };
+    }
+
+    // FIX: drive a single shared --ui-lift on .range-wrap so the GPS pill
+    // AND the Leaflet zoom control both ride the sheet on the compositor,
+    // frame-locked during drag and the spring snap.
+    function setY(y, animate) {
+      curY = clmp(y, 0, maxY);
+      sheet.classList.toggle('animate', !!animate && !reduceMotion);
+      sheet.style.setProperty('--sheet-y', curY + 'px');
+      const lift = H - curY + tabTotalPx() + 12;
+      wrap.style.setProperty('--ui-lift', lift + 'px');
+      drag.setAttribute('aria-expanded', String(curY < maxY * 0.5));
+    }
+    function snapTo(name, haptics) {
+      const previous = document.body.getAttribute('data-detent') || 'collapsed';
+      const d = detents();
+      const wasDragging = document.body.getAttribute('data-dragging') === '1';
+
+      setY(d[name], !wasDragging);
+      applyDetentAttr(name);
+
+      if (wasDragging) {
+        const r = revealForDetent(name);
+        sheet.style.setProperty('--fcb-reveal', String(r.fcb));
+        sheet.style.setProperty('--detail-reveal', String(r.detail));
+        wrap.style.setProperty('--detail-reveal', String(r.detail));
+        void sheet.offsetHeight;
+        requestAnimationFrame(() => {
+          document.body.removeAttribute('data-dragging');
+          sheet.style.removeProperty('--fcb-reveal');
+          sheet.style.removeProperty('--detail-reveal');
+          wrap.style.removeProperty('--detail-reveal');
+          sheet.classList.add('animate');
+        });
+      } else {
+        sheet.style.removeProperty('--fcb-reveal');
+        sheet.style.removeProperty('--detail-reveal');
+        wrap.style.removeProperty('--detail-reveal');
+      }
+
+      if (
+        previous === 'full' &&
+        (name === 'half' || name === 'collapsed') &&
+        scrollArea
+      ) {
+        scrollArea.scrollTop = 0;
+      }
+      // At full-sheet size, advice is shown inline in the shot card instead
+      // of as a floating map popover.
+      if (name === 'full' && typeof closeAdvice === 'function') {
+        closeAdvice();
+      }
+
+      // Do not leave an expanded inline panel around when the card disappears.
+      if (name !== 'full' && typeof closeInlineAdvice === 'function') {
+        closeInlineAdvice();
+      }
+      // If actively following the user, re-frame for the new detent so
+      // the dot stays in the clear area (handles collapse-while-tracking).
+      if (
+        state.followUser &&
+        state.loc &&
+        state.map &&
+        state.followMode === FollowMode.LOCKED
+      ) {
+        holdLockedView({ lat: state.loc.lat, lng: state.loc.lng }, false);
+      }
+      if (haptics) haptic(8);
+    }
+    function measure() {
+      const h = sheet.offsetHeight;
+      if (!h || !drag.offsetHeight) {
+        requestAnimationFrame(measure);
+        return;
+      }
+      H = h;
+      maxY = Math.max(0, H - headerH());
+      measureFcbHeight();
+      document.documentElement.style.setProperty(
+        '--sheet-peek',
+        headerH() + 'px'
+      );
+      const cur = document.body.getAttribute('data-detent') || 'collapsed';
+      const d = detents();
+      setY(d[cur] ?? d.collapsed, false);
+      applyDetentAttr(cur);
+    }
+    function cycleUp() {
+      const cur = document.body.getAttribute('data-detent') || 'collapsed';
+      snapTo(
+        cur === 'collapsed' ? 'half' : cur === 'half' ? 'full' : 'collapsed',
+        true
+      );
+    }
+
+    drag.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      moved = 0;
+      startY = e.clientY;
+      startT = curY;
+      lastY = e.clientY;
+      lastT = performance.now();
+      sheet.classList.remove('animate');
+      document.body.setAttribute('data-dragging', '1');
+      measureFcbHeight();
+      setReveal(curY);
+      try {
+        drag.setPointerCapture(e.pointerId);
+      } catch { }
+    });
+    drag.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const dy = e.clientY - startY;
+      moved = Math.max(moved, Math.abs(dy));
+      const now = performance.now();
+      vel = (e.clientY - lastY) / Math.max(1, now - lastT);
+      lastY = e.clientY;
+      lastT = now;
+      setY(startT + dy, false);
+      setReveal(curY);
+      // When auto-centering, pan the dot live so it tracks the sheet the
+      // same way the pills fade — no end-of-drag jump.
+      followFrameDuringDrag();
+    });
+    function end(e) {
+      if (!dragging) return;
+      dragging = false;
+      try {
+        drag.releasePointerCapture(e.pointerId);
+      } catch { }
+      if (moved < 5) {
+        document.body.removeAttribute('data-dragging');
+        sheet.style.removeProperty('--fcb-reveal');
+        sheet.style.removeProperty('--detail-reveal');
+        wrap.style.removeProperty('--detail-reveal'); // ← ADD
+        cycleUp();
+        return;
+      }
+      const projected = clmp(curY + vel * 160, 0, maxY);
+      snapTo(nearestName(projected), true);
+    }
+    drag.addEventListener('pointerup', end);
+    drag.addEventListener('pointercancel', end);
+    drag.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        cycleUp();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const cur = document.body.getAttribute('data-detent') || 'collapsed';
+        snapTo(cur === 'collapsed' ? 'half' : 'full', true);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const cur = document.body.getAttribute('data-detent') || 'collapsed';
+        snapTo(cur === 'full' ? 'half' : 'collapsed', true);
+      }
+    });
+    window.addEventListener('resize', () => requestAnimationFrame(measure));
+    window.addEventListener('orientationchange', () =>
+      setTimeout(measure, 250)
+    );
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () =>
+        requestAnimationFrame(measure)
+      );
+    }
+
+    state.sheet = {
+      measure,
+      expand: () => snapTo('full', true),
+      half: () => snapTo('half', true),
+      collapse: () => snapTo('collapsed', true),
+    };
+    applyDetentAttr('collapsed');
+    requestAnimationFrame(() => requestAnimationFrame(measure));
+  }
+
+  // Measure ONLY the sheet's actual covered band, from its visual (transformed) top.
+  function bottomObstructionPx() {
+    const mapEl = state.map && state.map.getContainer();
+    const sheetEl = els.sheet;
+    if (!mapEl || !sheetEl) return 0;
+    const mapR = mapEl.getBoundingClientRect();
+    const shR = sheetEl.getBoundingClientRect();
+    const covered = mapR.bottom - shR.top;
+    return clamp(covered, 0, mapR.height - 120);
+  }
+  // Keep the user pinned at the screen pixel captured when locking.
+  function holdLockedView(latlng, animate) {
+    if (!state.map || !state.lockOffset) return;
+    const z = state.map.getZoom();
+    const size = state.map.getSize();
+    // Desired screen point for the user = center + saved offset.
+    const desiredPt = L.point(
+      size.x / 2 + state.lockOffset.x,
+      size.y / 2 + state.lockOffset.y
+    );
+    const userPt = state.map.project([latlng.lat, latlng.lng], z);
+    // Map center must shift so the user lands on desiredPt.
+    const centerPt = userPt.subtract(
+      desiredPt.subtract(L.point(size.x / 2, size.y / 2))
+    );
+    state.map.setView(state.map.unproject(centerPt, z), z, { animate });
+  }
+  // Center `latlng` in the middle of the visible (un-obstructed) band.
+  function centerMapOn(latlng, zoom, animate) {
+    if (!state.map) return;
+    const z = zoom != null ? zoom : state.map.getZoom();
+    const dy = bottomObstructionPx() / 2;
+    const pt = state.map.project([latlng.lat, latlng.lng], z);
+    const shifted = L.point(pt.x, pt.y + dy);
+    state.map.setView(state.map.unproject(shifted, z), z, { animate });
+  }
+  function attachPressGesture(
+    el,
+    { onTap, onLongPress, delay = 550, moveTol = 10 }
+  ) {
+    let id = null,
+      sx = 0,
+      sy = 0,
+      timer = null,
+      moved = false,
+      longFired = false;
+    let suppressUntil = 0;
+    const clear = () => {
+      clearTimeout(timer);
+      timer = null;
+    };
+
+    el.addEventListener('pointerdown', (e) => {
+      if (id !== null) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      id = e.pointerId;
+      sx = e.clientX;
+      sy = e.clientY;
+      moved = false;
+      longFired = false;
+      try {
+        el.setPointerCapture(id);
+      } catch { }
+      timer = setTimeout(() => {
+        if (moved) return;
+        longFired = true;
+        suppressUntil = Date.now() + 700;
+        haptic(30);
+        onLongPress && onLongPress();
+      }, delay);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== id || moved) return;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > moveTol) {
+        moved = true;
+        clear();
+      }
+    });
+    const finish = (e, fireTap) => {
+      if (e.pointerId !== id) return;
+      clear();
+      try {
+        el.releasePointerCapture(id);
+      } catch { }
+      if (fireTap && !longFired && !moved) {
+        suppressUntil = Date.now() + 400;
+        onTap && onTap();
+      }
+      id = null;
+    };
+    el.addEventListener('pointerup', (e) => finish(e, true));
+    el.addEventListener('pointercancel', (e) => finish(e, false));
+    el.addEventListener(
+      'click',
+      (e) => {
+        if (Date.now() < suppressUntil) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+      },
+      true
+    );
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+  function syncFollowFab() {
+    const b = els.recenterBtn,
+      m = state.followMode;
+    if (!b) return;
+    b.classList.toggle('locked', m === FollowMode.LOCKED);
+    state.followUser = m !== FollowMode.IDLE;
+    b.setAttribute('aria-pressed', String(m !== FollowMode.IDLE));
+    b.setAttribute(
+      'aria-label',
+      m === FollowMode.IDLE
+        ? 'Center on my location — hold to lock'
+        : 'Locked to your position — tap or pan to release'
+    );
+  }
+
+  // Tap: idle <-> follow. (No re-zoom when turning OFF.)
+  function recenterOnUser() {
+    initMap();
+    if (!state.map) return;
+    if (!state.loc) {
+      setNotice(
+        'No location yet. Tap the GPS pill to start locating.',
+        'greenish'
+      );
+      haptic(5);
+      return;
+    }
+    // If locked, just release it — no re-center.
+    if (state.followMode === FollowMode.LOCKED) {
+      state.followMode = FollowMode.IDLE;
+      syncFollowFab();
+      setNotice('Lock released.', 'greenish');
+      haptic(5);
+      return;
+    }
+    // One-shot center AND zoom: bring the view to at least zoom 16
+    // so you can see the hole detail. Never zooms *out* on you —
+    // if you're already at 19 looking at a green it stays there.
+    const targetZoom = Math.max(state.map.getZoom(), 16);
+    centerMapOn(
+      { lat: state.loc.lat, lng: state.loc.lng },
+      targetZoom,
+      !reduceMotion
+    );
+    syncFollowFab();
+    setNotice('Centered on you — hold to lock.', 'greenish');
+    haptic(5);
+  }
+
+  // Long-press: lock the user at their CURRENT screen position and hold it there.
+  function lockOnUser() {
+    initMap();
+    if (!state.map || !state.loc) {
+      setNotice(
+        'No location yet. Tap the GPS pill to start locating.',
+        'greenish'
+      );
+      return;
+    }
+    // Where is the user on screen right now, relative to the map center?
+    const size = state.map.getSize();
+    const userPt = state.map.latLngToContainerPoint([
+      state.loc.lat,
+      state.loc.lng,
+    ]);
+    state.lockOffset = {
+      x: userPt.x - size.x / 2,
+      y: userPt.y - size.y / 2,
+    };
+    state.followMode = FollowMode.LOCKED;
+    syncFollowFab();
+    els.recenterBtn.classList.add('just-locked');
+    setTimeout(() => els.recenterBtn.classList.remove('just-locked'), 600);
+    setNotice(
+      'Locked to your current screen position. Pan the map to release.',
+      'greenish'
+    );
+  }
+
+  function initGlobalEvents() {
+    els.proToggle.addEventListener('change', () =>
+      setPro(els.proToggle.checked)
+    );
+    els.darkToggle.addEventListener('click', () => setDark(!state.prefs.dark));
+    els.gpsChip.addEventListener('click', () => {
+      haptic(8);
+      if (!state.gpsRunning) {
+        startGPS();
+      }
+      // If already running, do nothing — no pause, no silent stop.
+    });
+    if (els.recenterBtn) {
+      attachPressGesture(els.recenterBtn, {
+        onTap: recenterOnUser,
+        onLongPress: lockOnUser,
+      });
+    }
+    els.setFrontBtn.addEventListener('click', () => armPlaceMode('front'));
+    els.setCenterBtn.addEventListener('click', () => armPlaceMode('center'));
+    els.setBackBtn.addEventListener('click', () => armPlaceMode('back'));
+    els.clearFbBtn.addEventListener('click', () => {
+      state.frontPt = null;
+      state.backPt = null;
+      state.greenCenter = null;
+
+      disarmPlaceMode();
+      clearFbMarkers();
+      renderFcb();
+      updateLine();
+
+      // Return immediately to target-only recommendation behavior.
+      if (state.target) {
+        calculateRange();
+        scheduleContextUpdate();
+      }
+
+      haptic(6);
+      setNotice(
+        'Green cleared. Recommendations now use your selected target only.',
+        'greenish'
+      );
+    });
+    // Practice reset button (in sheet)
+    const prb = document.getElementById('practiceResetBtn');
+    if (prb) {
+      prb.addEventListener('click', () => {
+        if (
+          !confirm(
+            'Reset all practice shot data? This clears your dispersion model.'
+          )
+        )
+          return;
+        clearShotData();
+        renderPracticeSection();
+        if (state.target && state.loc) calculateRange();
+        haptic(12);
+      });
+    }
+    window.addEventListener('online', () => {
+      if (state.loc || state.target) scheduleContextUpdate();
+    });
+    window.addEventListener('offline', () => {
+      els.weatherStatus.textContent = 'Offline';
+      setNotice(
+        'Offline. Caddy uses cached weather/elevation if available, otherwise neutral defaults.',
+        'greenish'
+      );
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (state.roundSession) saveRoundSession();
+        stopGPS();
+        return;
+      }
+
+      const needsGps =
+        state.prefs.activeTab === 'range' ||
+        state.prefs.activeTab === 'round' ||
+        roundStatus() !== 'idle';
+
+      if (state.prefs.gpsEnabled && needsGps && !state.gpsRunning) {
+        kalman.reset();
+        state.fixSamples = [];
+        state.lastAcceptedFix = null;
+        state.consecutiveRejects = 0;
+        startGPS(true);
+      }
+    });
+    const persistSession = () => {
+      if (state.roundSession) saveRoundSession();
+    };
+    window.addEventListener('pagehide', () => {
+      persistSession();
+      stopGPS();
+    });
+    window.addEventListener('beforeunload', () => {
+      persistSession();
+      stopGPS();
+    });
+  }
+
+  function migrateRoundSession() {
+    if (!state.roundSession) return;
+
+    if (!state.roundSession.course) {
+      state.roundSession.course = makeCasualCourse();
+    }
+
+    state.roundSession.course = normalizeCourse(state.roundSession.course);
+
+    if (!Array.isArray(state.roundSession.scorecard)) {
+      state.roundSession.scorecard = Array.isArray(state.round)
+        ? state.round
+        : emptyRound();
+    }
+
+    state.roundSession.hole = clamp(
+      Math.round(
+        num(state.roundSession.hole || state.roundSession.currentHole, 1)
+      ),
+      1,
+      18
+    );
+
+    state.roundSession.currentHole = state.roundSession.hole;
+
+    state.round = state.roundSession.scorecard;
+
+    save('caddy:round', state.round);
+    saveRoundSession();
+  }
+
+  function bootstrap() {
+    // iOS sometimes ignores user-scalable=no — cancel synthetic
+    // double-tap-zoom on app chrome (never the map).
+    let _lastTouch = 0;
+    document.addEventListener(
+      'touchend',
+      (e) => {
+        if (e.target.closest && e.target.closest('#map')) return;
+        const now = Date.now();
+        if (now - _lastTouch <= 320) e.preventDefault();
+        _lastTouch = now;
+      },
+      { passive: false }
+    );
+    setManifest();
+    registerServiceWorker();
+    const lt = load('caddy:lastTarget', null);
+    if (lt && Number.isFinite(lt.lat)) state.target = lt;
+    applyPrefs();
+    initOnboard();
+    initGlobalEvents();
+    initSettingsSheet();
+    initClubsEvents();
+    initManualCalc();
+    initRoundEvents();
+    initStatsEvents();
+
+    initTabs();
+    initLayerSeg();
+    initSheet();
+
+    initRoundSetup();
+    initRoundMode();
+
+    initAdvice();
+    initModeToggle();
+
+    applyMode();
+    renderClubs();
+
+    migrateRoundSession();
+
+    renderRound();
+    renderStats();
+    updateGpsUI();
+    updateWeatherUI();
+    renderClubChips(state.lastCalc ? state.lastCalc.playsLikeYd : 0);
+    if (state.loc) {
+      updateGpsUI();
+      setNotice(
+        'Loaded last-known location. Tap the GPS pill for a fresh high-accuracy fix, or tap the map to measure.',
+        'greenish'
+      );
+      if (state.target) {
+        initMap();
+        updateUserMarker();
+        if (!state.markers.target && state.mapReady)
+          state.markers.target = L.marker(
+            [state.target.lat, state.target.lng],
+            { icon: targetIcon(), zIndexOffset: 850 }
+          ).addTo(state.map);
+        updateLine();
+        calculateRange();
+        scheduleContextUpdate();
+      }
+    }
+    if (
+      (window.matchMedia &&
+        window.matchMedia('(display-mode: standalone)').matches) ||
+      window.navigator.standalone
+    ) {
+      els.topSubtitle.textContent = 'Standalone PWA';
+    }
+  }
+
+  // ============================================================
+  //  BLOCK 0 — PRESERVED CONSTANTS (survived Cut 2)
+  // ============================================================
+
+  const SHOTLOG_KEY = 'caddy:shotLog:v1'; // localStorage key for the tracked-shot log — MUST NOT CHANGE (user data)
+  const COMPASS_16 = [
+    'N',
+    'NNE',
+    'NE',
+    'ENE',
+    'E',
+    'ESE',
+    'SE',
+    'SSE',
+    'S',
+    'SSW',
+    'SW',
+    'WSW',
+    'W',
+    'WNW',
+    'NW',
+    'NNW',
+  ]; // 16-point compass, 22.5° bins — Bowditch, American Practical Navigator
+
+  // ============================================================
+  //  BLOCK 1 — EXACT CONSTANTS + NUMERICAL / STATISTICAL CORE
+  // ============================================================
+
+  // --- Reference ellipsoid & Earth model ---
+  const WGS84_A = 6378137.0; // WGS-84 semi-major axis, m — NIMA TR8350.2 3rd ed. (2000)
+  const WGS84_F = 1 / 298.257223563; // WGS-84 flattening — NIMA TR8350.2 3rd ed. (2000)
+  const WGS84_B = WGS84_A * (1 - WGS84_F); // derived semi-minor axis, m
+  const WGS84_E2 = WGS84_F * (2 - WGS84_F); // first eccentricity squared, derived
+  const OMEGA_EARTH = 7.292115e-5; // Earth angular rate, rad/s — WGS-84 / IERS Conventions 2010
+  const GRAV_EQ = 9.7803253359; // Somigliana normal gravity at equator, m/s² — NIMA TR8350.2
+  const GRAV_K = 0.00193185265241; // Somigliana coefficient k — NIMA TR8350.2
+  const GRAV_M = 0.00344978650684; // Somigliana m = ω²a²b/GM — NIMA TR8350.2
+  const R = 6371008.7714; // IUGG mean Earth radius, m — legacy fallback paths only
+
+  // --- Exact conversions (defined, not measured) ---
+  const YD_TO_M = 0.9144; // international yard, exact — 1959 Intl. Yard & Pound Agreement / NIST SP 811
+  const FT_TO_M = 0.3048; // international foot, exact — NIST SP 811
+  const MPH_TO_MPS = 0.44704; // statute mph, exact — NIST SP 811
+  const M_TO_YD = 1 / YD_TO_M; // 1.0936132983377078 (removes the 3e-8 error in the old literal)
+  const M_TO_FT = 1 / FT_TO_M; // 3.2808398950131235
+  const MPS_TO_MPH = 1 / MPH_TO_MPS;
+  const RPM_TO_RADS = Math.PI / 30; // exact: 2π/60
+  const KELVIN_0C = 273.15; // ice point, exact by definition of °C — BIPM SI Brochure 9th ed.
+  const EPS = 1e-12;
+
+  const smoothstep = (a, b, x) => {
+    if (b === a) return x < a ? 0 : 1;
+    const t = clamp((x - a) / (b - a), 0, 1);
+    return t * t * (3 - 2 * t);
+  };
+  const hypot2 = (a, b) => Math.sqrt(a * a + b * b);
+
+  // ---------- Special functions ----------
+  const LANCZOS_G = 7; // Lanczos g parameter, n=9 — Press et al., Numerical Recipes 3rd ed. §6.1
+  const LANCZOS_C = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+  ];
+  function logGamma(z) {
+    if (z < 0.5)
+      return Math.log(Math.PI / Math.sin(Math.PI * z)) - logGamma(1 - z);
+    z -= 1;
+    let x = LANCZOS_C[0];
+    for (let i = 1; i < LANCZOS_G + 2; i++) x += LANCZOS_C[i] / (z + i);
+    const t = z + LANCZOS_G + 0.5;
+    return (
+      0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x)
+    );
+  }
+  function gammaP(a, x) {
+    // regularized P(a,x) — Numerical Recipes 3rd ed. §6.2
+    if (x <= 0 || a <= 0) return 0;
+    if (x < a + 1) {
+      let ap = a,
+        sum = 1 / a,
+        del = sum;
+      for (let n = 1; n < 400; n++) {
+        ap += 1;
+        del *= x / ap;
+        sum += del;
+        if (Math.abs(del) < Math.abs(sum) * 1e-16) break;
+      }
+      return sum * Math.exp(-x + a * Math.log(x) - logGamma(a));
+    }
+    const FPMIN = 1e-300;
+    let b = x + 1 - a,
+      c = 1 / FPMIN,
+      d = 1 / b,
+      h = d;
+    for (let i = 1; i < 400; i++) {
+      const an = -i * (i - a);
+      b += 2;
+      d = an * d + b;
+      if (Math.abs(d) < FPMIN) d = FPMIN;
+      c = b + an / c;
+      if (Math.abs(c) < FPMIN) c = FPMIN;
+      d = 1 / d;
+      const del = d * c;
+      h *= del;
+      if (Math.abs(del - 1) < 1e-16) break;
+    }
+    return 1 - Math.exp(-x + a * Math.log(x) - logGamma(a)) * h;
+  }
+  const erf = (x) => (x < 0 ? -gammaP(0.5, x * x) : gammaP(0.5, x * x));
+  const erfc = (x) => 1 - erf(x);
+  const normCdf = (z) => 0.5 * erfc(-z / Math.SQRT2);
+  const normPdf = (z) => Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI);
+
+  const AK_A = [
+    -3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+    1.38357751867269e2, -3.066479806614716e1, 2.506628277459239,
+  ]; // Acklam inverse-normal a[] — P. J. Acklam (2003)
+  const AK_B = [
+    -5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+    6.680131188771972e1, -1.328068155288572e1,
+  ]; // Acklam b[] — P. J. Acklam (2003)
+  const AK_C = [
+    -7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838,
+    -2.549732539343734, 4.374664141464968, 2.938163982698783,
+  ]; // Acklam c[] (tails) — P. J. Acklam (2003)
+  const AK_D = [
+    7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996,
+    3.754408661907416,
+  ]; // Acklam d[] (tails) — P. J. Acklam (2003)
+  function invNorm(p) {
+    if (!(p > 0) || !(p < 1)) return p <= 0 ? -Infinity : Infinity;
+    const pLow = 0.02425,
+      pHigh = 1 - pLow;
+    let x;
+    if (p < pLow) {
+      const q = Math.sqrt(-2 * Math.log(p));
+      x =
+        (((((AK_C[0] * q + AK_C[1]) * q + AK_C[2]) * q + AK_C[3]) * q +
+          AK_C[4]) *
+          q +
+          AK_C[5]) /
+        ((((AK_D[0] * q + AK_D[1]) * q + AK_D[2]) * q + AK_D[3]) * q + 1);
+    } else if (p <= pHigh) {
+      const q = p - 0.5,
+        r = q * q;
+      x =
+        ((((((AK_A[0] * r + AK_A[1]) * r + AK_A[2]) * r + AK_A[3]) * r +
+          AK_A[4]) *
+          r +
+          AK_A[5]) *
+          q) /
+        (((((AK_B[0] * r + AK_B[1]) * r + AK_B[2]) * r + AK_B[3]) * r +
+          AK_B[4]) *
+          r +
+          1);
+    } else {
+      const q = Math.sqrt(-2 * Math.log(1 - p));
+      x =
+        -(
+          ((((AK_C[0] * q + AK_C[1]) * q + AK_C[2]) * q + AK_C[3]) * q +
+            AK_C[4]) *
+          q +
+          AK_C[5]
+        ) /
+        ((((AK_D[0] * q + AK_D[1]) * q + AK_D[2]) * q + AK_D[3]) * q + 1);
+    }
+    const e = normCdf(x) - p,
+      u = e / normPdf(x); // one Halley refinement — Numerical Recipes 3rd ed. §9.4
+    return x - u / (1 + (x * u) / 2);
+  }
+  function betacf(a, b, x) {
+    // incomplete-beta continued fraction — NR 3rd ed. §6.4
+    const FPMIN = 1e-300,
+      qab = a + b,
+      qap = a + 1,
+      qam = a - 1;
+    let c = 1,
+      d = 1 - (qab * x) / qap;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    d = 1 / d;
+    let h = d;
+    for (let m = 1; m <= 400; m++) {
+      const m2 = 2 * m;
+      let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+      d = 1 + aa * d;
+      if (Math.abs(d) < FPMIN) d = FPMIN;
+      c = 1 + aa / c;
+      if (Math.abs(c) < FPMIN) c = FPMIN;
+      d = 1 / d;
+      h *= d * c;
+      aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+      d = 1 + aa * d;
+      if (Math.abs(d) < FPMIN) d = FPMIN;
+      c = 1 + aa / c;
+      if (Math.abs(c) < FPMIN) c = FPMIN;
+      d = 1 / d;
+      const del = d * c;
+      h *= del;
+      if (Math.abs(del - 1) < 1e-15) break;
+    }
+    return h;
+  }
+  function ibeta(a, b, x) {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    const lb =
+      logGamma(a + b) -
+      logGamma(a) -
+      logGamma(b) +
+      a * Math.log(x) +
+      b * Math.log(1 - x);
+    return x < (a + 1) / (a + b + 2)
+      ? (Math.exp(lb) * betacf(a, b, x)) / a
+      : 1 - (Math.exp(lb) * betacf(b, a, 1 - x)) / b;
+  }
+  function tCdf(t, nu) {
+    // Student-t CDF via incomplete beta — Abramowitz & Stegun 26.5.27
+    if (!Number.isFinite(t)) return t > 0 ? 1 : 0;
+    if (nu > 1e7) return normCdf(t);
+    const p = 0.5 * ibeta(nu / 2, 0.5, nu / (nu + t * t));
+    return t > 0 ? 1 - p : p;
+  }
+  function tQuantile(p, nu) {
+    if (!(nu > 0) || nu > 1e7) return invNorm(p);
+    let lo = -80,
+      hi = 80;
+    const seed = invNorm(p);
+    if (tCdf(seed, nu) > p) hi = seed;
+    else lo = seed;
+    for (let i = 0; i < 90; i++) {
+      const mid = 0.5 * (lo + hi);
+      if (tCdf(mid, nu) < p) lo = mid;
+      else hi = mid;
+      if (hi - lo < 1e-11) break;
+    }
+    return 0.5 * (lo + hi);
+  }
+  function chi2Inv(p, df) {
+    if (df === 2) return -2 * Math.log(1 - p); // exact: χ²₂ CDF = 1 - exp(-x/2)
+    let lo = 0,
+      hi = Math.max(30, 4 * df + 60);
+    for (let i = 0; i < 220; i++) {
+      const mid = 0.5 * (lo + hi);
+      if (gammaP(df / 2, mid / 2) < p) lo = mid;
+      else hi = mid;
+    }
+    return 0.5 * (lo + hi);
+  }
+
+  // ---------- Robust & descriptive statistics ----------
+  const MAD_TO_SIGMA = 1.4826; // MAD→σ consistency factor for a normal — Rousseeuw & Croux, JASA 88 (1993) 1273
+  const RAYLEIGH_95 = 2.4477468306; // 95th percentile of the Rayleigh dist = sqrt(-2 ln 0.05) — standard CEP↔R95 conversion
+  function quantileSorted(sorted, p) {
+    const n = sorted.length;
+    if (!n) return NaN;
+    if (n === 1) return sorted[0];
+    const h = (n - 1) * clamp(p, 0, 1);
+    const lo = Math.floor(h),
+      hi = Math.ceil(h);
+    return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo]); // type-7 quantile — Hyndman & Fan, Am. Stat. 50 (1996) 361
+  }
+  const median = (arr) =>
+    quantileSorted(
+      [...arr].sort((a, b) => a - b),
+      0.5
+    );
+  function madSigma(arr) {
+    if (arr.length < 2) return NaN;
+    const m = median(arr);
+    return MAD_TO_SIGMA * median(arr.map((x) => Math.abs(x - m)));
+  }
+  function c4(n) {
+    // unbiasing factor for the sample SD of a normal — Kenney & Keeping, Math. of Statistics Pt.1 3rd ed.
+    if (n < 2) return NaN;
+    if (n > 400) return 1 - 0.75 / n;
+    return (
+      Math.sqrt(2 / (n - 1)) * Math.exp(logGamma(n / 2) - logGamma((n - 1) / 2))
+    );
+  }
+  function weightedMoments(values, weights) {
+    // weighted Welford — Welford, Technometrics 4 (1962) 419; West, CACM 22 (1979) 532
+    let W = 0,
+      W2 = 0,
+      mean = 0,
+      S = 0;
+    for (let i = 0; i < values.length; i++) {
+      const w = weights[i];
+      if (!(w > 0)) continue;
+      W += w;
+      W2 += w * w;
+      const d = values[i] - mean;
+      mean += (w / W) * d;
+      S += w * d * (values[i] - mean);
+    }
+    const nEff = W2 > 0 ? (W * W) / W2 : 0; // Kish effective sample size — Kish, Survey Sampling (1965) §8.2
+    const variance = W > 0 && nEff > 1 ? (S / W) * (nEff / (nEff - 1)) : NaN;
+    return { W, mean, variance, nEff };
+  }
+  function theilSen(xs, ys) {
+    // median-of-slopes regression — Theil (1950); Sen, JASA 63 (1968) 1379
+    const n = Math.min(xs.length, ys.length);
+    if (n < 3) return null;
+    const slopes = [];
+    for (let i = 0; i < n - 1; i++)
+      for (let j = i + 1; j < n; j++) {
+        const dx = xs[j] - xs[i];
+        if (Math.abs(dx) > EPS) slopes.push((ys[j] - ys[i]) / dx);
+      }
+    if (!slopes.length) return null;
+    const slope = median(slopes);
+    return { slope, intercept: median(ys.map((y, i) => y - slope * xs[i])), n };
+  }
+  function wilsonInterval(k, n, conf = 0.95) {
+    // score interval for a proportion — Wilson, JASA 22 (1927) 209
+    if (!n) return { p: NaN, lo: NaN, hi: NaN, n: 0 };
+    const z = invNorm(1 - (1 - conf) / 2),
+      p = k / n,
+      z2 = z * z,
+      d = 1 + z2 / n;
+    const c = p + z2 / (2 * n);
+    const h = (z / d) * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n));
+    return { p, lo: clamp(c / d - h, 0, 1), hi: clamp(c / d + h, 0, 1), n };
+  }
+
+  // ---------- Shape-preserving interpolation ----------
+  function pchip(xs, ys) {
+    // monotone cubic — Fritsch & Carlson, SIAM J. Numer. Anal. 17 (1980) 238
+    const n = xs.length;
+    const h = new Array(n - 1),
+      delta = new Array(n - 1),
+      m = new Array(n).fill(0);
+    for (let i = 0; i < n - 1; i++) {
+      h[i] = xs[i + 1] - xs[i];
+      delta[i] = (ys[i + 1] - ys[i]) / h[i];
+    }
+    m[0] = delta[0];
+    m[n - 1] = delta[n - 2];
+    for (let i = 1; i < n - 1; i++) {
+      if (delta[i - 1] * delta[i] <= 0) {
+        m[i] = 0;
+        continue;
+      }
+      const w1 = 2 * h[i] + h[i - 1],
+        w2 = h[i] + 2 * h[i - 1];
+      m[i] = (w1 + w2) / (w1 / delta[i - 1] + w2 / delta[i]);
+    }
+    return function evalAt(x) {
+      if (x <= xs[0]) return ys[0] + m[0] * (x - xs[0]);
+      if (x >= xs[n - 1]) return ys[n - 1] + m[n - 1] * (x - xs[n - 1]);
+      let lo = 0,
+        hi = n - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (xs[mid] > x) hi = mid;
+        else lo = mid;
+      }
+      const t = (x - xs[lo]) / h[lo],
+        t2 = t * t,
+        t3 = t2 * t;
+      return (
+        (2 * t3 - 3 * t2 + 1) * ys[lo] +
+        (t3 - 2 * t2 + t) * h[lo] * m[lo] +
+        (-2 * t3 + 3 * t2) * ys[lo + 1] +
+        (t3 - t2) * h[lo] * m[lo + 1]
+      );
+    };
+  }
+
+  // ---------- Quadrature over a normal factor (9-node truncated Gauss–Legendre) ----------
+  const GL9_X = [
+    -0.9681602395076261, -0.8360311073266358, -0.6133714327005904,
+    -0.3242534234038089, 0, 0.3242534234038089, 0.6133714327005904,
+    0.8360311073266358, 0.9681602395076261,
+  ]; // 9-pt Gauss–Legendre abscissae — Abramowitz & Stegun Table 25.4
+  const GL9_W = [
+    0.0812743883615744, 0.1806481606948574, 0.2606106964029354,
+    0.3123470770400029, 0.3302393550012598, 0.3123470770400029,
+    0.2606106964029354, 0.1806481606948574, 0.0812743883615744,
+  ]; // matching weights — A&S Table 25.4
+  const NORMAL_TRUNC_SIGMA = 3.5; // ±3.5σ captures 99.954% of a normal; tails are club-choice-irrelevant
+  function normalNodes(nSigma = NORMAL_TRUNC_SIGMA) {
+    const zs = GL9_X.map((x) => x * nSigma);
+    const raw = zs.map((z, i) => GL9_W[i] * normPdf(z) * nSigma);
+    const tot = raw.reduce((a, b) => a + b, 0);
+    return { zs, ws: raw.map((w) => w / tot) };
+  }
+  const NORM_NODES = normalNodes();
+
+  function makeLRU(limit) {
+    const map = new Map();
+    return {
+      get(k) {
+        if (!map.has(k)) return undefined;
+        const v = map.get(k);
+        map.delete(k);
+        map.set(k, v);
+        return v;
+      },
+      set(k, v) {
+        if (map.has(k)) map.delete(k);
+        map.set(k, v);
+        if (map.size > limit) map.delete(map.keys().next().value);
+      },
+      clear() {
+        map.clear();
+      },
+    };
+  }
+  // ============================================================
+  //  BLOCK 2 — GEODESY (replaces haversineMeters, initialBearingDeg, angleDiff)
+  // ============================================================
+
+  function angleDiff(a, b) {
+    let d = (a - b) % 360;
+    if (d > 180) d -= 360;
+    if (d <= -180) d += 360;
+    return d;
+  }
+
+  const VINCENTY_TOL = 1e-13; // ~0.06 mm in λ at Earth scale — T. Vincenty, Survey Review XXIII/176 (1975) 88
+  const VINCENTY_MAXIT = 60; // converges in 3–5 iterations for s < 10 km
+
+  function geodesicInverse(p1, p2) {
+    const a = WGS84_A,
+      b = WGS84_B,
+      f = WGS84_F;
+    const L = d2r(p2.lng - p1.lng);
+    const U1 = Math.atan((1 - f) * Math.tan(d2r(p1.lat)));
+    const U2 = Math.atan((1 - f) * Math.tan(d2r(p2.lat)));
+    const sU1 = Math.sin(U1),
+      cU1 = Math.cos(U1);
+    const sU2 = Math.sin(U2),
+      cU2 = Math.cos(U2);
+    let lam = L,
+      lamPrev,
+      it = 0;
+    let sLam = 0,
+      cLam = 1,
+      sSig = 0,
+      cSig = 1,
+      sig = 0,
+      c2Alpha = 1,
+      cos2SigM = 1;
+    do {
+      sLam = Math.sin(lam);
+      cLam = Math.cos(lam);
+      sSig = hypot2(cU2 * sLam, cU1 * sU2 - sU1 * cU2 * cLam);
+      if (sSig < EPS) return { s: 0, az1: 0, az2: 0, converged: true };
+      cSig = sU1 * sU2 + cU1 * cU2 * cLam;
+      sig = Math.atan2(sSig, cSig);
+      const sAlpha = (cU1 * cU2 * sLam) / sSig;
+      c2Alpha = Math.max(0, 1 - sAlpha * sAlpha);
+      cos2SigM = c2Alpha < EPS ? 0 : cSig - (2 * sU1 * sU2) / c2Alpha;
+      const C = (f / 16) * c2Alpha * (4 + f * (4 - 3 * c2Alpha));
+      lamPrev = lam;
+      lam =
+        L +
+        (1 - C) *
+        f *
+        sAlpha *
+        (sig +
+          C * sSig * (cos2SigM + C * cSig * (-1 + 2 * cos2SigM * cos2SigM)));
+    } while (Math.abs(lam - lamPrev) > VINCENTY_TOL && ++it < VINCENTY_MAXIT);
+
+    if (it >= VINCENTY_MAXIT) {
+      const dp = d2r(p2.lat - p1.lat),
+        dl = d2r(p2.lng - p1.lng);
+      const hs =
+        Math.sin(dp / 2) ** 2 +
+        Math.cos(d2r(p1.lat)) * Math.cos(d2r(p2.lat)) * Math.sin(dl / 2) ** 2;
+      const s = 2 * R * Math.atan2(Math.sqrt(hs), Math.sqrt(1 - hs));
+      const y = Math.sin(dl) * Math.cos(d2r(p2.lat));
+      const x =
+        Math.cos(d2r(p1.lat)) * Math.sin(d2r(p2.lat)) -
+        Math.sin(d2r(p1.lat)) * Math.cos(d2r(p2.lat)) * Math.cos(dl);
+      const az = norm(r2d(Math.atan2(y, x)));
+      return { s, az1: az, az2: az, converged: false };
+    }
+    const uSq = (c2Alpha * (a * a - b * b)) / (b * b);
+    const A =
+      1 + (uSq / 16384) * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
+    const B = (uSq / 1024) * (256 + uSq * (-128 + uSq * (74 - 47 * uSq)));
+    const dSig =
+      B *
+      sSig *
+      (cos2SigM +
+        (B / 4) *
+        (cSig * (-1 + 2 * cos2SigM * cos2SigM) -
+          (B / 6) *
+          cos2SigM *
+          (-3 + 4 * sSig * sSig) *
+          (-3 + 4 * cos2SigM * cos2SigM)));
+    return {
+      s: b * A * (sig - dSig),
+      az1: norm(r2d(Math.atan2(cU2 * sLam, cU1 * sU2 - sU1 * cU2 * cLam))),
+      az2: norm(r2d(Math.atan2(cU1 * sLam, -sU1 * cU2 + cU1 * sU2 * cLam))),
+      converged: true,
+    };
+  }
+
+  function geodesicDirect(p, azDeg, sMeters) {
+    const a = WGS84_A,
+      b = WGS84_B,
+      f = WGS84_F;
+    const alpha1 = d2r(norm(azDeg));
+    const sA1 = Math.sin(alpha1),
+      cA1 = Math.cos(alpha1);
+    const tanU1 = (1 - f) * Math.tan(d2r(p.lat));
+    const cU1 = 1 / Math.sqrt(1 + tanU1 * tanU1),
+      sU1 = tanU1 * cU1;
+    const sigma1 = Math.atan2(tanU1, cA1);
+    const sAlpha = cU1 * sA1,
+      c2Alpha = 1 - sAlpha * sAlpha;
+    const uSq = (c2Alpha * (a * a - b * b)) / (b * b);
+    const A =
+      1 + (uSq / 16384) * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
+    const B = (uSq / 1024) * (256 + uSq * (-128 + uSq * (74 - 47 * uSq)));
+    let sigma = sMeters / (b * A),
+      sigmaPrev,
+      it = 0,
+      sSig = 0,
+      cSig = 1,
+      cos2SigM = 1;
+    do {
+      cos2SigM = Math.cos(2 * sigma1 + sigma);
+      sSig = Math.sin(sigma);
+      cSig = Math.cos(sigma);
+      const dSig =
+        B *
+        sSig *
+        (cos2SigM +
+          (B / 4) *
+          (cSig * (-1 + 2 * cos2SigM * cos2SigM) -
+            (B / 6) *
+            cos2SigM *
+            (-3 + 4 * sSig * sSig) *
+            (-3 + 4 * cos2SigM * cos2SigM)));
+      sigmaPrev = sigma;
+      sigma = sMeters / (b * A) + dSig;
+    } while (
+      Math.abs(sigma - sigmaPrev) > VINCENTY_TOL &&
+      ++it < VINCENTY_MAXIT
+    );
+    const tmp = sU1 * sSig - cU1 * cSig * cA1;
+    const lat2 = Math.atan2(
+      sU1 * cSig + cU1 * sSig * cA1,
+      (1 - f) * Math.sqrt(sAlpha * sAlpha + tmp * tmp)
+    );
+    const lambda = Math.atan2(sSig * sA1, cU1 * cSig - sU1 * sSig * cA1);
+    const C = (f / 16) * c2Alpha * (4 + f * (4 - 3 * c2Alpha));
+    const Lo =
+      lambda -
+      (1 - C) *
+      f *
+      sAlpha *
+      (sigma +
+        C * sSig * (cos2SigM + C * cSig * (-1 + 2 * cos2SigM * cos2SigM)));
+    return { lat: r2d(lat2), lng: p.lng + r2d(Lo) };
+  }
+
+  // PUBLIC NAME PRESERVED — now the exact WGS-84 geodesic, not the spherical haversine.
+  // The geodesic between two lat/lngs is already the horizontal projection, so no slope
+  // correction is needed. Optional meanHeightM scales the arc to flight altitude.
+  function haversineMeters(a, b, meanHeightM) {
+    const g = geodesicInverse(a, b);
+    if (!Number.isFinite(meanHeightM) || meanHeightM === 0) return g.s;
+    const phi = d2r((a.lat + b.lat) / 2);
+    const s = Math.sin(phi),
+      W2 = 1 - WGS84_E2 * s * s;
+    const N = WGS84_A / Math.sqrt(W2); // prime-vertical radius of curvature
+    const M = (WGS84_A * (1 - WGS84_E2)) / (W2 * Math.sqrt(W2)); // meridional radius of curvature
+    const az = d2r(g.az1);
+    const Ralpha = 1 / (Math.cos(az) ** 2 / M + Math.sin(az) ** 2 / N); // Euler's radius in azimuth
+    return g.s * (1 + meanHeightM / Ralpha);
+  }
+
+  // PUBLIC NAME PRESERVED — geodesic forward azimuth.
+  function initialBearingDeg(a, b) {
+    return geodesicInverse(a, b).az1;
+  }
+
+  // Local ENU tangent frame; error < 1 cm inside 2 km.
+  function enuFrame(origin) {
+    const phi = d2r(origin.lat);
+    const s = Math.sin(phi),
+      W2 = 1 - WGS84_E2 * s * s;
+    const N = WGS84_A / Math.sqrt(W2);
+    const M = (WGS84_A * (1 - WGS84_E2)) / (W2 * Math.sqrt(W2));
+    return {
+      lat0: origin.lat,
+      lng0: origin.lng,
+      mPerDegLat: (M * Math.PI) / 180,
+      mPerDegLng: (N * Math.cos(phi) * Math.PI) / 180,
+    };
+  }
+  const toENU = (fr, p) => ({
+    e: (p.lng - fr.lng0) * fr.mPerDegLng,
+    n: (p.lat - fr.lat0) * fr.mPerDegLat,
+  });
+  const fromENU = (fr, e, n) => ({
+    lat: fr.lat0 + n / fr.mPerDegLat,
+    lng: fr.lng0 + e / fr.mPerDegLng,
+  });
+  function crossTrackYd(A, B, p) {
+    // signed perpendicular offset; + = right of A→B
+    const fr = enuFrame(A),
+      b = toENU(fr, B),
+      q = toENU(fr, p);
+    const len = hypot2(b.e, b.n);
+    if (len < EPS) return 0;
+    return (q.e * (b.n / len) - q.n * (b.e / len)) * M_TO_YD;
+  }
+  function alongTrackYd(A, B, p) {
+    const fr = enuFrame(A),
+      b = toENU(fr, B),
+      q = toENU(fr, p);
+    const len = hypot2(b.e, b.n);
+    if (len < EPS) return 0;
+    return ((q.e * b.e + q.n * b.n) / len) * M_TO_YD;
+  }
+  const midpointGeodesic = (A, B) => {
+    const g = geodesicInverse(A, B);
+    return geodesicDirect(A, g.az1, g.s / 2);
+  };
+  function gravityAt(latDeg, heightM) {
+    // Somigliana + 2nd-order free-air — NIMA TR8350.2 §4; Heiskanen & Moritz (1967) eq. 2-124
+    const s2 = Math.sin(d2r(num(latDeg, 40))) ** 2;
+    const g0 = (GRAV_EQ * (1 + GRAV_K * s2)) / Math.sqrt(1 - WGS84_E2 * s2);
+    const h = num(heightM, 0);
+    return (
+      g0 *
+      (1 -
+        (2 / WGS84_A) * (1 + WGS84_F + GRAV_M - 2 * WGS84_F * s2) * h +
+        (3 / (WGS84_A * WGS84_A)) * h * h)
+    );
+  }
+  // ============================================================
+  //  BLOCK 3 — ATMOSPHERE
+  // ============================================================
+
+  // CIPM-2007 moist-air density — Picard, Davis, Gläser & Fujii, Metrologia 45 (2008) 149. Rel. unc. 2.2e-5.
+  const CIPM_MA = 28.96546e-3; // molar mass of dry air, kg/mol — CIPM-2007 Table 1
+  const CIPM_MV = 18.01528e-3; // molar mass of water vapour, kg/mol — CIPM-2007 Table 1
+  const CIPM_R = 8.314472; // molar gas constant adopted by CIPM-2007, J/(mol·K)
+  const SVP_A = 1.2378847e-5; // saturation vapour pressure coeff. A, K⁻² — CIPM-2007 eq. A1.1
+  const SVP_B = -1.9121316e-2; // saturation vapour pressure coeff. B, K⁻¹ — CIPM-2007 eq. A1.1
+  const SVP_C = 33.93711047; // saturation vapour pressure coeff. C — CIPM-2007 eq. A1.1
+  const SVP_D = -6.3431645e3; // saturation vapour pressure coeff. D, K — CIPM-2007 eq. A1.1
+  const ENH_A = 1.00062; // enhancement factor α — CIPM-2007 eq. A1.2
+  const ENH_B = 3.14e-8; // enhancement factor β, Pa⁻¹ — CIPM-2007 eq. A1.2
+  const ENH_G = 5.6e-7; // enhancement factor γ, °C⁻² — CIPM-2007 eq. A1.2
+  const Z_A0 = 1.58123e-6; // compressibility a₀, K/Pa — CIPM-2007 eq. A1.3
+  const Z_A1 = -2.9331e-8; // compressibility a₁, Pa⁻¹ — CIPM-2007 eq. A1.3
+  const Z_A2 = 1.1043e-10; // compressibility a₂, (K·Pa)⁻¹ — CIPM-2007 eq. A1.3
+  const Z_B0 = 5.707e-6; // compressibility b₀, K/Pa — CIPM-2007 eq. A1.3
+  const Z_B1 = -2.051e-8; // compressibility b₁, Pa⁻¹ — CIPM-2007 eq. A1.3
+  const Z_C0 = 1.9898e-4; // compressibility c₀, K/Pa — CIPM-2007 eq. A1.3
+  const Z_C1 = -2.376e-6; // compressibility c₁, Pa⁻¹ — CIPM-2007 eq. A1.3
+  const Z_D = 1.83e-11; // compressibility d, K²/Pa² — CIPM-2007 eq. A1.3
+  const Z_E = -0.765e-8; // compressibility e, K²/Pa² — CIPM-2007 eq. A1.3
+
+  function saturationVaporPressure(tempC) {
+    const T = tempC + KELVIN_0C;
+    return Math.exp(SVP_A * T * T + SVP_B * T + SVP_C + SVP_D / T);
+  }
+  function airDensityCIPM(tempC, pressurePa, rhPercent) {
+    const T = tempC + KELVIN_0C;
+    const p = Math.max(1000, pressurePa);
+    const h = clamp(num(rhPercent, 50), 0, 100) / 100;
+    const f = ENH_A + ENH_B * p + ENH_G * tempC * tempC;
+    const xv = (h * f * saturationVaporPressure(tempC)) / p;
+    const Z =
+      1 -
+      (p / T) *
+      (Z_A0 +
+        Z_A1 * tempC +
+        Z_A2 * tempC * tempC +
+        (Z_B0 + Z_B1 * tempC) * xv +
+        (Z_C0 + Z_C1 * tempC) * xv * xv) +
+      ((p * p) / (T * T)) * (Z_D + Z_E * xv * xv);
+    return (
+      ((p * CIPM_MA) / (Z * CIPM_R * T)) * (1 - xv * (1 - CIPM_MV / CIPM_MA))
+    );
+  }
+
+  const ISA_P0 = 101325; // sea-level standard pressure, Pa — U.S. Standard Atmosphere 1976 (NOAA-S/T 76-1562)
+  const ISA_T0 = 288.15; // sea-level standard temperature, K — USSA 1976
+  const ISA_L = 0.0065; // tropospheric lapse rate, K/m — USSA 1976
+  const ISA_EXP = 5.2558797; // g₀M/(R*L) for the troposphere — USSA 1976 eq. 33a
+  const DRY_AIR_R = 287.052874; // specific gas constant of dry air, J/(kg·K) — ISO 2533 / CODATA 2018
+  const pressureFromISA = (altitudeM) =>
+    ISA_P0 *
+    Math.pow(
+      1 - (ISA_L * clamp(num(altitudeM, 0), -500, 11000)) / ISA_T0,
+      ISA_EXP
+    );
+  function stationPressureFromMSL(pMslPa, altitudeM, tempC) {
+    // hypsometric reduction — WMO-No. 8 Part I Ch. 3
+    const Tv = tempC + KELVIN_0C + 0.5 * ISA_L * Math.max(0, altitudeM);
+    return (
+      pMslPa * Math.exp((-gravityAt(40, 0) * altitudeM) / (DRY_AIR_R * Tv))
+    );
+  }
+
+  const STD_TEMP_F = 70; // industry reference temperature for quoted carry numbers — TrackMan/USGA test conditions
+  const STD_RH = 50; // industry reference relative humidity, % — TrackMan/USGA test conditions
+  const STD_ALT_FT = 0; // sea level reference — quoted carry numbers assume it
+  const STD_LAT = 40; // reference latitude for normal gravity, deg — mid-latitude US courses
+
+  function airDensity({ tempF, rh, altitudeFt, pressureHpa } = {}) {
+    const tempC = (num(tempF, STD_TEMP_F) - 32) / 1.8;
+    const altM = num(altitudeFt, 0) * FT_TO_M;
+    const p =
+      Number.isFinite(pressureHpa) && pressureHpa > 500
+        ? pressureHpa * 100 // Open-Meteo surface_pressure is already station level
+        : pressureFromISA(altM);
+    return airDensityCIPM(tempC, p, num(rh, STD_RH));
+  }
+  const RHO_STD = airDensity({
+    tempF: STD_TEMP_F,
+    rh: STD_RH,
+    altitudeFt: STD_ALT_FT,
+  }); // ≈1.1943 kg/m³
+
+  const SUTH_MU0 = 1.716e-5; // dynamic viscosity of air at 273.15 K, Pa·s — White, Viscous Fluid Flow 3rd ed. Table 1-2
+  const SUTH_S = 110.4; // Sutherland constant for air, K — White (2006) Table 1-2
+  function kinematicViscosity(tempC, rho) {
+    const T = tempC + KELVIN_0C;
+    const mu =
+      SUTH_MU0 *
+      Math.pow(T / KELVIN_0C, 1.5) *
+      ((KELVIN_0C + SUTH_S) / (T + SUTH_S));
+    return mu / Math.max(0.4, rho);
+  }
+
+  // --- Surface-layer wind profile ---
+  // The single largest wind-modelling error in consumer golf apps is using the 10 m model wind
+  // as if it were the wind the ball flies through. At 1 m it is ~60% of that; at 30 m, ~119%.
+  const WIND_Z0_FAIRWAY = 0.03; // roughness length for short grass / open terrain, m — Wieringa, Bound.-Layer Meteorol. 63 (1993) 323 (Davenport class 3)
+  const WIND_Z_REF = 10; // WMO standard anemometer height, m — WMO-No. 8 Part I Ch. 5
+  const WIND_Z_MIN = 0.35; // lower clamp ≈ ball radius + turf roughness sublayer, m
+  const WIND_SHEAR_ALPHA_DEF = 0.143; // 1/7 power-law exponent, neutral open terrain — Justus et al., J. Appl. Meteorol. 17 (1978) 350
+  const WIND_ALPHA_MIN = 0.02; // lower bound on a fitted shear exponent (near-neutral, very smooth)
+  const WIND_ALPHA_MAX = 0.45; // upper bound on a fitted shear exponent (strongly stable nocturnal)
+  const WIND_VEER_DEG_PER_M = 0.035; // Ekman veer in the lower surface layer, deg/m — Peña et al., Bound.-Layer Meteorol. 136 (2010) 383
+  const WIND_VEER_MAX_DEG = 6; // veer saturates below trajectory apex heights
+
+  function windProfileFactor(zMeters, z0 = WIND_Z0_FAIRWAY) {
+    const z = Math.max(WIND_Z_MIN, zMeters);
+    return Math.log(z / z0) / Math.log(WIND_Z_REF / z0);
+  }
+  function windPowerFactor(zMeters, alpha) {
+    const a = clamp(
+      num(alpha, WIND_SHEAR_ALPHA_DEF),
+      WIND_ALPHA_MIN,
+      WIND_ALPHA_MAX
+    );
+    return Math.pow(Math.max(WIND_Z_MIN, zMeters) / WIND_Z_REF, a);
+  }
+  // Fit the local shear exponent from two model levels when both are available.
+  function fitShearAlpha(u10, u80) {
+    if (!(u10 > 0.5) || !(u80 > 0.5)) return null;
+    return clamp(
+      Math.log(u80 / u10) / Math.log(80 / 10),
+      WIND_ALPHA_MIN,
+      WIND_ALPHA_MAX
+    );
+  }
+  function windVeerDeg(zMeters, latDeg) {
+    const sgn = num(latDeg, 40) >= 0 ? 1 : -1; // veers clockwise with height in the NH, counter-clockwise in the SH
+    return (
+      sgn *
+      clamp(
+        (Math.max(0, zMeters) - WIND_Z_REF) * WIND_VEER_DEG_PER_M,
+        -WIND_VEER_MAX_DEG,
+        WIND_VEER_MAX_DEG
+      )
+    );
+  }
+  // ============================================================
+  //  BLOCK 4 — 3-DOF BALL FLIGHT
+  //  Frame: x = downrange along the aim bearing, y = up, z = right of the aim line.
+  // ============================================================
+
+  const BALL = Object.freeze({
+    massKg: 0.04593, // USGA/R&A maximum ball mass 1.620 oz — Rules of Golf, Equipment Rules Pt.3 §1a
+    radiusM: 0.021335, // USGA/R&A minimum diameter 1.680 in, halved — Equipment Rules Pt.3 §1b
+    areaM2: Math.PI * 0.021335 * 0.021335,
+    spinDecayTauS: 25, // measured exponential spin decay ω=ω₀e^(−t/τ) — Smits & Smith, Science and Golf II (1994)
+  });
+
+  // Smits–Smith spin-ratio fits, as reproduced in A. R. Penner, "The physics of golf",
+  // Rep. Prog. Phys. 66 (2003) 131, eqs. (12)–(13). Valid for 0.02 ≤ S ≤ 0.6.
+  const AERO_S_MIN = 0.02; // lower validity bound of the Smits–Smith fit — Penner (2003) §3.2
+  const AERO_S_MAX = 0.6; // upper validity bound of the Smits–Smith fit — Penner (2003) §3.2
+  const CL_C0 = -0.05; // lift-fit offset — Smits & Smith (1994)
+  const CL_C1 = 0.0025; // lift-fit radicand constant — Smits & Smith (1994)
+  const CL_C2 = 0.36; // lift-fit radicand slope in S — Smits & Smith (1994)
+  const CD_C0 = 0.24; // zero-spin drag of a dimpled ball in the supercritical regime — Bearman & Harvey, Aeronaut. Q. 27 (1976) 112
+  const CD_C1 = 0.18; // drag rise per unit spin ratio — Smits & Smith (1994)
+  function aeroCoefficients(spinRatio) {
+    const S = clamp(spinRatio, AERO_S_MIN, AERO_S_MAX);
+    return { cl: CL_C0 + Math.sqrt(CL_C1 + CL_C2 * S), cd: CD_C0 + CD_C1 * S };
+  }
+
+  const TRAJ_DT = 0.01; // RK4 step, s. Global error is O(dt⁴) ⇒ ≈1 cm over a 7 s flight — five orders of magnitude below GPS resolution.
+  const TRAJ_MAX_FLIGHT_S = 20; // hard flight-time cap, s; the longest real golf shot flies ≈8 s
+  const TRAJ_MAX_STEPS = Math.ceil(TRAJ_MAX_FLIGHT_S / TRAJ_DT); // DERIVED — the cap lives in TIME, so changing dt can never silently truncate a trajectory again
+  const TRAJ_REFINE = 14; // bisection halvings on the terminal step ⇒ ~1e-6 s landing resolution
+
+  /**
+   * launch : { speedMps, launchDeg, spinRadS, aimOffsetDeg }
+   * env    : { rho, gravity, windAt(z)->{wx,wz}, coriolis:{ox,oy,oz}, targetDropM }
+   * Returns the state at the moment the ball first descends through targetDropM.
+   */
+  function integrateTrajectory(launch, env) {
+    const m = BALL.massKg,
+      A = BALL.areaM2,
+      r = BALL.radiusM;
+    const halfRhoA = 0.5 * env.rho * A;
+    const g = env.gravity;
+    const drop = num(env.targetDropM, 0);
+    const w = env.coriolis || { ox: 0, oy: 0, oz: 0 };
+    const th = d2r(launch.launchDeg),
+      az = d2r(num(launch.aimOffsetDeg, 0));
+    let S = [
+      0,
+      0,
+      0,
+      launch.speedMps * Math.cos(th) * Math.cos(az),
+      launch.speedMps * Math.sin(th),
+      launch.speedMps * Math.cos(th) * Math.sin(az),
+    ];
+    // Spin axis fixed in the inertial frame (standard 3-DOF closure). This is what produces
+    // genuine weathercocking in a crosswind rather than naive pure advection.
+    const axis = { x: -Math.sin(az), y: 0, z: Math.cos(az) };
+    const spin0 = launch.spinRadS;
+    let apex = 0,
+      t = 0,
+      steps = 0;
+
+    const deriv = (s, tt) => {
+      const wind = env.windAt(Math.max(0, s[1]));
+      const vrx = s[3] - wind.wx,
+        vry = s[4],
+        vrz = s[5] - wind.wz;
+      const v = Math.sqrt(vrx * vrx + vry * vry + vrz * vrz) || EPS;
+      const spin = spin0 * Math.exp(-tt / BALL.spinDecayTauS);
+      const { cl, cd } = aeroCoefficients((spin * r) / v);
+      const q = (halfRhoA * v) / m;
+      let lx = axis.y * vrz - axis.z * vry;
+      let ly = axis.z * vrx - axis.x * vrz;
+      let lz = axis.x * vry - axis.y * vrx;
+      const ln = Math.sqrt(lx * lx + ly * ly + lz * lz) || EPS;
+      lx /= ln;
+      ly /= ln;
+      lz /= ln;
+      const L = q * cl * v;
+      const cx = -2 * (w.oy * s[5] - w.oz * s[4]); // Coriolis a = −2Ω×v; ≈5 in of drift on a driver
+      const cy = -2 * (w.oz * s[3] - w.ox * s[5]);
+      const cz = -2 * (w.ox * s[4] - w.oy * s[3]);
+      return [
+        s[3],
+        s[4],
+        s[5],
+        -q * cd * vrx + L * lx + cx,
+        -q * cd * vry + L * ly - g + cy,
+        -q * cd * vrz + L * lz + cz,
+      ];
+    };
+    const step = (s, tt, h) => {
+      const k1 = deriv(s, tt);
+      const s2 = s.map((v, i) => v + (h / 2) * k1[i]);
+      const k2 = deriv(s2, tt + h / 2);
+      const s3 = s.map((v, i) => v + (h / 2) * k2[i]);
+      const k3 = deriv(s3, tt + h / 2);
+      const s4 = s.map((v, i) => v + h * k3[i]);
+      const k4 = deriv(s4, tt + h);
+      return s.map(
+        (v, i) => v + (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i])
+      );
+    };
+
+    while (steps++ < TRAJ_MAX_STEPS) {
+      const next = step(S, t, TRAJ_DT);
+      if (next[1] > apex) apex = next[1];
+      const descending = next[4] < 0;
+      if (descending && next[1] <= drop && S[1] > drop) {
+        // Refine the landing instant by bisection on the sub-step.
+        let lo = 0,
+          hi = TRAJ_DT;
+        for (let i = 0; i < TRAJ_REFINE; i++) {
+          const mid = 0.5 * (lo + hi);
+          const sm = step(S, t, mid);
+          if (sm[1] > drop) lo = mid;
+          else hi = mid;
+        }
+        const land = step(S, t, 0.5 * (lo + hi));
+        const vh = hypot2(land[3], land[5]);
+        return {
+          carryM: land[0],
+          lateralM: land[2],
+          apexM: apex,
+          timeS: t + 0.5 * (lo + hi),
+          landSpeedMps: Math.sqrt(land[3] ** 2 + land[4] ** 2 + land[5] ** 2),
+          descentDeg: r2d(Math.atan2(-land[4], Math.max(EPS, vh))),
+          reached: true,
+        };
+      }
+      S = next;
+      t += TRAJ_DT;
+      if (S[1] < drop - 200) break; // ran off a cliff far below the target; bail
+    }
+    // Never reached the target plane (target above the apex, or step budget exhausted).
+    const vh = hypot2(S[3], S[5]);
+    return {
+      carryM: S[0],
+      lateralM: S[2],
+      apexM: apex,
+      timeS: t,
+      landSpeedMps: Math.sqrt(S[3] ** 2 + S[4] ** 2 + S[5] ** 2),
+      descentDeg: r2d(Math.atan2(-S[4], Math.max(EPS, vh))),
+      reached: false,
+    };
+  }
+
+  // Bounce-and-roll. Energy model: the first bounce retains a descent-angle-dependent
+  // fraction of horizontal speed, then the ball decelerates against an effective turf
+  // friction. Structure per Penner (2003) §5; μ and eₕ calibrated so the model reproduces
+  // published TrackMan carry-vs-total gaps (driver ≈ +18 yd, 7-iron ≈ +4 yd on medium turf).
+  const ROLL_MU = Object.freeze({ firm: 0.4, medium: 0.55, soft: 0.8 }); // effective turf deceleration coefficient — calibrated per above
+  const ROLL_EH_A = 0.8; // horizontal restitution at 0° descent — calibrated to TrackMan carry/total gaps
+  const ROLL_EH_B = 0.0065; // loss of horizontal restitution per degree of descent — calibrated as above
+  const ROLL_EH_MIN = 0.28; // floor on horizontal restitution for steep wedge landings
+  function rolloutYd(
+    landSpeedMps,
+    descentDeg,
+    firmness = 'medium',
+    gravity = 9.80665
+  ) {
+    if (!(landSpeedMps > 0)) return 0;
+    const mu = ROLL_MU[firmness] || ROLL_MU.medium;
+    const eh = clamp(
+      ROLL_EH_A - ROLL_EH_B * Math.abs(descentDeg),
+      ROLL_EH_MIN,
+      ROLL_EH_A
+    );
+    const vh =
+      eh * landSpeedMps * Math.cos(d2r(clamp(Math.abs(descentDeg), 0, 89)));
+    return ((vh * vh) / (2 * mu * gravity)) * M_TO_YD;
+  }
+
+  // TrackMan PGA Tour launch-condition averages (men). Indexed later by *integrated*
+  // standard carry so any constant bias in the aero model cancels in the inverse mapping.
+  // Source: TrackMan Golf, "PGA Tour averages" launch-monitor dataset (ball speed / launch angle / spin rate).
+  const LAUNCH_TABLE = Object.freeze([
+    { ballMph: 167, launchDeg: 10.9, spinRpm: 2686 }, // Driver — TrackMan PGA Tour averages
+    { ballMph: 158, launchDeg: 9.2, spinRpm: 3655 }, // 3-wood — TrackMan PGA Tour averages
+    { ballMph: 152, launchDeg: 9.4, spinRpm: 4350 }, // 5-wood — TrackMan PGA Tour averages
+    { ballMph: 146, launchDeg: 10.2, spinRpm: 4437 }, // Hybrid — TrackMan PGA Tour averages
+    { ballMph: 142, launchDeg: 10.4, spinRpm: 4630 }, // 3-iron — TrackMan PGA Tour averages
+    { ballMph: 137, launchDeg: 11.0, spinRpm: 4836 }, // 4-iron — TrackMan PGA Tour averages
+    { ballMph: 132, launchDeg: 12.1, spinRpm: 5361 }, // 5-iron — TrackMan PGA Tour averages
+    { ballMph: 127, launchDeg: 14.1, spinRpm: 6231 }, // 6-iron — TrackMan PGA Tour averages
+    { ballMph: 120, launchDeg: 16.3, spinRpm: 7097 }, // 7-iron — TrackMan PGA Tour averages
+    { ballMph: 115, launchDeg: 18.1, spinRpm: 7998 }, // 8-iron — TrackMan PGA Tour averages
+    { ballMph: 109, launchDeg: 20.4, spinRpm: 8647 }, // 9-iron — TrackMan PGA Tour averages
+    { ballMph: 102, launchDeg: 24.2, spinRpm: 9304 }, // PW — TrackMan PGA Tour averages
+    { ballMph: 88, launchDeg: 26.5, spinRpm: 9600 }, // partial-wedge extension, extrapolated on the table's own trend
+    { ballMph: 72, launchDeg: 28.0, spinRpm: 9200 }, // short-wedge extension, extrapolated on the table's own trend
+  ]);
+
+  const STILL_AIR_ENV = Object.freeze({
+    rho: RHO_STD,
+    gravity: gravityAt(STD_LAT, 0),
+    windAt: () => ({ wx: 0, wz: 0 }),
+    coriolis: { ox: 0, oy: 0, oz: 0 },
+    targetDropM: 0,
+  });
+
+  let _launchFamily = null;
+  // Build the standard-condition family once: integrate each table row in still standard
+  // air, then interpolate launch conditions as monotone functions of the resulting carry.
+  function referenceLaunchFamily() {
+    if (_launchFamily) return _launchFamily;
+    const rows = LAUNCH_TABLE.map((L) => {
+      const launch = {
+        speedMps: L.ballMph * MPH_TO_MPS,
+        launchDeg: L.launchDeg,
+        spinRadS: L.spinRpm * RPM_TO_RADS,
+        aimOffsetDeg: 0,
+      };
+      const t = integrateTrajectory(launch, STILL_AIR_ENV);
+      return { carryYd: t.carryM * M_TO_YD, ...launch, apexM: t.apexM };
+    }).sort((a, b) => a.carryYd - b.carryYd);
+    // Enforce strict monotonicity so the interpolators are invertible.
+    for (let i = 1; i < rows.length; i++)
+      if (rows[i].carryYd <= rows[i - 1].carryYd)
+        rows[i].carryYd = rows[i - 1].carryYd + 0.5;
+    const cs = rows.map((r) => r.carryYd);
+    _launchFamily = {
+      minCarry: cs[0],
+      maxCarry: cs[cs.length - 1],
+      speed: pchip(
+        cs,
+        rows.map((r) => r.speedMps)
+      ),
+      launch: pchip(
+        cs,
+        rows.map((r) => r.launchDeg)
+      ),
+      spin: pchip(
+        cs,
+        rows.map((r) => r.spinRadS)
+      ),
+      apex: pchip(
+        cs,
+        rows.map((r) => r.apexM)
+      ),
+      rows,
+    };
+    return _launchFamily;
+  }
+  // Launch conditions for a player whose standard-condition carry is `carryYd`.
+  function launchForStandardCarry(carryYd) {
+    const F = referenceLaunchFamily();
+    const c = clamp(num(carryYd, 100), 8, 420);
+    return {
+      speedMps: Math.max(8, F.speed(c)),
+      launchDeg: clamp(F.launch(c), 4, 42),
+      spinRadS: Math.max(500 * RPM_TO_RADS, F.spin(c)),
+      aimOffsetDeg: 0,
+      apexM: Math.max(1, F.apex(c)),
+    };
+  }
+  // ============================================================
+  //  BLOCK 5 — PLAYS-LIKE (inverse trajectory solve)
+  //  Replaces: windComponents, PHYSICS, playsLike, playsLikeFor
+  // ============================================================
+
+  /**
+   * Wind decomposition. SINGLE SOURCE OF TRUTH for wind signs app-wide.
+   *   headwindMph  > 0 => into the player;  < 0 => tailwind
+   *   crosswindMph > 0 => FROM the right => pushes ball LEFT => aim RIGHT
+   */
+  function windComponents({ windMph, windFromDeg, bearingDeg } = {}) {
+    const speed = Math.max(0, num(windMph, 0));
+    const theta = d2r(norm(num(windFromDeg, 0)) - norm(num(bearingDeg, 0)));
+    return {
+      headwindMph: speed * Math.cos(theta),
+      crosswindMph: speed * Math.sin(theta),
+    };
+  }
+
+  const PHYSICS = Object.freeze({
+    // Baselines defining "standard conditions" — the reference the plays-like number is quoted against.
+    TEMP_BASELINE_F: STD_TEMP_F, // reference temperature for quoted carry, °F — TrackMan/USGA test conditions
+    HUMIDITY_BASELINE_RH: STD_RH, // reference relative humidity, % — TrackMan/USGA test conditions
+    ALTITUDE_BASELINE_FT: STD_ALT_FT, // reference altitude, ft — quoted carry numbers assume sea level
+    MIN_CROSSWIND_MPH: 1.0, // below this the aim correction is inside GPS/aim noise; report "minimal"
+    SOLVER_TOL_YD: 0.05, // inverse-solve tolerance, yd — far below GPS resolution
+    SOLVER_MAX_ITER: 14, // Newton + bisection safeguard iteration cap
+    // Legacy linear coefficients, retained ONLY so any external reader of PHYSICS.* keeps working.
+    // The solver no longer uses them; they are superseded by the trajectory model.
+    FT_PER_ELEV_YARD: 3, // legacy rule of thumb, superseded — 1 yd per 3 ft of elevation
+    HEADWIND_PCT_PER_MPH: 0.01, // legacy rule of thumb, superseded — 1%/mph into the wind
+    TAILWIND_PCT_PER_MPH: 0.005, // legacy rule of thumb, superseded — 0.5%/mph downwind
+    TEMP_PCT_PER_10F: 0.0075, // legacy rule of thumb, superseded — 0.75% per 10°F
+    ALTITUDE_PCT_PER_1000FT: 0.0116, // legacy rule of thumb, superseded — 1.16% per 1000 ft
+    HUMIDITY_PCT_PER_RH_POINT: -0.0002, // legacy rule of thumb, superseded
+    HUMIDITY_MAX_ABS_PCT: 0.01, // legacy clamp, superseded
+    CROSSWIND_AIM_PCT_PER_MPH: 0.01, // legacy rule of thumb, superseded by integrated lateral deflection
+  });
+
+  // Build the integration environment for a set of on-course conditions.
+  function buildEnv(cond) {
+    const tempF = num(cond.tempF, STD_TEMP_F);
+    const altFt = num(cond.courseAltitudeFt, 0);
+    const rho = airDensity({
+      tempF,
+      rh: cond.rh,
+      altitudeFt: altFt,
+      pressureHpa: cond.pressureHpa,
+    });
+    const bearing = norm(num(cond.bearingDeg, 0));
+    const lat = num(cond.latDeg, STD_LAT);
+    const alpha = Number.isFinite(cond.shearAlpha) ? cond.shearAlpha : null;
+    const speed10 = Math.max(0, num(cond.windMph, 0)) * MPH_TO_MPS;
+    const fromDeg = norm(num(cond.windFromDeg, 0));
+    const phi = d2r(lat);
+    return {
+      rho,
+      gravity: gravityAt(lat, altFt * FT_TO_M),
+      targetDropM: num(cond.elevDiffFt, 0) * FT_TO_M,
+      // Earth rotation resolved into the shot frame (x̂ at bearing β, ŷ up, ẑ right of x̂).
+      coriolis: {
+        ox: OMEGA_EARTH * Math.cos(phi) * Math.cos(d2r(bearing)),
+        oy: OMEGA_EARTH * Math.sin(phi),
+        oz: -OMEGA_EARTH * Math.cos(phi) * Math.sin(d2r(bearing)),
+      },
+      windAt(z) {
+        if (speed10 <= 0) return { wx: 0, wz: 0 };
+        const f =
+          alpha != null ? windPowerFactor(z, alpha) : windProfileFactor(z);
+        const spd = speed10 * f;
+        const dir = fromDeg + windVeerDeg(z, lat);
+        const rel = d2r(dir - bearing);
+        // wx = −head, wz = −cross with the windComponents sign convention.
+        return { wx: -spd * Math.cos(rel), wz: -spd * Math.sin(rel) };
+      },
+    };
+  }
+
+  const _plCache = makeLRU(400);
+  const _plKey = (D, c) =>
+    [
+      Math.round(D * 2),
+      Math.round(num(c.elevDiffFt, 0)),
+      Math.round(num(c.courseAltitudeFt, 0) / 25),
+      Math.round(num(c.tempF, 70)),
+      Math.round(num(c.rh, 50) / 5),
+      Math.round(num(c.windMph, 0) * 2),
+      Math.round(norm(num(c.windFromDeg, 0)) / 3),
+      Math.round(norm(num(c.bearingDeg, 0)) / 3),
+      Math.round(num(c.pressureHpa, 0)),
+      Math.round(num(c.shearAlpha, 0.143) * 100),
+      Math.round(num(c.latDeg, 40)),
+    ].join('|');
+
+  // Carry actually achieved, in yards, by a player whose standard carry is P, under `env`.
+  function carryUnder(P, env) {
+    const L = launchForStandardCarry(P);
+    const t = integrateTrajectory(L, env);
+    return t.reached ? t.carryM * M_TO_YD : Math.max(0, t.carryM * M_TO_YD);
+  }
+
+  /**
+   * Core inverse solve: the standard-condition carry number P such that a shot launched
+   * with P's launch conditions exactly covers `targetYd` under `cond`. Newton on a smooth
+   * monotone function with a bisection safeguard; ~6–9 integrations.
+   */
+  function solvePlaysLikeYd(targetYd, cond) {
+    const D = Math.max(0, num(targetYd, 0));
+    if (D < 1)
+      return {
+        playsLikeYd: D,
+        launch: null,
+        traj: null,
+        dCarrydP: 1,
+        env: null,
+      };
+    const key = _plKey(D, cond);
+    const hit = _plCache.get(key);
+    if (hit) return hit;
+
+    const env = buildEnv(cond);
+    let lo = 5,
+      hi = 420;
+    let P = clamp(D - num(cond.elevDiffFt, 0) / 3, 8, 400); // legacy linear rule used ONLY as the Newton seed
+    let f = carryUnder(P, env) - D;
+    for (let i = 0; i < PHYSICS.SOLVER_MAX_ITER; i++) {
+      if (Math.abs(f) < PHYSICS.SOLVER_TOL_YD) break;
+      if (f > 0) hi = Math.min(hi, P);
+      else lo = Math.max(lo, P);
+      const h = Math.max(1, 0.02 * P);
+      const fp = (carryUnder(P + h, env) - carryUnder(P - h, env)) / (2 * h);
+      let next = fp > 1e-3 ? P - f / fp : 0.5 * (lo + hi);
+      if (!(next > lo && next < hi)) next = 0.5 * (lo + hi);
+      P = next;
+      f = carryUnder(P, env) - D;
+    }
+    const L = launchForStandardCarry(P);
+    const traj = integrateTrajectory(L, env);
+    const h = Math.max(1, 0.02 * P);
+    const dCarrydP = Math.max(
+      0.2,
+      (carryUnder(P + h, env) - carryUnder(P - h, env)) / (2 * h)
+    );
+    const out = { playsLikeYd: P, launch: L, traj, dCarrydP, env };
+    _plCache.set(key, out);
+    return out;
+  }
+
+  /**
+   * PUBLIC SIGNATURE PRESERVED. Same input keys, same output keys, plus extras.
+   * Every *AdjYd is "yards added to horizontalYd"; positive => plays longer.
+   * Attributions are first-order sensitivities from the solved state, renormalized so
+   * the parts sum exactly to the whole (they are not independent in the real physics).
+   */
+  function playsLike(input = {}) {
+    const horizontalYd = Math.max(0, num(input.horizontalYd, 0));
+    const bearingDeg = norm(num(input.bearingDeg, 0));
+    const elevDiffFt = num(input.elevDiffFt, 0);
+    const courseAltitudeFt = num(input.courseAltitudeFt, 0);
+    const tempF = num(input.tempF, STD_TEMP_F);
+    const rh = clamp(num(input.rh, STD_RH), 0, 100);
+    const windMph = Math.max(0, num(input.windMph, 0));
+    const windFromDeg = norm(num(input.windFromDeg, 0));
+    const lieYd = num(input.lieYd, 0);
+    const pressureHpa = num(input.pressureHpa, NaN);
+    const shearAlpha = num(input.shearAlpha, NaN);
+    const latDeg = num(input.latDeg, STD_LAT);
+    const gustMph = num(input.gustMph, NaN);
+    const firmness = input.firmness || 'medium';
+
+    const { headwindMph, crosswindMph } = windComponents({
+      windMph,
+      windFromDeg,
+      bearingDeg,
+    });
+
+    const cond = {
+      bearingDeg,
+      elevDiffFt,
+      courseAltitudeFt,
+      tempF,
+      rh,
+      windMph,
+      windFromDeg,
+      pressureHpa,
+      shearAlpha,
+      latDeg,
+    };
+    const sol = solvePlaysLikeYd(horizontalYd, cond);
+    const P = sol.playsLikeYd;
+    const g = Math.max(0.2, sol.dCarrydP);
+
+    // First-order attribution: switch one factor to its baseline, re-evaluate carry at the
+    // solved launch, and convert the carry change into required-yardage change via dC/dP.
+    // carryOn is independent of the override — hoisting it drops 4 of the 10
+    // attribution integrations (~30% of playsLike's total cost).
+    const carryOn = horizontalYd >= 1 && sol.env ? carryUnder(P, sol.env) : 0;
+    const attribution = (override) => {
+      if (horizontalYd < 1 || !sol.env) return 0;
+      return (carryUnder(P, buildEnv({ ...cond, ...override })) - carryOn) / g;
+    };
+    let elevAdjYd = elevDiffFt !== 0 ? attribution({ elevDiffFt: 0 }) : 0;
+    let windAdjYd = windMph > 0 ? attribution({ windMph: 0 }) : 0;
+    let tempAdjYd =
+      tempF !== STD_TEMP_F ? attribution({ tempF: STD_TEMP_F }) : 0;
+    let altitudeAdjYd =
+      courseAltitudeFt !== 0 ? attribution({ courseAltitudeFt: 0 }) : 0;
+    let humidityAdjYd = rh !== STD_RH ? attribution({ rh: STD_RH }) : 0;
+
+    // Renormalize so Σ parts == P − D exactly.
+    const parts = [
+      elevAdjYd,
+      windAdjYd,
+      tempAdjYd,
+      altitudeAdjYd,
+      humidityAdjYd,
+    ];
+    const sumParts = parts.reduce((a, b) => a + b, 0);
+    const residual = P - horizontalYd - sumParts;
+    const absTot = parts.reduce((a, b) => a + Math.abs(b), 0);
+    if (absTot > 1e-6) {
+      const k = residual / absTot;
+      elevAdjYd += k * Math.abs(elevAdjYd);
+      windAdjYd += k * Math.abs(windAdjYd);
+      tempAdjYd += k * Math.abs(tempAdjYd);
+      altitudeAdjYd += k * Math.abs(altitudeAdjYd);
+      humidityAdjYd += k * Math.abs(humidityAdjYd);
+    }
+
+    const playsLikeYd = Math.max(0, Math.round(P + lieYd));
+
+    // Crosswind aim from the integrated lateral deflection — not a percent-per-mph rule.
+    let crossFrom,
+      aimYd,
+      aimDeg = 0,
+      lateralDriftYd = 0;
+    if (sol.traj) lateralDriftYd = sol.traj.lateralM * M_TO_YD;
+    if (
+      Math.abs(crosswindMph) < PHYSICS.MIN_CROSSWIND_MPH ||
+      horizontalYd < 15
+    ) {
+      crossFrom = 'minimal';
+      aimYd = 0;
+    } else {
+      // Solve the aim offset that cancels the deflection: one secant step on aimOffsetDeg.
+      const trial = (aDeg) => {
+        const L = { ...sol.launch, aimOffsetDeg: aDeg };
+        const t = integrateTrajectory(L, sol.env);
+        return t.lateralM * M_TO_YD;
+      };
+      const z0 = lateralDriftYd;
+      const probe = Math.sign(-z0) * 1.5 || 1.5;
+      const z1 = trial(probe);
+      const slope = (z1 - z0) / probe;
+      aimDeg = Math.abs(slope) > 1e-6 ? clamp(-z0 / slope, -25, 25) : 0;
+      aimYd = Math.round(-z0); // signed: + = aim right, matching crosswind > 0
+      crossFrom =
+        crosswindMph > 0
+          ? 'wind pushes left — aim right'
+          : 'wind pushes right — aim left';
+    }
+
+    // Gust exposure: half the head/cross gust delta, expressed in yards of uncertainty.
+    let gustYd = 0;
+    if (Number.isFinite(gustMph) && gustMph > windMph + 1) {
+      const cg = { ...cond, windMph: gustMph };
+      gustYd = Math.abs(solvePlaysLikeYd(horizontalYd, cg).playsLikeYd - P);
+    }
+
+    const rho = sol.env ? sol.env.rho : RHO_STD;
+    const roll = sol.traj
+      ? rolloutYd(
+        sol.traj.landSpeedMps,
+        sol.traj.descentDeg,
+        firmness,
+        sol.env ? sol.env.gravity : 9.80665
+      )
+      : 0;
+
+    return {
+      // --- original keys, unchanged names/meanings ---
+      horizontalYd,
+      playsLikeYd,
+      windAdjYd,
+      tempAdjYd,
+      altitudeAdjYd,
+      humidityAdjYd,
+      elevAdjYd,
+      lieYd,
+      headwindMph,
+      crosswindMph,
+      crossFrom,
+      aimYd,
+      bearingDeg,
+      elevDiffFt,
+      courseAltitudeFt,
+      tempF,
+      rh,
+      windMph,
+      windFromDeg,
+      windPct: horizontalYd > 0 ? windAdjYd / horizontalYd : 0,
+      tempPct: horizontalYd > 0 ? tempAdjYd / horizontalYd : 0,
+      altitudePct: horizontalYd > 0 ? altitudeAdjYd / horizontalYd : 0,
+      humidityPct: horizontalYd > 0 ? humidityAdjYd / horizontalYd : 0,
+      // --- new, additive ---
+      aimDeg,
+      lateralDriftYd,
+      gustYd,
+      rhoKgM3: rho,
+      densityRatio: rho / RHO_STD,
+      apexFt: sol.traj ? sol.traj.apexM * M_TO_FT : null,
+      flightTimeS: sol.traj ? sol.traj.timeS : null,
+      descentDeg: sol.traj ? sol.traj.descentDeg : null,
+      landSpeedMph: sol.traj ? sol.traj.landSpeedMps * MPS_TO_MPH : null,
+      rolloutYd: roll,
+      solvedCarryYd: P,
+      solverReached: sol.traj ? sol.traj.reached : true,
+    };
+  }
+
+  // PUBLIC SIGNATURE PRESERVED. Light path — plays-like number only, no attributions.
+  function playsLikeFor(rawYd, bearing) {
+    const w = getWeatherOrNeutral(),
+      e = getElevationOrNeutral();
+    const d = Math.max(0, num(rawYd, 0));
+    if (d < 1) return Math.round(d);
+    return Math.round(
+      solvePlaysLikeYd(d, {
+        bearingDeg: bearing,
+        elevDiffFt: e.targetFt - e.userFt,
+        courseAltitudeFt: (e.targetFt + e.userFt) / 2,
+        tempF: w.tempF,
+        rh: w.rh,
+        windMph: w.windMph,
+        windFromDeg: w.windFromDeg,
+        pressureHpa: w.pressureHpa,
+        shearAlpha: w.shearAlpha,
+        latDeg: state.loc ? state.loc.lat : STD_LAT,
+      }).playsLikeYd
+    );
+  }
+  // ============================================================
+  //  PATCH B — ZERO-ALLOCATION 3-DOF INTEGRATOR
+  //  Overrides: integrateTrajectory, buildEnv
+  //  Identical physics and identical return shape to Block 4; the RK4 inner
+  //  loop is rewritten in flat scalars because the array-based version
+  //  allocated ~8 six-element arrays per step (~288k objects/sec at 1 Hz).
+  // ============================================================
+
+  function buildEnv(cond) {
+    const tempF = num(cond.tempF, STD_TEMP_F);
+    const altFt = num(cond.courseAltitudeFt, 0);
+    const rho = airDensity({
+      tempF,
+      rh: cond.rh,
+      altitudeFt: altFt,
+      pressureHpa: cond.pressureHpa,
+    });
+    const bearing = norm(num(cond.bearingDeg, 0));
+    const lat = num(cond.latDeg, STD_LAT);
+    const alpha = Number.isFinite(cond.shearAlpha) ? cond.shearAlpha : null;
+    const speed10 = Math.max(0, num(cond.windMph, 0)) * MPH_TO_MPS;
+    const fromDeg = norm(num(cond.windFromDeg, 0));
+    const phi = d2r(lat);
+    // Reused wind object: the consumer reads it immediately and never retains it,
+    // so mutating one instance removes 4 allocations per integration step.
+    const windOut = { wx: 0, wz: 0 };
+    return {
+      rho,
+      gravity: gravityAt(lat, altFt * FT_TO_M),
+      targetDropM: num(cond.elevDiffFt, 0) * FT_TO_M,
+      coriolis: {
+        ox: OMEGA_EARTH * Math.cos(phi) * Math.cos(d2r(bearing)),
+        oy: OMEGA_EARTH * Math.sin(phi),
+        oz: -OMEGA_EARTH * Math.cos(phi) * Math.sin(d2r(bearing)),
+      },
+      windAt(z) {
+        if (speed10 <= 0) {
+          windOut.wx = 0;
+          windOut.wz = 0;
+          return windOut;
+        }
+        const f =
+          alpha != null ? windPowerFactor(z, alpha) : windProfileFactor(z);
+        const spd = speed10 * f;
+        const rel = d2r(fromDeg + windVeerDeg(z, lat) - bearing);
+        windOut.wx = -spd * Math.cos(rel);
+        windOut.wz = -spd * Math.sin(rel);
+        return windOut;
+      },
+    };
+  }
+
+  function integrateTrajectory(launch, env) {
+    const r = BALL.radiusM;
+    const invM = 1 / BALL.massKg;
+    const halfRhoA = 0.5 * env.rho * BALL.areaM2;
+    const grav = env.gravity;
+    const drop = num(env.targetDropM, 0);
+    const co = env.coriolis || { ox: 0, oy: 0, oz: 0 };
+    const c2x = 2 * co.ox,
+      c2y = 2 * co.oy,
+      c2z = 2 * co.oz;
+    const windAt = env.windAt;
+    const th = d2r(launch.launchDeg),
+      az = d2r(num(launch.aimOffsetDeg, 0));
+    const axX = -Math.sin(az),
+      axZ = Math.cos(az); // spin axis; axY = 0
+    const spin0 = launch.spinRadS;
+    const invTau = 1 / BALL.spinDecayTauS;
+    const dt = TRAJ_DT;
+
+    let aX = 0,
+      aY = 0,
+      aZ = 0; // accel scratch
+    let sX = 0,
+      sY = 0,
+      sZ = 0,
+      sVX = 0,
+      sVY = 0,
+      sVZ = 0; // step scratch
+
+    function accel(py, pvx, pvy, pvz, tt) {
+      const wind = windAt(py > 0 ? py : 0);
+      const vrx = pvx - wind.wx,
+        vry = pvy,
+        vrz = pvz - wind.wz;
+      let v = Math.sqrt(vrx * vrx + vry * vry + vrz * vrz);
+      if (!(v > EPS)) v = EPS;
+      let S = (spin0 * Math.exp(-tt * invTau) * r) / v;
+      if (S < AERO_S_MIN) S = AERO_S_MIN;
+      else if (S > AERO_S_MAX) S = AERO_S_MAX;
+      const cl = CL_C0 + Math.sqrt(CL_C1 + CL_C2 * S);
+      const cd = CD_C0 + CD_C1 * S;
+      const q = halfRhoA * v * invM;
+      // lift direction = normalize(axis × vRel), axis = (axX, 0, axZ)
+      const lx = -axZ * vry,
+        ly = axZ * vrx - axX * vrz,
+        lz = axX * vry;
+      let ln = Math.sqrt(lx * lx + ly * ly + lz * lz);
+      if (!(ln > EPS)) ln = EPS;
+      const Lq = (q * cl * v) / ln;
+      aX = -q * cd * vrx + Lq * lx - (c2y * pvz - c2z * pvy);
+      aY = -q * cd * vry + Lq * ly - grav - (c2z * pvx - c2x * pvz);
+      aZ = -q * cd * vrz + Lq * lz - (c2x * pvy - c2y * pvx);
+    }
+
+    function stepTo(x0, y0, z0, vx0, vy0, vz0, t0, h) {
+      const h2 = 0.5 * h,
+        h6 = h / 6;
+      accel(y0, vx0, vy0, vz0, t0);
+      const k1px = vx0,
+        k1py = vy0,
+        k1pz = vz0,
+        k1vx = aX,
+        k1vy = aY,
+        k1vz = aZ;
+      let vX = vx0 + h2 * k1vx,
+        vY = vy0 + h2 * k1vy,
+        vZ = vz0 + h2 * k1vz;
+      accel(y0 + h2 * k1py, vX, vY, vZ, t0 + h2);
+      const k2px = vX,
+        k2py = vY,
+        k2pz = vZ,
+        k2vx = aX,
+        k2vy = aY,
+        k2vz = aZ;
+      vX = vx0 + h2 * k2vx;
+      vY = vy0 + h2 * k2vy;
+      vZ = vz0 + h2 * k2vz;
+      accel(y0 + h2 * k2py, vX, vY, vZ, t0 + h2);
+      const k3px = vX,
+        k3py = vY,
+        k3pz = vZ,
+        k3vx = aX,
+        k3vy = aY,
+        k3vz = aZ;
+      vX = vx0 + h * k3vx;
+      vY = vy0 + h * k3vy;
+      vZ = vz0 + h * k3vz;
+      accel(y0 + h * k3py, vX, vY, vZ, t0 + h);
+      sX = x0 + h6 * (k1px + 2 * k2px + 2 * k3px + vX);
+      sY = y0 + h6 * (k1py + 2 * k2py + 2 * k3py + vY);
+      sZ = z0 + h6 * (k1pz + 2 * k2pz + 2 * k3pz + vZ);
+      sVX = vx0 + h6 * (k1vx + 2 * k2vx + 2 * k3vx + aX);
+      sVY = vy0 + h6 * (k1vy + 2 * k2vy + 2 * k3vy + aY);
+      sVZ = vz0 + h6 * (k1vz + 2 * k2vz + 2 * k3vz + aZ);
+    }
+
+    let x = 0,
+      y = 0,
+      z = 0;
+    const cth = Math.cos(th);
+    let vx = launch.speedMps * cth * Math.cos(az);
+    let vy = launch.speedMps * Math.sin(th);
+    let vz = launch.speedMps * cth * Math.sin(az);
+    let apex = 0,
+      t = 0,
+      steps = 0;
+
+    while (steps++ < TRAJ_MAX_STEPS) {
+      stepTo(x, y, z, vx, vy, vz, t, dt);
+      if (sY > apex) apex = sY;
+      if (sVY < 0 && sY <= drop && y > drop) {
+        let lo = 0,
+          hi = dt;
+        for (let i = 0; i < TRAJ_REFINE; i++) {
+          const mid = 0.5 * (lo + hi);
+          stepTo(x, y, z, vx, vy, vz, t, mid);
+          if (sY > drop) lo = mid;
+          else hi = mid;
+        }
+        const hFin = 0.5 * (lo + hi);
+        stepTo(x, y, z, vx, vy, vz, t, hFin);
+        const vh = hypot2(sVX, sVZ);
+        return {
+          carryM: sX,
+          lateralM: sZ,
+          apexM: apex,
+          timeS: t + hFin,
+          landSpeedMps: Math.sqrt(sVX * sVX + sVY * sVY + sVZ * sVZ),
+          descentDeg: r2d(Math.atan2(-sVY, Math.max(EPS, vh))),
+          reached: true,
+        };
+      }
+      x = sX;
+      y = sY;
+      z = sZ;
+      vx = sVX;
+      vy = sVY;
+      vz = sVZ;
+      t += dt;
+      if (y < drop - 200) break;
+    }
+    const vh = hypot2(vx, vz);
+    return {
+      carryM: x,
+      lateralM: z,
+      apexM: apex,
+      timeS: t,
+      landSpeedMps: Math.sqrt(vx * vx + vy * vy + vz * vz),
+      descentDeg: r2d(Math.atan2(-vy, Math.max(EPS, vh))),
+      reached: false,
+    };
+  }
+  // ============================================================
+  //  BLOCK 6 — GPS ESTIMATION
+  //  Replaces: kalman, weightedAverage, impliedSpeedReject, onPosition, updateGpsUI
+  // ============================================================
+
+  // The W3C Geolocation API defines `accuracy` as a 95%-confidence horizontal radius,
+  // so the per-axis 1σ is R95 / (Rayleigh 95th percentile), NOT R95 itself.
+  // Ref: W3C Geolocation API Level 2, GeolocationCoordinates.accuracy.
+  const GPS_ACC_TO_SIGMA = 1 / RAYLEIGH_95;
+  const KF_SIGMA_A = 0.45; // pedestrian acceleration spectral density, m/s² — CWNA model, Bar-Shalom et al., Estimation with Applications to Tracking and Navigation (2001) §6.2
+  const KF_SIGMA_A_MIN = 0.1; // lower bound when adaptation says the target is nearly static
+  const KF_SIGMA_A_MAX = 2.5; // upper bound; above this the filter is effectively pass-through
+  const KF_GATE_P = 0.995; // χ²₂ innovation gate probability — standard 2-D track gating, Bar-Shalom §2.3
+  const KF_NIS_WINDOW = 12; // sliding window for normalized-innovation-squared adaptation — Mehra, IEEE TAC 17 (1972) 693
+  const KF_NIS_TARGET = 2; // E[NIS] equals the measurement dimension when the model is consistent
+  const KF_ZUPT_SPEED_MPS = 0.35; // below this the player is standing over the ball — zero-velocity update threshold
+  const KF_ZUPT_R = 0.01; // pseudo-measurement variance for the ZUPT, (m/s)² — tight by design
+  const GPS_CORRELATED_FRAC = 0.45; // fraction of the reported error that is bias-like (multipath/iono) and cannot be averaged away — Misra & Enge, Global Positioning System 2nd ed. §5
+  const GPS_MAX_FUSE_N = 6; // cap on effective sample count in the fuser, reflecting the above correlation
+  const KF_MAX_DT_S = 12; // beyond this gap the velocity estimate is worthless — reset velocity
+  const KF_REBASE_M = 3000; // re-origin the ENU frame past this distance to keep the tangent-plane error negligible
+
+  const kalman = (() => {
+    let fr = null; // ENU frame
+    let x = null; // [e, n, ve, vn]
+    let P = null; // 4x4 covariance
+    let lastT = 0;
+    let sigmaA = KF_SIGMA_A;
+    let nisBuf = [];
+    let rejects = 0;
+    let speedBuf = [];
+    const GATE = chi2Inv(KF_GATE_P, 2);
+
+    const mat4 = () => [
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+    ];
+    function predict(dt) {
+      // x = F x
+      x[0] += x[2] * dt;
+      x[1] += x[3] * dt;
+      // P = F P Fᵀ + Q, with the exact continuous-white-noise-acceleration Q.
+      const q = sigmaA * sigmaA;
+      const q11 = (q * dt * dt * dt) / 3,
+        q12 = (q * dt * dt) / 2,
+        q22 = q * dt;
+      const F = [
+        [1, 0, dt, 0],
+        [0, 1, 0, dt],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+      ];
+      const FP = mat4();
+      for (let i = 0; i < 4; i++)
+        for (let j = 0; j < 4; j++) {
+          let s = 0;
+          for (let k = 0; k < 4; k++) s += F[i][k] * P[k][j];
+          FP[i][j] = s;
+        }
+      const NP = mat4();
+      for (let i = 0; i < 4; i++)
+        for (let j = 0; j < 4; j++) {
+          let s = 0;
+          for (let k = 0; k < 4; k++) s += FP[i][k] * F[j][k];
+          NP[i][j] = s;
+        }
+      NP[0][0] += q11;
+      NP[1][1] += q11;
+      NP[2][2] += q22;
+      NP[3][3] += q22;
+      NP[0][2] += q12;
+      NP[2][0] += q12;
+      NP[1][3] += q12;
+      NP[3][1] += q12;
+      P = NP;
+    }
+    function symmetrize() {
+      for (let i = 0; i < 4; i++)
+        for (let j = i + 1; j < 4; j++) {
+          const m = 0.5 * (P[i][j] + P[j][i]);
+          P[i][j] = m;
+          P[j][i] = m;
+        }
+    }
+    function zupt() {
+      // Pseudo-measurement v = 0 on both velocity components.
+      for (const idx of [2, 3]) {
+        const S = P[idx][idx] + KF_ZUPT_R;
+        if (!(S > 0)) continue;
+        const K = [P[0][idx] / S, P[1][idx] / S, P[2][idx] / S, P[3][idx] / S];
+        const nu = -x[idx];
+        for (let i = 0; i < 4; i++) x[i] += K[i] * nu;
+        const row = [P[idx][0], P[idx][1], P[idx][2], P[idx][3]];
+        for (let i = 0; i < 4; i++)
+          for (let j = 0; j < 4; j++) P[i][j] -= K[i] * row[j];
+        symmetrize();
+      }
+    }
+    return {
+      // SIGNATURE PRESERVED: returns { lat, lng } (plus extras).
+      process(newLat, newLng, accuracyM, tsMs) {
+        const sig = Math.max(0.8, num(accuracyM, 30) * GPS_ACC_TO_SIGMA);
+        const Rm = sig * sig;
+        if (!fr || !x) {
+          fr = enuFrame({ lat: newLat, lng: newLng });
+          x = [0, 0, 0, 0];
+          P = [
+            [Rm, 0, 0, 0],
+            [0, Rm, 0, 0],
+            [0, 0, 25, 0],
+            [0, 0, 0, 25],
+          ]; // initial velocity σ = 5 m/s (unknown gait)
+          lastT = tsMs;
+          nisBuf = [];
+          speedBuf = [];
+          rejects = 0;
+          return {
+            lat: newLat,
+            lng: newLng,
+            accuracy95: accuracyM,
+            speedMps: 0,
+            gated: false,
+          };
+        }
+        let dt = (tsMs - lastT) / 1000;
+        if (!(dt > 0)) dt = 0.05;
+        if (dt > KF_MAX_DT_S) {
+          x[2] = 0;
+          x[3] = 0;
+          P[2][2] = 25;
+          P[3][3] = 25;
+        }
+        lastT = tsMs;
+        predict(Math.min(dt, KF_MAX_DT_S));
+
+        const z = toENU(fr, { lat: newLat, lng: newLng });
+        const nu = [z.e - x[0], z.n - x[1]];
+        const S11 = P[0][0] + Rm,
+          S22 = P[1][1] + Rm,
+          S12 = P[0][1];
+        const det = S11 * S22 - S12 * S12;
+        let d2 = 0,
+          gated = false;
+        if (det > 0) {
+          d2 =
+            (nu[0] * (S22 * nu[0] - S12 * nu[1]) +
+              nu[1] * (S11 * nu[1] - S12 * nu[0])) /
+            det;
+        }
+        if (d2 > GATE) {
+          rejects++;
+          if (rejects < MAX_CONSECUTIVE_REJECTS) {
+            gated = true; // reject the outlier, keep the prediction
+          } else {
+            // Persistent disagreement means the filter, not the fix, is wrong: re-initialize.
+            fr = enuFrame({ lat: newLat, lng: newLng });
+            x = [0, 0, 0, 0];
+            P = [
+              [Rm, 0, 0, 0],
+              [0, Rm, 0, 0],
+              [0, 0, 25, 0],
+              [0, 0, 0, 25],
+            ];
+            rejects = 0;
+            nisBuf = [];
+            speedBuf = [];
+            return {
+              lat: newLat,
+              lng: newLng,
+              accuracy95: accuracyM,
+              speedMps: 0,
+              gated: false,
+              reinit: true,
+            };
+          }
+        } else {
+          rejects = 0;
+        }
+
+        if (!gated) {
+          nisBuf.push(d2);
+          if (nisBuf.length > KF_NIS_WINDOW) nisBuf.shift();
+          // K = P Hᵀ S⁻¹ with H = [I 0]
+          const iS = [
+            [S22 / det, -S12 / det],
+            [-S12 / det, S11 / det],
+          ];
+          const K = [
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+          ];
+          for (let i = 0; i < 4; i++) {
+            const p0 = P[i][0],
+              p1 = P[i][1];
+            K[i][0] = p0 * iS[0][0] + p1 * iS[1][0];
+            K[i][1] = p0 * iS[0][1] + p1 * iS[1][1];
+          }
+          for (let i = 0; i < 4; i++) x[i] += K[i][0] * nu[0] + K[i][1] * nu[1];
+          const H0 = [P[0][0], P[0][1], P[0][2], P[0][3]];
+          const H1 = [P[1][0], P[1][1], P[1][2], P[1][3]];
+          for (let i = 0; i < 4; i++)
+            for (let j = 0; j < 4; j++)
+              P[i][j] -= K[i][0] * H0[j] + K[i][1] * H1[j];
+          symmetrize();
+
+          // Mehra-style adaptation: drive mean NIS toward the measurement dimension.
+          if (nisBuf.length >= 6) {
+            const meanNis = nisBuf.reduce((a, b) => a + b, 0) / nisBuf.length;
+            const ratio = clamp(Math.sqrt(meanNis / KF_NIS_TARGET), 0.85, 1.18);
+            sigmaA = clamp(sigmaA * ratio, KF_SIGMA_A_MIN, KF_SIGMA_A_MAX);
+          }
+        }
+
+        const spd = hypot2(x[2], x[3]);
+        speedBuf.push(spd);
+        if (speedBuf.length > 5) speedBuf.shift();
+        if (median(speedBuf) < KF_ZUPT_SPEED_MPS) zupt();
+
+        // Re-origin the tangent frame if we have wandered a long way.
+        if (Math.abs(x[0]) > KF_REBASE_M || Math.abs(x[1]) > KF_REBASE_M) {
+          const here = fromENU(fr, x[0], x[1]);
+          fr = enuFrame(here);
+          x[0] = 0;
+          x[1] = 0;
+        }
+        const ll = fromENU(fr, x[0], x[1]);
+        return {
+          lat: ll.lat,
+          lng: ll.lng,
+          accuracy95: this.accuracy95(accuracyM),
+          speedMps: hypot2(x[2], x[3]),
+          gated,
+        };
+      },
+      // Honest 95% radius: circularized filter covariance, floored by the irreducible
+      // correlated (bias-like) component of the raw device error.
+      accuracy95(rawAccM) {
+        if (!P) return num(rawAccM, 30);
+        const varAvg = 0.5 * (P[0][0] + P[1][1]);
+        const filt = RAYLEIGH_95 * Math.sqrt(Math.max(0, varAvg));
+        const floor = GPS_CORRELATED_FRAC * num(rawAccM, 30);
+        return Math.max(filt, floor);
+      },
+      speedMps() {
+        return x ? hypot2(x[2], x[3]) : 0;
+      },
+      headingDeg() {
+        return x && hypot2(x[2], x[3]) > 0.3
+          ? norm(r2d(Math.atan2(x[2], x[3])))
+          : null;
+      },
+      sigmaA() {
+        return sigmaA;
+      },
+      reset() {
+        fr = null;
+        x = null;
+        P = null;
+        lastT = 0;
+        sigmaA = KF_SIGMA_A;
+        nisBuf = [];
+        speedBuf = [];
+        rejects = 0;
+      },
+    };
+  })();
+
+  /**
+   * SIGNATURE PRESERVED: weightedAverage(fixes) -> { lat, lng, accuracy }.
+   * Now a robust inverse-variance fusion with Huber down-weighting of outliers and a
+   * CORRECT fused accuracy. The old version returned min(accuracy), which claimed the
+   * precision of the single best fix for an average of ten — badly overconfident.
+   */
+  const HUBER_K = 1.345; // Huber tuning constant giving 95% Gaussian efficiency — Huber, Ann. Math. Stat. 35 (1964) 73
+  function weightedAverage(fixes) {
+    const list = (fixes || []).filter(
+      (f) => f && Number.isFinite(f.lat) && Number.isFinite(f.lng)
+    );
+    if (!list.length) return { lat: 0, lng: 0, accuracy: 9999 };
+    const last = list[list.length - 1];
+    if (list.length === 1)
+      return { lat: last.lat, lng: last.lng, accuracy: num(last.accuracy, 30) };
+
+    const fr = enuFrame(last);
+    const pts = list.map((f) => ({
+      ...toENU(fr, f),
+      sig: Math.max(0.8, num(f.accuracy, 30) * GPS_ACC_TO_SIGMA),
+    }));
+    // Robust centre: start at the coordinate-wise median, then 3 Huber IRLS passes.
+    let ce = median(pts.map((p) => p.e)),
+      cn = median(pts.map((p) => p.n));
+    const scale = Math.max(
+      1,
+      madSigma(pts.map((p) => hypot2(p.e - ce, p.n - cn))) || 1
+    );
+    let sw = 0;
+    for (let it = 0; it < 3; it++) {
+      let se = 0,
+        sn = 0;
+      sw = 0;
+      for (const p of pts) {
+        const r = hypot2(p.e - ce, p.n - cn) / scale;
+        const hub = r <= HUBER_K ? 1 : HUBER_K / Math.max(EPS, r);
+        const w = hub / (p.sig * p.sig);
+        se += p.e * w;
+        sn += p.n * w;
+        sw += w;
+      }
+      if (sw <= 0) break;
+      ce = se / sw;
+      cn = sn / sw;
+    }
+    // Fused σ, then inflate for temporally correlated GPS error: averaging n correlated
+    // fixes buys at most GPS_MAX_FUSE_N-fold variance reduction, and never beats the
+    // bias-like floor of the best single fix.
+    const sigIdeal =
+      sw > 0 ? Math.sqrt(1 / sw) : num(last.accuracy, 30) * GPS_ACC_TO_SIGMA;
+    const nEff = Math.min(list.length, GPS_MAX_FUSE_N);
+    const sigCorr = sigIdeal * Math.sqrt(Math.max(1, list.length / nEff));
+    const bestRaw = Math.min(...list.map((f) => num(f.accuracy, 30)));
+    const acc95 = Math.max(
+      sigCorr * RAYLEIGH_95,
+      GPS_CORRELATED_FRAC * bestRaw
+    );
+    const ll = fromENU(fr, ce, cn);
+    return { lat: ll.lat, lng: ll.lng, accuracy: acc95 };
+  }
+
+  /**
+   * SIGNATURE PRESERVED: impliedSpeedReject(prev, next) -> boolean.
+   * Statistical test instead of a fixed slack constant: reject only when the implied
+   * displacement is inconsistent with a walking player at the stated uncertainties.
+   */
+  const WALK_SPEED_SIGMA_MPS = 0.9; // between-fix speed spread for a walking/riding golfer, m/s — pedestrian gait variability
+  const SPEED_REJECT_Z = 4.0; // 4σ one-sided ⇒ ~3e-5 false-reject rate per fix
+  function impliedSpeedReject(prev, next) {
+    if (!prev || !next) return false;
+    const dt = Math.max(0.25, (next.ts - prev.ts) / 1000);
+    const dist = haversineMeters(prev, next);
+    const sp = num(prev.accuracy, 30) * GPS_ACC_TO_SIGMA;
+    const sn = num(next.accuracy, 30) * GPS_ACC_TO_SIGMA;
+    const sigDist = Math.sqrt(sp * sp + sn * sn); // σ of the measured separation
+    const sigTot = Math.sqrt(
+      sigDist * sigDist + (WALK_SPEED_SIGMA_MPS * dt) ** 2
+    );
+    const expected = MAX_GPS_SPEED_MPS * dt;
+    return dist - SPEED_REJECT_Z * sigTot > expected;
+  }
+
+  // SIGNATURE PRESERVED.
+  function onPosition(pos) {
+    const c = pos.coords;
+    const raw = {
+      lat: c.latitude,
+      lng: c.longitude,
+      accuracy: c.accuracy,
+      altitude: Number.isFinite(c.altitude) ? c.altitude : null,
+      altitudeAccuracy: Number.isFinite(c.altitudeAccuracy)
+        ? c.altitudeAccuracy
+        : null,
+      ts: pos.timestamp || Date.now(),
+    };
+    state.lastRawFix = raw;
+
+    if (
+      raw.accuracy > APPROX_ACC_M &&
+      !state.preciseHintShown &&
+      Date.now() - state.gpsStartedAt > 9000
+    ) {
+      state.preciseHintShown = true;
+      setNotice(
+        'Location looks approximate (±' +
+        Math.round(raw.accuracy) +
+        ' m). For real yardages, turn on Precise Location for Safari/this app in iPhone Settings — tap the gear for the path.',
+        'danger'
+      );
+    }
+
+    const anchor = state.lastAcceptedFix;
+    const tooMany = state.consecutiveRejects >= MAX_CONSECUTIVE_REJECTS;
+    const tooOld = anchor && raw.ts - anchor.ts > REBASE_AFTER_MS;
+    if (anchor && !tooMany && !tooOld && impliedSpeedReject(anchor, raw)) {
+      state.consecutiveRejects++;
+      return;
+    }
+    state.consecutiveRejects = 0;
+    state.lastAcceptedFix = raw;
+
+    state.fixSamples.push(raw);
+    if (state.fixSamples.length > 10) state.fixSamples.shift();
+    const wAvg = weightedAverage(state.fixSamples);
+    const sm = kalman.process(wAvg.lat, wAvg.lng, wAvg.accuracy, raw.ts);
+    state.smoothed = sm;
+    // Report the filter's own 95% radius, never better than the correlated-error floor.
+    const acc = Math.min(
+      num(wAvg.accuracy, raw.accuracy),
+      Number.isFinite(sm.accuracy95)
+        ? sm.accuracy95
+        : num(wAvg.accuracy, raw.accuracy)
+    );
+    state.currentAccuracy = acc;
+    state.loc = {
+      lat: sm.lat,
+      lng: sm.lng,
+      accuracy: acc,
+      altitude: raw.altitude,
+      ts: raw.ts,
+    };
+    state.locStale = false;
+    state.gpsDenied = false;
+    save('caddy:lastLocation', state.loc);
+    updateGpsUI();
+    updateUserMarker();
+    if (state.map && !state.pannedOnce) {
+      state.map.setView([state.loc.lat, state.loc.lng], 17, {
+        animate: !reduceMotion,
+      });
+      state.pannedOnce = true;
+    } else if (state.map && state.followMode === FollowMode.LOCKED) {
+      holdLockedView({ lat: state.loc.lat, lng: state.loc.lng }, !reduceMotion);
+    }
+    if (state.target) calculateRange();
+
+    if (roundStatus() !== 'idle') {
+      renderRoundShotUI();
+    }
+
+    const roundSetupIsOpen = els.roundSetupSheet?.classList.contains('open');
+
+    if (
+      roundSetupIsOpen &&
+      state.nearbySearchRequested &&
+      !state.nearbyCourseLoading
+    ) {
+      findNearbyCourses();
+    }
+
+    scheduleContextUpdate();
+  }
+
+  // SIGNATURE PRESERVED. Now also surfaces convergence progress and motion state.
+  function updateGpsUI(forceState) {
+    const dot = els.gpsDot;
+    dot.className = 'gps-dot';
+    if (!state.gpsRunning && !state.loc) {
+      if (state.gpsDenied) {
+        dot.classList.add('bad');
+        els.gpsText.textContent = 'GPS denied';
+      } else els.gpsText.textContent = 'Enable GPS';
+      return;
+    }
+    if (!state.loc) {
+      dot.classList.add('searching');
+      els.gpsText.textContent = 'Locating…';
+      return;
+    }
+    const accYd = (state.loc.accuracy || 0) * M_TO_YD;
+    const moving = kalman.speedMps() > KF_ZUPT_SPEED_MPS;
+    const suffix = moving ? '' : ' ·'; // a trailing dot marks a settled, averaging fix
+    if (state.locStale || !state.gpsRunning) {
+      dot.classList.add('warn');
+      els.gpsText.textContent = `Last GPS · ±${fmt(accYd)} yd`;
+    } else if (state.loc.accuracy > USABLE_ACC_M) {
+      dot.classList.add('warn');
+      els.gpsText.textContent = `GPS ±${fmt(accYd)} yd`;
+    } else {
+      dot.classList.add('good');
+      els.gpsText.textContent = `GPS ±${fmt(accYd)} yd${suffix}`;
+    }
+  }
+  // ============================================================
+  //  BLOCK 7 — SHOT LOG + BAYESIAN DISPERSION MODEL
+  //  Replaces: logShot, shotDataSummary, clubStats,
+  //            formulaDispersionYd, clubDispersionYd + their constants
+  //  Schema: caddy:shotLog:v1 entries are EITHER a legacy number (total yd)
+  //          OR { d: totalYd, c: carryYd, l: lateralYd|null, t: ms, a: gpsAccM }.
+  // ============================================================
+
+  const SHOT_FULL_TRUST_N = 5; // legacy name kept; the posterior now blends continuously, this only gates UI copy
+  const SHOT_MIN_TRUST_N = 2; // legacy name kept; minimum n before tracked data influences the posterior mean
+  const SHOT_MAX_PER_CLUB = 200; // ring-buffer cap; recency weighting makes a longer history harmless
+  const DISPERSION_SIGMAS = 1.5; // legacy name kept; superseded by DISPERSION_COVERAGE below
+
+  // Prior on relative distance dispersion. Tour distance-control σ is ≈4% of carry for
+  // short irons rising to ≈6% for the driver; amateurs run ~1.5–2× that.
+  // Ref: Broadie, Every Shot Counts (2014) ch.4 & Interfaces 42 (2012) 146 (shot-pattern analysis);
+  //      TrackMan/Arccos aggregate dispersion studies for the amateur multiplier.
+  const DISP_REL_SHORT = 0.045; // prior relative σ at short-iron distances — Broadie (2012/2014) shot patterns
+  const DISP_REL_LONG = 0.062; // prior relative σ at driver distances — Broadie (2012/2014) shot patterns
+  const DISP_REL_KNEE_LO = 110; // carry, yd, at which the short-iron relative σ applies
+  const DISP_REL_KNEE_HI = 270; // carry, yd, at which the driver relative σ applies
+  const DISP_AMATEUR_MULT = 1.55; // prior inflation for a non-tour player — Arccos/Shot Scope amateur dispersion aggregates
+  const DISP_FLOOR_YD = 3; // no club is tighter than this in practice; also guards tiny samples
+  const DISP_PRIOR_STRENGTH = 6; // ν₀: prior worth ~6 observations, so ~6 shots move σ halfway to measured
+  const DISP_HALFLIFE_DAYS = 240; // recency half-life; a season-old shot carries half the weight of today's
+  const DISPERSION_COVERAGE = 0.87; // two-sided predictive coverage of the reported ± band (≈±1.5σ for large n)
+  const LATERAL_REL_PRIOR = 0.065; // prior relative σ of lateral dispersion (offline as a fraction of carry) — Broadie (2014) ch.4
+  const SHOT_SANITY_LO = 0.4; // hard reject below 40% of stock: topped/chunked, not a distance sample
+  const SHOT_SANITY_HI = 1.6; // hard reject above 160% of stock: mis-tagged club or GPS blowup
+
+  function loadShotLog() {
+    const v = load(SHOTLOG_KEY, {});
+    return v && typeof v === 'object' ? v : {};
+  }
+  function saveShotLog(log) {
+    save(SHOTLOG_KEY, log);
+  }
+
+  // Normalize either schema to { d, c, l, t, a }.
+  function normalizeShotEntry(e) {
+    if (Number.isFinite(e)) return { d: e, c: null, l: null, t: null, a: null };
+    if (!e || typeof e !== 'object') return null;
+    const d = Number(e.d);
+    if (!Number.isFinite(d) || d <= 0) return null;
+    return {
+      d,
+      c: Number.isFinite(e.c) ? Number(e.c) : null,
+      l: Number.isFinite(e.l) ? Number(e.l) : null,
+      t: Number.isFinite(e.t) ? Number(e.t) : null,
+      a: Number.isFinite(e.a) ? Number(e.a) : null,
+    };
+  }
+
+  // Estimate the carry component of a measured TOTAL distance by modelling the rollout
+  // for that club's launch conditions in the CURRENT conditions. This fixes a real
+  // inconsistency: the log measured total, but club.yards is a carry number.
+  function estimateCarryFromTotal(totalYd, firmness = 'medium') {
+    const D = Math.max(0, num(totalYd, 0));
+    if (D < 15) return D;
+    let carry = D * 0.94; // seed
+    for (let i = 0; i < 6; i++) {
+      const L = launchForStandardCarry(carry);
+      const t = integrateTrajectory(L, STILL_AIR_ENV);
+      const roll = rolloutYd(
+        t.landSpeedMps,
+        t.descentDeg,
+        firmness,
+        STILL_AIR_ENV.gravity
+      );
+      const next = clamp(D - roll, 0.55 * D, D);
+      if (Math.abs(next - carry) < 0.05) {
+        carry = next;
+        break;
+      }
+      carry = next;
+    }
+    return carry;
+  }
+
+  /**
+   * SIGNATURE PRESERVED: logShot(clubId, distanceYd, baselineYd) -> boolean.
+   * Extra optional args are additive and safe to omit.
+   */
+  function logShot(clubId, distanceYd, baselineYd, lateralYd, gpsAccM) {
+    const dist = Number(distanceYd);
+    if (!clubId || !Number.isFinite(dist) || dist <= 0 || dist > 400)
+      return false;
+    const base = num(baselineYd, 0);
+    if (
+      base > 0 &&
+      (dist < base * SHOT_SANITY_LO || dist > base * SHOT_SANITY_HI)
+    )
+      return false;
+    const log = loadShotLog();
+    const arr = log[clubId] || (log[clubId] = []);
+    arr.push({
+      d: Math.round(dist * 10) / 10,
+      c: Math.round(estimateCarryFromTotal(dist) * 10) / 10,
+      l: Number.isFinite(lateralYd) ? Math.round(lateralYd * 10) / 10 : null,
+      t: Date.now(),
+      a: Number.isFinite(gpsAccM) ? Math.round(gpsAccM * 10) / 10 : null,
+    });
+    if (arr.length > SHOT_MAX_PER_CLUB)
+      log[clubId] = arr.slice(-SHOT_MAX_PER_CLUB);
+    saveShotLog(log);
+    return true;
+  }
+
+  // SIGNATURE PRESERVED.
+  function shotDataSummary() {
+    const log = loadShotLog();
+    let total = 0,
+      clubs = 0;
+    for (const k of Object.keys(log)) {
+      const n = (log[k] || []).map(normalizeShotEntry).filter(Boolean).length;
+      if (n > 0) {
+        total += n;
+        clubs += 1;
+      }
+    }
+    return { total, clubs };
+  }
+  function clearShotData() {
+    try {
+      localStorage.removeItem(SHOTLOG_KEY);
+    } catch { }
+  }
+
+  function priorRelSigma(carryYd) {
+    const t = smoothstep(DISP_REL_KNEE_LO, DISP_REL_KNEE_HI, num(carryYd, 150));
+    return (
+      (DISP_REL_SHORT + t * (DISP_REL_LONG - DISP_REL_SHORT)) *
+      DISP_AMATEUR_MULT
+    );
+  }
+
+  // SIGNATURE PRESERVED. formulaDispersionYd(carry) -> prior ±band in yards.
+  function formulaDispersionYd(carry) {
+    const c = num(carry, 0);
+    if (c <= 0) return 0;
+    const z = invNorm(0.5 + DISPERSION_COVERAGE / 2);
+    return Math.max(DISP_FLOOR_YD, Math.round(z * priorRelSigma(c) * c));
+  }
+
+  /**
+   * SIGNATURE PRESERVED: clubStats(clubId) -> { mean, stdev, n } (+ many extras).
+   * Now a Normal–Inverse-Gamma posterior over (carry mean, carry σ) with exponential
+   * recency weighting and robust pre-screening. mean/stdev keep their old meaning
+   * (null when insufficient data) so existing callers are unaffected.
+   * Conjugate NIG update: Gelman et al., Bayesian Data Analysis 3rd ed. §3.3.
+   */
+  function clubStatsUncached(clubId, opts = {}) {
+    const log = loadShotLog();
+    const raw = (log[clubId] || []).map(normalizeShotEntry).filter(Boolean);
+    const club = state.clubs.find((c) => c.id === clubId);
+    const stock = club ? num(club.yards, 0) : 0;
+    const empty = {
+      mean: null,
+      stdev: null,
+      n: 0,
+      nEff: 0,
+      sigmaPrior: null,
+      sigmaPost: null,
+      meanTotal: null,
+      lateralSigma: null,
+      ciLo: null,
+      ciHi: null,
+      trend: null,
+      source: 'none',
+    };
+    if (!raw.length) {
+      if (stock > 0) {
+        empty.sigmaPrior = priorRelSigma(stock) * stock;
+        empty.sigmaPost = empty.sigmaPrior;
+        empty.source = 'prior';
+      }
+      return empty;
+    }
+    const now = Date.now();
+    const HL = DISP_HALFLIFE_DAYS * 86400000;
+    // Carry values (fall back to a modelled carry for legacy total-only entries).
+    const vals = raw.map((e) =>
+      Number.isFinite(e.c) ? e.c : estimateCarryFromTotal(e.d)
+    );
+    // Robust pre-screen at 3× MAD around the median; keeps a single shank from wrecking σ.
+    const med = median(vals);
+    const mad =
+      madSigma(vals) || Math.max(DISP_FLOOR_YD, 0.05 * (stock || med));
+    const keep = vals.map((v) => Math.abs(v - med) <= 3 * mad);
+    const wts = raw.map((e, i) => {
+      if (!keep[i]) return 0;
+      const age = Number.isFinite(e.t) ? Math.max(0, now - e.t) : HL; // undated legacy shots get one half-life of age
+      let w = Math.pow(0.5, age / HL);
+      if (Number.isFinite(e.a) && e.a > 0)
+        w *= 1 / (1 + (e.a / ROUND_GPS_OK_M) ** 2); // down-weight sloppy fixes
+      return w;
+    });
+    const mom = weightedMoments(vals, wts);
+    const n = vals.filter((_, i) => keep[i]).length;
+    const nEff = mom.nEff;
+
+    // NIG prior: μ₀ = stock number, σ₀ from the skill model, ν₀ = DISP_PRIOR_STRENGTH.
+    const mu0 = stock > 0 ? stock : mom.mean;
+    const sigPrior = priorRelSigma(mu0) * mu0;
+    const nu0 = DISP_PRIOR_STRENGTH;
+    const kappa0 = 2; // weak prior on the mean: worth 2 observations
+    const sampleVar = Number.isFinite(mom.variance)
+      ? mom.variance
+      : sigPrior * sigPrior;
+    // Posterior scale for σ (mode of the inverse-gamma marginal).
+    const nuN = nu0 + nEff;
+    const ss =
+      nu0 * sigPrior * sigPrior +
+      Math.max(0, nEff - 1) * sampleVar +
+      ((kappa0 * nEff) / (kappa0 + nEff)) * (mom.mean - mu0) ** 2;
+    const sigmaPost = Math.sqrt(
+      Math.max((DISP_FLOOR_YD * DISP_FLOOR_YD) / 4, ss / Math.max(1, nuN))
+    );
+    const meanPost = (kappa0 * mu0 + nEff * mom.mean) / (kappa0 + nEff);
+
+    // Posterior predictive interval for the MEAN (what to set club.yards to).
+    const seMean = sigmaPost / Math.sqrt(kappa0 + nEff);
+    const tq = tQuantile(0.975, Math.max(1, nuN));
+    // Lateral dispersion.
+    const lats = raw.map((e) => e.l).filter((x) => Number.isFinite(x));
+    const latSig =
+      lats.length >= 3
+        ? Math.max(
+          madSigma(lats) || 0,
+          Math.sqrt(
+            weightedMoments(
+              lats,
+              lats.map(() => 1)
+            ).variance || 0
+          )
+        )
+        : LATERAL_REL_PRIOR * (mu0 || 150);
+    // Distance trend over time (yd per 30 days) — is the player gaining or losing speed?
+    // Cap the Theil-Sen input: it is O(n²) and 60 recent shots already resolve a trend.
+    const dated = raw
+      .map((e, i) => ({ e, v: vals[i] }))
+      .filter((o) => Number.isFinite(o.e.t))
+      .slice(-TREND_MAX_SHOTS);
+    const trend =
+      dated.length >= 5
+        ? (
+          theilSen(
+            dated.map((o) => o.e.t / 86400000),
+            dated.map((o) => o.v)
+          ) || {}
+        ).slope
+        : null;
+
+    // Legacy-compatible fields: only expose mean/stdev once there is real data.
+    const legacyMean = n >= 1 ? mom.mean : null;
+    const legacyStd =
+      n >= 2 && Number.isFinite(sampleVar)
+        ? Math.sqrt(sampleVar) / c4(Math.max(2, Math.round(nEff))) // bias-corrected sample SD
+        : null;
+
+    return {
+      mean: legacyMean,
+      stdev: legacyStd,
+      n,
+      nEff,
+      meanPost,
+      sigmaPost,
+      sigmaPrior: sigPrior,
+      meanTotal: raw.length
+        ? weightedMoments(
+          raw.map((e) => e.d),
+          wts
+        ).mean
+        : null,
+      lateralSigma: latSig,
+      ciLo: meanPost - tq * seMean,
+      ciHi: meanPost + tq * seMean,
+      trendYdPer30d: Number.isFinite(trend) ? trend * 30 : null,
+      source: n >= SHOT_MIN_TRUST_N ? 'posterior' : 'prior-dominated',
+    };
+  }
+
+  /**
+   * SIGNATURE PRESERVED: clubDispersionYd(club) -> ± band in yards.
+   * Now the posterior-predictive half-width at DISPERSION_COVERAGE, which shrinks
+   * smoothly and automatically as evidence accumulates. No hand-tuned blend.
+   */
+  function clubDispersionYd(club) {
+    if (!club) return 0;
+    const carry = num(club.yards, 0);
+    if (carry <= 0) return 0;
+    const st = clubStats(club.id);
+    const sig = Number.isFinite(st.sigmaPost)
+      ? st.sigmaPost
+      : priorRelSigma(carry) * carry;
+    const nu = DISP_PRIOR_STRENGTH + (st.nEff || 0);
+    // Predictive spread includes uncertainty in the mean itself.
+    const predSig = sig * Math.sqrt(1 + 1 / (2 + (st.nEff || 0)));
+    const q = tQuantile(0.5 + DISPERSION_COVERAGE / 2, Math.max(1, nu));
+    return Math.max(DISP_FLOOR_YD, Math.round(q * predSig));
+  }
+  // Raw σ accessors used by the strategy engine.
+  function clubSigmaDistYd(club) {
+    if (!club) return 0;
+    const st = clubStats(club.id);
+    return Number.isFinite(st.sigmaPost)
+      ? st.sigmaPost
+      : priorRelSigma(num(club.yards, 150)) * num(club.yards, 150);
+  }
+  function clubSigmaLatYd(club) {
+    if (!club) return 0;
+    const st = clubStats(club.id);
+    return Number.isFinite(st.lateralSigma)
+      ? st.lateralSigma
+      : LATERAL_REL_PRIOR * num(club.yards, 150);
+  }
+
+  // ============================================================
+  //  PATCH A — MEMOIZATION LAYER FOR THE SHOT MODEL
+  //  Overrides: loadShotLog, saveShotLog, clearShotData,
+  //             estimateCarryFromTotal.  Adds: clubStats wrapper.
+  //  clubStats is on the hot path ~216x per recalculation; without this
+  //  every call re-parses localStorage and re-runs an O(n²) regression.
+  // ============================================================
+
+  const TREND_MAX_SHOTS = 60; // cap on Theil-Sen input; O(n²) cost vs negligible extra trend resolution
+  const CARRY_MEMO_BINS = 2; // memo bins per yard for the total→carry inversion (0.5 yd resolution)
+  const CARRY_MEMO_MAX = 512; // bounded memo; shot distances span at most ~400 yd
+
+  let _shotLogCache = null;
+  let _shotLogVersion = 0;
+  const _clubStatsCache = new Map();
+  const _carryMemo = new Map();
+
+  function loadShotLog() {
+    if (_shotLogCache) return _shotLogCache;
+    const v = load(SHOTLOG_KEY, {});
+    _shotLogCache = v && typeof v === 'object' ? v : {};
+    return _shotLogCache;
+  }
+  function saveShotLog(log) {
+    save(SHOTLOG_KEY, log);
+    _shotLogCache = log;
+    _shotLogVersion++;
+    _clubStatsCache.clear();
+  }
+  function clearShotData() {
+    try {
+      localStorage.removeItem(SHOTLOG_KEY);
+    } catch { }
+    _shotLogCache = null;
+    _shotLogVersion++;
+    _clubStatsCache.clear();
+  }
+
+  // Memoized: the inversion runs up to 6 trajectory integrations per distinct distance.
+  function estimateCarryFromTotal(totalYd, firmness = 'medium') {
+    const D = Math.max(0, num(totalYd, 0));
+    if (D < 15) return D;
+    const key = firmness + '|' + Math.round(D * CARRY_MEMO_BINS);
+    const hit = _carryMemo.get(key);
+    if (hit !== undefined) return hit;
+    let carry = D * 0.94;
+    for (let i = 0; i < 6; i++) {
+      const L = launchForStandardCarry(carry);
+      const t = integrateTrajectory(L, STILL_AIR_ENV);
+      const roll = rolloutYd(
+        t.landSpeedMps,
+        t.descentDeg,
+        firmness,
+        STILL_AIR_ENV.gravity
+      );
+      const next = clamp(D - roll, 0.55 * D, D);
+      if (Math.abs(next - carry) < 0.05) {
+        carry = next;
+        break;
+      }
+      carry = next;
+    }
+    if (_carryMemo.size > CARRY_MEMO_MAX) _carryMemo.clear();
+    _carryMemo.set(key, carry);
+    return carry;
+  }
+
+  // SIGNATURE PRESERVED. Cache key folds in the club's stock yardage because the
+  // NIG prior is centred on it — editing a club invalidates its entry automatically.
+  function clubStats(clubId, opts) {
+    if (opts && Object.keys(opts).length)
+      return clubStatsUncached(clubId, opts);
+    const club = state.clubs.find((c) => c.id === clubId);
+    const key =
+      clubId + '|' + _shotLogVersion + '|' + (club ? num(club.yards, 0) : 0);
+    const hit = _clubStatsCache.get(key);
+    if (hit) return hit;
+    const out = clubStatsUncached(clubId, opts);
+    _clubStatsCache.set(key, out);
+    return out;
+  }
+  // ============================================================
+  //  BLOCK 8 — EXPECTED STROKES + DECISION THEORY
+  //  Replaces: recommendClub, recommendSmart, selectedClubGuidance
+  // ============================================================
+
+  // PGA Tour expected-strokes baselines. Distances in yards except putting (feet).
+  // Source: M. Broadie, Every Shot Counts (2014), Tour baseline tables; and
+  // M. Broadie, "Assessing Golfer Performance on the PGA TOUR", Interfaces 42 (2012) 146.
+  const ES_X_FAIRWAY = [
+    10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 220, 240,
+    260, 280, 300,
+  ];
+  const ES_Y_FAIRWAY = [
+    2.18, 2.4, 2.52, 2.6, 2.66, 2.7, 2.72, 2.75, 2.77, 2.8, 2.85, 2.91, 2.98,
+    3.08, 3.19, 3.32, 3.45, 3.58, 3.7, 3.82,
+  ]; // fairway baseline — Broadie (2014)
+  const ES_Y_ROUGH = [
+    2.34, 2.59, 2.7, 2.78, 2.84, 2.88, 2.91, 2.93, 2.96, 2.98, 3.04, 3.1, 3.17,
+    3.26, 3.36, 3.47, 3.58, 3.68, 3.78, 3.88,
+  ]; // rough baseline — Broadie (2014)
+  const ES_Y_SAND = [
+    2.43, 2.53, 2.66, 2.82, 2.92, 2.99, 3.03, 3.05, 3.07, 3.1, 3.14, 3.19, 3.25,
+    3.32, 3.42, 3.53, 3.64, 3.74, 3.84, 3.94,
+  ]; // sand baseline — Broadie (2014)
+  const ES_Y_RECOV = [
+    2.95, 3.05, 3.1, 3.15, 3.2, 3.25, 3.3, 3.35, 3.4, 3.45, 3.51, 3.57, 3.63,
+    3.69, 3.76, 3.83, 3.9, 3.97, 4.04, 4.11,
+  ]; // recovery baseline — Broadie (2014)
+  const ES_X_GREEN_FT = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70,
+    80, 90, 100,
+  ];
+  const ES_Y_GREEN = [
+    1.001, 1.009, 1.053, 1.147, 1.256, 1.357, 1.443, 1.515, 1.575, 1.626, 1.702,
+    1.784, 1.874, 1.936, 1.985, 2.026, 2.064, 2.098, 2.127, 2.182, 2.231, 2.267,
+    2.298, 2.324,
+  ]; // putting baseline — Broadie (2014)
+  const ES_PENALTY_STROKES = 1.0; // one-stroke penalty for a water/OB drop — Rules of Golf 17.1d / 18.2
+  // Amateur scaling. Broadie's baselines are Tour; a mid handicap is worse everywhere, but
+  // decisions depend on DIFFERENCES, which scale roughly with the player's relative dispersion.
+  const ES_AMATEUR_PENALTY_MULT = 1.25; // inflation of off-green penalties for a non-tour short game — Broadie (2014) ch.6 amateur comparisons
+
+  const _esFair = pchip(ES_X_FAIRWAY, ES_Y_FAIRWAY);
+  const _esRough = pchip(ES_X_FAIRWAY, ES_Y_ROUGH);
+  const _esSand = pchip(ES_X_FAIRWAY, ES_Y_SAND);
+  const _esRecov = pchip(ES_X_FAIRWAY, ES_Y_RECOV);
+  const _esGreen = pchip(ES_X_GREEN_FT, ES_Y_GREEN);
+
+  function expectedStrokes(lie, distYd) {
+    const d = Math.max(0, num(distYd, 0));
+    if (lie === 'green') return clamp(_esGreen(clamp(d * 3, 0.5, 110)), 1, 3.2);
+    if (d < 1) return 1.0;
+    const f = (fn, floor) => clamp(fn(clamp(d, 5, 320)), floor, 5.2);
+    switch (lie) {
+      case 'rough':
+        return f(_esRough, 2.1);
+      case 'sand':
+        return f(_esSand, 2.2);
+      case 'recovery':
+        return f(_esRecov, 2.6);
+      case 'penalty':
+        return f(_esFair, 2.0) + ES_PENALTY_STROKES * ES_AMATEUR_PENALTY_MULT;
+      default:
+        return f(_esFair, 2.0);
+    }
+  }
+  // Distance in yards from a landing point back to the hole, given the pin is at pinAlong
+  // along the shot line, and the shot finished at (along, lateral) relative to the ball.
+  const distToPin = (along, lateral, pinAlong) =>
+    hypot2(pinAlong - along, lateral);
+
+  /**
+   * Classify a finish point into a lie, using whatever green geometry we actually have.
+   * geo: { front, center, back, depth, widthYd, axisBearing } — see Block 9.
+   * All distances measured along/across the shot line, in yards from the player.
+   */
+  const GREEN_FRINGE_YD = 3; // apron/fringe collar depth around a green, yd — typical USGA maintenance practice
+  const GREEN_WIDTH_TO_DEPTH = 1.15; // median green is slightly wider than deep — USGA Green Section green-sizing guidance (median ≈6,000 ft²)
+  const GREEN_MIN_HALF_WIDTH_YD = 8; // floor on the modelled half-width when depth is unknown
+  function classifyLie(along, lateral, geo, opts = {}) {
+    const surround = opts.surround || 'rough';
+    if (!geo || geo.front == null || geo.back == null) {
+      // No green model: treat "close to the aim point" as green, else the surround.
+      const tgt = num(opts.targetAlong, NaN);
+      if (Number.isFinite(tgt) && hypot2(along - tgt, lateral) < 12)
+        return 'green';
+      return surround;
+    }
+    const halfW = Math.max(
+      GREEN_MIN_HALF_WIDTH_YD,
+      0.5 *
+      (Number.isFinite(geo.widthYd)
+        ? geo.widthYd
+        : GREEN_WIDTH_TO_DEPTH * geo.depth)
+    );
+    const inDepth = along >= geo.front && along <= geo.back;
+    const inWidth = Math.abs(lateral - num(geo.centerLateral, 0)) <= halfW;
+    if (inDepth && inWidth) return 'green';
+    const nearDepth =
+      along >= geo.front - GREEN_FRINGE_YD &&
+      along <= geo.back + GREEN_FRINGE_YD;
+    const nearWidth =
+      Math.abs(lateral - num(geo.centerLateral, 0)) <= halfW + GREEN_FRINGE_YD;
+    if (nearDepth && nearWidth) return 'green'; // fringe putts as green in the baselines
+    return surround;
+  }
+
+  /**
+   * Expected strokes for playing `club` at a shot whose plays-like requirement is
+   * playsTarget, with the pin at pinPlays plays-like yards. Integrates the 2-D outcome
+   * distribution on a 9x9 Gauss-Legendre product rule over the normal factors.
+   */
+  function clubExpectedStrokes(club, playsTarget, pinPlays, geo, opts = {}) {
+    if (!club)
+      return { es: Infinity, pGreen: 0, pShort: 0, pLong: 0, pTrouble: 0 };
+    const mu = num(club.yards, 0);
+    if (mu <= 0)
+      return { es: Infinity, pGreen: 0, pShort: 0, pLong: 0, pTrouble: 0 };
+    const effort = num(opts.effort, 1); // 1 = stock; <1 = smooth; >1 = firm
+    const muEff = mu * effort;
+    // Taking speed off tightens distance a little but costs strike quality; firming up
+    // widens both. Empirically σ scales sub-linearly with effort.
+    const sigD =
+      clubSigmaDistYd(club) * (0.82 + 0.18 * effort) * Math.max(0.85, effort);
+    const sigL =
+      clubSigmaLatYd(club) * Math.max(0.85, effort) * (mu > 0 ? muEff / mu : 1);
+    // Convert plays-like requirement back into the along-line frame: the club's plays-like
+    // capability is muEff, and the pin sits pinPlays away in the same units.
+    const nodes = NORM_NODES;
+    let es = 0,
+      pGreen = 0,
+      pShort = 0,
+      pLong = 0,
+      pTrouble = 0;
+    for (let i = 0; i < nodes.zs.length; i++) {
+      const along = muEff + nodes.zs[i] * sigD;
+      for (let j = 0; j < nodes.zs.length; j++) {
+        const lateral = nodes.zs[j] * sigL + num(opts.aimLateral, 0);
+        const w = nodes.ws[i] * nodes.ws[j];
+        const lie = classifyLie(along, lateral, geo, {
+          surround: opts.surround,
+          targetAlong: playsTarget,
+        });
+        const dPin = distToPin(along, lateral, pinPlays);
+        es += w * expectedStrokes(lie, dPin);
+        if (lie === 'green') pGreen += w;
+        else {
+          pTrouble += w;
+          if (geo && geo.front != null && along < geo.front) pShort += w;
+          else if (geo && geo.back != null && along > geo.back) pLong += w;
+        }
+      }
+    }
+    return { es, pGreen, pShort, pLong, pTrouble, muEff, sigD, sigL };
+  }
+
+  /**
+   * SIGNATURE PRESERVED: recommendClub(playsYd) -> { main, sub }.
+   * Geometry-free path. Now chooses by minimizing expected strokes against a generic
+   * green centred on the target, with the player's own dispersion, and reports the
+   * effort level that minimizes it rather than a fixed "take the longer club" heuristic.
+   */
+  const GENERIC_GREEN_DEPTH_YD = 30; // median depth of a modern green, yd — USGA Green Section green-sizing guidance
+  const EFFORT_LEVELS = [0.88, 0.94, 1.0, 1.06]; // smooth / easy / stock / firm — the four swings most players actually own
+  const EFFORT_NAMES = ['smooth', 'easy', 'stock', 'firm'];
+  const ES_TIE_THRESHOLD = 0.008; // strokes; below this two options are indistinguishable given model error
+
+  function recommendClub(playsYd) {
+    playsYd = Math.max(0, num(playsYd, 0));
+    const asc = sortedClubsAsc(),
+      desc = sortedClubsDesc();
+    if (!asc.length)
+      return {
+        main: 'Add clubs',
+        sub: 'Go to Clubs and add your stock carry distances.',
+      };
+    const shortest = asc[0],
+      longest = desc[0];
+
+    if (playsYd <= 3)
+      return {
+        main: 'No full shot needed',
+        sub: 'Tap-in or tiny chip — 0–3 yards.',
+      };
+    if (playsYd < 20)
+      return {
+        main: 'Putt / chip',
+        sub: 'Very close. Use feel; no full swing.',
+      };
+
+    // Generic green centred on the target so short/long misses are penalized symmetrically.
+    const geo = {
+      front: playsYd - GENERIC_GREEN_DEPTH_YD / 2,
+      back: playsYd + GENERIC_GREEN_DEPTH_YD / 2,
+      depth: GENERIC_GREEN_DEPTH_YD,
+      widthYd: GENERIC_GREEN_DEPTH_YD * GREEN_WIDTH_TO_DEPTH,
+      centerLateral: 0,
+    };
+    let best = null;
+    for (const c of desc) {
+      for (let k = 0; k < EFFORT_LEVELS.length; k++) {
+        const eff = EFFORT_LEVELS[k];
+        const r = clubExpectedStrokes(c, playsYd, playsYd, geo, {
+          effort: eff,
+          surround: 'rough',
+        });
+        // Penalize efforts outside the stock swing slightly: they are harder to repeat
+        // than the dispersion model alone implies.
+        const penalty = Math.abs(eff - 1) * 0.02;
+        const score = r.es + penalty;
+        if (!best || score < best.score - 1e-9)
+          best = { club: c, eff, effName: EFFORT_NAMES[k], score, ...r };
+      }
+    }
+    if (!best)
+      return {
+        main: 'Add clubs',
+        sub: 'Go to Clubs and add your stock carry distances.',
+      };
+
+    // Genuinely out of range?
+    if (playsYd > longest.yards * 1.08) {
+      const gap = Math.round(playsYd - longest.yards);
+      return {
+        main: 'Lay up',
+        sub: `${gap} yd beyond your ${longest.yards} yd ${longest.name
+          }. Lay up to a full-wedge number (${Math.max(
+            40,
+            Math.round(playsYd - shortest.yards)
+          )} yd carry leaves ${shortest.name}).`,
+      };
+    }
+    if (playsYd < shortest.yards * 0.55) {
+      const pct = clamp(Math.round((playsYd / shortest.yards) * 100), 30, 95);
+      return {
+        main: `${shortest.name} · ${pct}%`,
+        sub: `Partial wedge — control it with swing length, not deceleration. Stock ${shortest.name} is ${shortest.yards} yd.`,
+      };
+    }
+
+    const c = best.club;
+    const delta = Math.round(c.yards * best.eff - playsYd);
+    const label =
+      best.eff === 1 ? `${c.name} stock` : `${c.name} ${best.effName}`;
+    // Runner-up margin tells the player how much the choice actually matters.
+    let runner = null;
+    for (const o of desc) {
+      if (o.id === c.id) continue;
+      const r = clubExpectedStrokes(o, playsYd, playsYd, geo, {
+        effort: 1,
+        surround: 'rough',
+      });
+      if (!runner || r.es < runner.es) runner = { club: o, es: r.es };
+    }
+    const margin = runner ? runner.es - best.es : 0;
+    const bits = [];
+    bits.push(
+      `Stock ${c.name} ${c.yards} yd vs ${fmt(playsYd)} yd plays-like (${delta >= 0 ? '+' : ''
+      }${delta}).`
+    );
+    bits.push(
+      `${Math.round(best.pGreen * 100)}% green, E[strokes] ${fmt(best.es, 2)}.`
+    );
+    if (runner && margin < ES_TIE_THRESHOLD)
+      bits.push(
+        `${runner.club.name} is statistically identical — take the one you trust.`
+      );
+    else if (runner)
+      bits.push(
+        `Next best ${runner.club.name} costs ${fmt(margin, 2)} strokes.`
+      );
+    return { main: label, sub: bits.join(' ') };
+  }
+
+  /**
+   * SIGNATURE PRESERVED: recommendSmart(playsTarget, geo, bearing, accYd)
+   *   -> { main, sub, verdict, tips }
+   * Full geometry-aware optimizer. Verdict now comes from the expected-strokes surface
+   * and the probability of trouble, not from a ±2 yd edge comparison.
+   */
+  const VERDICT_GO_PGREEN = 0.55; // ≥55% green with the best club => commit
+  const VERDICT_BAIL_PGREEN = 0.22; // <22% green with the best club => the target itself is wrong
+  const VERDICT_BAIL_ES = 3.35; // expected strokes above which the shot is not worth attempting as aimed
+  function recommendSmart(playsTarget, geo, bearing, accYd) {
+    const asc = sortedClubsAsc();
+    const desc = sortedClubsDesc();
+
+    if (!asc.length) {
+      return {
+        main: 'Add clubs',
+        sub: 'Add your carry distances in the Clubs tab.',
+        verdict: 'neutral',
+        tips: [],
+      };
+    }
+
+    /*
+     * Important:
+     * The selected map target is always the shot target.
+     *
+     * FCB describes the green around that target. It must never silently
+     * replace the selected target with green center.
+     */
+    const pinPlays = playsTarget;
+
+    // Convert FCB's actual along-line distances into the same approximate
+    // plays-like scale used for club selection.
+    const rawTargetYd = Math.max(
+      1,
+      state.lastCalc && Number.isFinite(state.lastCalc.horizontalYd)
+        ? state.lastCalc.horizontalYd
+        : haversineMeters(state.loc, state.target) * M_TO_YD
+    );
+
+    const playsScale = playsTarget / rawTargetYd;
+
+    const frontRaw =
+      geo && Number.isFinite(geo.frontAlong)
+        ? geo.frontAlong
+        : geo && Number.isFinite(geo.front)
+          ? geo.front
+          : null;
+
+    const backRaw =
+      geo && Number.isFinite(geo.backAlong)
+        ? geo.backAlong
+        : geo && Number.isFinite(geo.back)
+          ? geo.back
+          : null;
+
+    // Green model remains aligned to the selected target line.
+    // Sorting prevents accidental Front/Back placement order from breaking it.
+    const model =
+      Number.isFinite(frontRaw) && Number.isFinite(backRaw)
+        ? {
+          front: Math.min(frontRaw, backRaw) * playsScale,
+          back: Math.max(frontRaw, backRaw) * playsScale,
+          depth: Math.abs(backRaw - frontRaw) * playsScale || 4,
+          widthYd: Number.isFinite(geo.widthYd)
+            ? geo.widthYd
+            : GREEN_WIDTH_TO_DEPTH *
+            Math.max(4, Math.abs(backRaw - frontRaw) * playsScale),
+          centerLateral: num(geo.centerLateral, 0),
+        }
+        : null;
+
+    let best = null,
+      alternatives = [];
+    for (const c of desc) {
+      for (let k = 0; k < EFFORT_LEVELS.length; k++) {
+        const eff = EFFORT_LEVELS[k];
+        const r = clubExpectedStrokes(c, playsTarget, pinPlays, model, {
+          effort: eff,
+          surround: 'rough',
+          aimLateral: 0,
+        });
+        const score = r.es + Math.abs(eff - 1) * 0.02;
+        const cand = { club: c, eff, effName: EFFORT_NAMES[k], score, ...r };
+        alternatives.push(cand);
+        if (!best || score < best.score - 1e-9) best = cand;
+      }
+    }
+    alternatives.sort((a, b) => a.score - b.score);
+    const tips = [];
+    let verdict = 'neutral';
+    if (!best) {
+      return {
+        main: 'No recommendation',
+        sub: 'Add carry distances in the Clubs tab.',
+        verdict,
+        tips,
+      };
+    }
+
+    const c = best.club;
+    const main =
+      best.eff === 1 ? `${c.name} stock` : `${c.name} ${best.effName}`;
+    const pG = best.pGreen;
+
+    if (pG >= VERDICT_GO_PGREEN) {
+      verdict = 'go';
+      tips.push(
+        `🟢 Green light — ${c.name} holds this green ${Math.round(
+          pG * 100
+        )}% of the time from your pattern. Commit and fire.`
+      );
+    } else if (pG < VERDICT_BAIL_PGREEN || best.es > VERDICT_BAIL_ES) {
+      verdict = 'bail';
+      tips.push(
+        `🔴 Low-percentage shot — only ~${Math.round(
+          pG * 100
+        )}% of your pattern finds this green (E[strokes] ${fmt(
+          best.es,
+          2
+        )}). Play to the fat part or lay back.`
+      );
+    } else {
+      verdict = 'manage';
+      tips.push(
+        `🟡 Manageable but not free — ~${Math.round(pG * 100)}% green with ${c.name
+        }. Smooth swing, favour the miss you can live with.`
+      );
+    }
+
+    // Which miss is actually costly? Compare conditional expected strokes short vs long.
+    if (model) {
+      if (best.pLong > best.pShort * 1.6 && best.pLong > 0.12)
+        tips.push(
+          `Your bad miss here is long (${Math.round(
+            best.pLong * 100
+          )}% vs ${Math.round(
+            best.pShort * 100
+          )}% short). Take the club that can't fly the back.`
+        );
+      else if (best.pShort > best.pLong * 1.6 && best.pShort > 0.12)
+        tips.push(
+          `Your bad miss here is short (${Math.round(
+            best.pShort * 100
+          )}% vs ${Math.round(
+            best.pLong * 100
+          )}% long) — most amateurs under-club; add one.`
+        );
+      const depth = Math.round(model.depth);
+      if (depth >= 26)
+        tips.push(
+          `Deep green (~${depth} yd playing depth) — plenty of room, be aggressive at the number.`
+        );
+      else if (depth <= 14)
+        tips.push(
+          `Shallow green (~${depth} yd playing depth) — distance control decides this shot, not line.`
+        );
+    }
+
+    // Is a different club materially better, or is this a coin flip?
+    const distinct = alternatives
+      .filter(
+        (a, i) => alternatives.findIndex((b) => b.club.id === a.club.id) === i
+      )
+      .slice(0, 3);
+    if (distinct.length > 1) {
+      const m = distinct[1].score - distinct[0].score;
+      if (m < ES_TIE_THRESHOLD)
+        tips.push(
+          `${distinct[0].club.name} and ${distinct[1].club.name} are statistically tied — pick the one you'd rather hit.`
+        );
+      else if (m > 0.06)
+        tips.push(
+          `${c.name} is clearly right here — ${distinct[1].club.name
+          } costs about ${fmt(m, 2)} strokes.`
+        );
+    }
+
+    // Where the target sits relative to the green.
+    if (model && playsTarget < model.front - 4) {
+      tips.push(
+        `Your selected target is about ${Math.round(
+          model.front - playsTarget
+        )} yd short of the green front. This is treated as an intentional layup target.`
+      );
+    }
+
+    if (model && playsTarget > model.back + 4) {
+      tips.push(
+        `Your selected target is about ${Math.round(
+          playsTarget - model.back
+        )} yd beyond the green back. Move the target onto the green unless that is intentional.`
+      );
+    }
+
+    // GPS uncertainty folded into the decision, not just warned about.
+    if (accYd > ACCURACY_WARN_YD) {
+      const sigTot = Math.hypot(clubSigmaDistYd(c), accYd / RAYLEIGH_95);
+      tips.push(
+        `GPS is ±${fmt(
+          accYd
+        )} yd — that inflates your effective distance spread to ±${fmt(
+          sigTot * 1.5
+        )} yd. Favour the middle.`
+      );
+    }
+
+    const sub =
+      best.eff === 1
+        ? `${Math.round(pG * 100)}% green chance.`
+        : `${Math.round(pG * 100)}% green chance with a ${best.effName} swing.`;
+
+    return {
+      main,
+      sub,
+      verdict,
+      tips,
+
+      pGreen: pG,
+      expectedStrokes: best.es,
+      club: c,
+      effort: best.eff,
+      effortName: best.effName,
+    }; // <-- this closes the object literal
+  } // <-- ADD THIS: closes recommendSmart()
+  /**
+     * SIGNATURE PRESERVED: selectedClubGuidance(playsYd) -> string.
+     ...
+     */
+  function selectedClubGuidance(playsYd) {
+    const club = state.clubs.find((c) => c.id === state.prefs.selectedClubId);
+    if (!club || !Number.isFinite(playsYd)) return '';
+    const mu = num(club.yards, 0);
+    if (mu <= 0) return '';
+    const sig = Math.max(1, clubSigmaDistYd(club));
+    const pCover = 1 - normCdf((playsYd - mu) / sig); // P(carry >= required)
+    const d = mu - playsYd;
+    const effort = playsYd / mu;
+    const pct = Math.round(pCover * 100);
+
+    let head;
+    if (Math.abs(d) <= 0.35 * sig) head = `${club.name}: stock`;
+    else if (d > 0 && effort >= 0.9)
+      head = `${club.name}: easy (${Math.round(effort * 100)}%)`;
+    else if (d > 0) head = `${club.name}: too much — ${fmt(d)} yd long`;
+    else if (effort <= 1.06)
+      head = `${club.name}: firm (${Math.round(effort * 100)}%)`;
+    else head = `${club.name}: not enough — ${fmt(-d)} yd short`;
+
+    return `${head} · ${pct}% chance of covering ${fmt(playsYd)} yd`;
+  }
+
+  // ============================================================
+  //  BLOCK 9 — GREEN GEOMETRY
+  //  Replaces: LEFTOVER_HIDE_YD, OVERSHOOT_TOL_YD,
+  //            leftoverToGreen, formatLeftover, greenGeometry
+  // ============================================================
+
+  const LEFTOVER_HIDE_YD = 3; // below this, leg 2 is degenerate — hide it
+  const OVERSHOOT_TOL_YD = 3; // legacy name kept; superseded by the statistical test below
+  const GREEN_AXIS_MIN_YD = 6; // front/back closer than this cannot define a reliable axis
+  const GREEN_ASPECT_DEFAULT = 1.15; // median green is slightly wider than deep — USGA Green Section green-sizing guidance
+  const GREEN_WIDTH_MIN_YD = 16; // floor on modelled green width, yd — smallest common championship green
+  const GREEN_WIDTH_MAX_YD = 55; // ceiling on modelled green width, yd — very large double green
+
+  /**
+   * SIGNATURE PRESERVED: leftoverToGreen(user, aim, green) -> { yards, state }
+   * state ∈ 'short' | 'over' | 'on'.
+   * Now uses the signed along-track projection of the green centre onto the aim line,
+   * with the overshoot threshold scaled by actual GPS uncertainty rather than a fixed 3 yd.
+   */
+  function leftoverToGreen(user, aim, green) {
+    if (!user || !aim || !green) return null;
+    const aimToGreen = haversineMeters(aim, green) * M_TO_YD;
+    if (aimToGreen < LEFTOVER_HIDE_YD) return { yards: 0, state: 'on' };
+    // Project the green centre onto the user->aim line. Positive = beyond the aim point.
+    const alongGreen = alongTrackYd(user, aim, green);
+    const userToAim = haversineMeters(user, aim) * M_TO_YD;
+    const beyond = userToAim - alongGreen; // >0 means the aim point sits past the green centre
+    // Threshold = 1σ of the differential GPS error, floored at the legacy tolerance.
+    const sigYd =
+      state.loc && Number.isFinite(state.loc.accuracy)
+        ? state.loc.accuracy * GPS_ACC_TO_SIGMA * M_TO_YD
+        : OVERSHOOT_TOL_YD;
+    const tol = Math.max(OVERSHOOT_TOL_YD, sigYd);
+    return { yards: aimToGreen, state: beyond > tol ? 'over' : 'short' };
+  }
+
+  function formatLeftover(lo) {
+    if (!lo || lo.state === 'on') return 'at green';
+    const y = Math.round(lo.yards);
+    return lo.state === 'over' ? `${y} yd past` : `${y} yd left`;
+  }
+
+  /**
+   * SIGNATURE PRESERVED: greenGeometry() -> { front, center, back, depth } (+ extras).
+   * front/center/back remain straight-line yardages from the player, so all existing
+   * readouts are unchanged. depth is now the TRUE PLAYING DEPTH along the shot line.
+   */
+  function greenGeometry() {
+    if (!state.loc) return null;
+    const yd = (p) => (p ? haversineMeters(state.loc, p) * M_TO_YD : null);
+    const front = yd(state.frontPt);
+    const center = yd(state.greenCenter);
+    const back = yd(state.backPt);
+
+    const aim =
+      state.target || state.greenCenter || state.backPt || state.frontPt;
+    let depth =
+      front != null && back != null ? Math.max(0, back - front) : null;
+    let axisBearing = null,
+      obliquityDeg = null,
+      widthYd = null,
+      centerLateral = 0;
+    let frontAlong = null,
+      backAlong = null,
+      centerAlong = null;
+
+    if (aim && state.frontPt && state.backPt) {
+      const axisLen = haversineMeters(state.frontPt, state.backPt) * M_TO_YD;
+      if (axisLen >= GREEN_AXIS_MIN_YD) {
+        axisBearing = initialBearingDeg(state.frontPt, state.backPt);
+        const shotBearing = initialBearingDeg(state.loc, aim);
+        obliquityDeg = Math.abs(angleDiff(axisBearing, shotBearing));
+        // Playing depth = the green axis projected onto the shot line.
+        frontAlong = alongTrackYd(state.loc, aim, state.frontPt);
+        backAlong = alongTrackYd(state.loc, aim, state.backPt);
+        depth = Math.max(0, backAlong - frontAlong);
+        // Width perpendicular to the AXIS, estimated from the aspect ratio of the axis
+        // length, then re-projected onto the shot line's cross direction. An oblique
+        // green presents more width and less depth — both handled here.
+        const axisWidth = clamp(
+          axisLen * GREEN_ASPECT_DEFAULT,
+          GREEN_WIDTH_MIN_YD,
+          GREEN_WIDTH_MAX_YD
+        );
+        const ob = d2r(obliquityDeg);
+        widthYd = clamp(
+          Math.abs(axisWidth * Math.cos(ob)) + Math.abs(axisLen * Math.sin(ob)),
+          GREEN_WIDTH_MIN_YD,
+          GREEN_WIDTH_MAX_YD * 1.4
+        );
+      }
+    }
+    if (aim && state.greenCenter) {
+      centerAlong = alongTrackYd(state.loc, aim, state.greenCenter);
+      centerLateral = crossTrackYd(state.loc, aim, state.greenCenter);
+    }
+    if (widthYd == null && depth != null && depth > 0)
+      widthYd = clamp(
+        depth * GREEN_ASPECT_DEFAULT,
+        GREEN_WIDTH_MIN_YD,
+        GREEN_WIDTH_MAX_YD
+      );
+
+    return {
+      front,
+      center,
+      back,
+      depth,
+      widthYd,
+      axisBearing,
+      obliquityDeg,
+      centerLateral,
+      frontAlong,
+      backAlong,
+      centerAlong,
+      // Straight-line depth, kept separately so the UI can show both if you want.
+      depthStraight:
+        front != null && back != null ? Math.max(0, back - front) : null,
+    };
+  }
+
+  // FCB is green reference data, not an instruction to replace the user's map target.
+  // Only engage the green-aware optimizer when the selected target is actually
+  // on or very near the marked green center.
+  function targetIsOnMarkedGreen(geo) {
+    if (!state.loc || !state.target || !geo || !state.greenCenter) return false;
+
+    const targetToCenterYd =
+      haversineMeters(state.target, state.greenCenter) * M_TO_YD;
+
+    // Green depth provides a reasonable tolerance. The clamp prevents very
+    // small or very large FCB spacing from making this too strict or too loose.
+    const toleranceYd = clamp(
+      (Number.isFinite(geo.depthStraight) ? geo.depthStraight : 24) * 0.8,
+      18,
+      35
+    );
+
+    return targetToCenterYd <= toleranceYd;
+  }
+
+  function targetToGreenTip() {
+    if (
+      !state.loc ||
+      !state.target ||
+      !state.greenCenter ||
+      !Number.isFinite(state.loc.lat) ||
+      !Number.isFinite(state.loc.lng) ||
+      !Number.isFinite(state.target.lat) ||
+      !Number.isFinite(state.target.lng) ||
+      !Number.isFinite(state.greenCenter.lat) ||
+      !Number.isFinite(state.greenCenter.lng)
+    ) {
+      return null;
+    }
+
+    const userToTargetYd = haversineMeters(state.loc, state.target) * M_TO_YD;
+
+    const greenAlongShotLineYd = alongTrackYd(
+      state.loc,
+      state.target,
+      state.greenCenter
+    );
+
+    if (
+      !Number.isFinite(userToTargetYd) ||
+      !Number.isFinite(greenAlongShotLineYd)
+    ) {
+      return null;
+    }
+
+    /*
+     * Positive means the green center is beyond the selected target.
+     * Negative means the selected target is beyond the green center.
+     */
+    const remainingAlongYd = greenAlongShotLineYd - userToTargetYd;
+
+    const targetToCenterYd =
+      haversineMeters(state.target, state.greenCenter) * M_TO_YD;
+
+    if (
+      !Number.isFinite(remainingAlongYd) ||
+      !Number.isFinite(targetToCenterYd) ||
+      targetToCenterYd < 4
+    ) {
+      return null;
+    }
+
+    const lateralOffsetYd = crossTrackYd(
+      state.loc,
+      state.target,
+      state.greenCenter
+    );
+
+    const lateralText =
+      Math.abs(lateralOffsetYd) >= 8
+        ? ` Green center is also about ${Math.round(
+          Math.abs(lateralOffsetYd)
+        )} yd ${lateralOffsetYd > 0 ? 'right' : 'left'} of your target line.`
+        : '';
+
+    if (remainingAlongYd > 3) {
+      return (
+        `This is a layup target: it leaves about ${Math.round(
+          remainingAlongYd
+        )} yd to green center.` +
+        ` Club choice is based on the selected target, not the green center.` +
+        lateralText
+      );
+    }
+
+    if (remainingAlongYd < -3) {
+      return (
+        `Your selected target is about ${Math.round(
+          Math.abs(remainingAlongYd)
+        )} yd beyond green center.` +
+        ` Move the target back onto the green unless that is intentional.` +
+        lateralText
+      );
+    }
+
+    return null;
+  }
+  // ============================================================
+  //  BLOCK 10 — WEATHER / ELEVATION CONTEXT
+  //  Replaces: updateContext, getWeatherOrNeutral,
+  //            getElevationOrNeutral, updateWeatherUI, stampText
+  // ============================================================
+
+  const ELEV_PROFILE_N = 9; // sample count along the shot line; 9 resolves a ridge to ~1/8 of the shot
+  const BLIND_CLEARANCE_FT = 8; // terrain rising this far above the sight line makes the shot blind
+  const GEOID_TYPICAL_CONUS_M = -30; // mean EGM96 geoid undulation over the CONUS, m — NGA EGM96 model summary (used only to sanity-check GPS altitude)
+
+  function getWeatherOrNeutral() {
+    return (
+      state.context.weather || {
+        tempF: STD_TEMP_F,
+        rh: STD_RH,
+        windMph: 0,
+        windFromDeg: 0,
+        pressureHpa: NaN,
+        gustMph: NaN,
+        shearAlpha: NaN,
+      }
+    );
+  }
+  function getElevationOrNeutral() {
+    if (state.context.elevation) return state.context.elevation;
+    // GPS-only fallback: differential is zero, absolute altitude is ellipsoidal so it is
+    // only used for density (a 30 m error costs ~0.3% density, ~0.5 yd on a 200 yd shot).
+    const hasGpsAlt = state.loc && Number.isFinite(state.loc.altitude);
+    const gpsFt = hasGpsAlt ? state.loc.altitude * M_TO_FT : 0;
+    return {
+      userFt: gpsFt,
+      targetFt: gpsFt,
+      usedGpsFallback: hasGpsAlt,
+      profileFt: null,
+      blindFt: 0,
+    };
+  }
+
+  async function updateContext() {
+    const user = state.loc,
+      target = state.target;
+    if (!user && !target) {
+      updateWeatherUI();
+      return;
+    }
+    const seq = ++state.contextSeq;
+    const isCurrent = () => seq === state.contextSeq;
+
+    const p = target
+      ? user
+        ? midpointGeodesic(user, target)
+        : { lat: target.lat, lng: target.lng }
+      : { lat: user.lat, lng: user.lng };
+
+    // --- Weather: add pressure, gusts, and a second wind level for shear fitting ---
+    const wKey = `weather:${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+    const wUrl =
+      'https://api.open-meteo.com/v1/forecast' +
+      `?latitude=${p.lat.toFixed(5)}&longitude=${p.lng.toFixed(5)}` +
+      '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,' +
+      'wind_gusts_10m,surface_pressure,pressure_msl,wind_speed_80m,wind_direction_80m' +
+      '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto';
+    try {
+      const w = await cachedJSON(wKey, wUrl, WEATHER_TTL);
+      if (!isCurrent()) return;
+      const cur = w.data.current || {};
+      const u10 = num(cur.wind_speed_10m, 0);
+      const u80 = num(cur.wind_speed_80m, NaN);
+      const alpha = Number.isFinite(u80) ? fitShearAlpha(u10, u80) : null;
+      // Prefer station-level surface_pressure; otherwise reduce MSL to station level.
+      let pHpa = num(cur.surface_pressure, NaN);
+      if (!Number.isFinite(pHpa)) {
+        const msl = num(cur.pressure_msl, NaN);
+        const e0 = state.context.elevation;
+        if (Number.isFinite(msl) && e0)
+          pHpa =
+            stationPressureFromMSL(
+              msl * 100,
+              e0.userFt * FT_TO_M,
+              (num(cur.temperature_2m, 70) - 32) / 1.8
+            ) / 100;
+      }
+      state.context.weather = {
+        tempF: num(cur.temperature_2m, STD_TEMP_F),
+        rh: num(cur.relative_humidity_2m, STD_RH),
+        windMph: u10,
+        windFromDeg: norm(num(cur.wind_direction_10m, 0)),
+        gustMph: num(cur.wind_gusts_10m, NaN),
+        pressureHpa: Number.isFinite(pHpa) ? pHpa : NaN,
+        shearAlpha: Number.isFinite(alpha) ? alpha : NaN,
+        wind80Mph: Number.isFinite(u80) ? u80 : NaN,
+      };
+      state.context.offlineWeather = !!w.offline;
+      state.context.weatherTs = w.ts;
+    } catch {
+      if (!isCurrent()) return;
+      state.context.weather = null;
+      state.context.offlineWeather = true;
+    }
+
+    // --- Elevation: 9-point profile along the shot line ---
+    if (user && target) {
+      const eKey =
+        `elev:${user.lat.toFixed(4)},${user.lng.toFixed(4)}:` +
+        `${target.lat.toFixed(4)},${target.lng.toFixed(4)}`;
+      const g = geodesicInverse(user, target);
+      const pts = [];
+      for (let i = 0; i < ELEV_PROFILE_N; i++)
+        pts.push(geodesicDirect(user, g.az1, (g.s * i) / (ELEV_PROFILE_N - 1)));
+      const eUrl =
+        'https://api.open-meteo.com/v1/elevation' +
+        `?latitude=${pts.map((q) => q.lat.toFixed(5)).join(',')}` +
+        `&longitude=${pts.map((q) => q.lng.toFixed(5)).join(',')}`;
+      try {
+        const e = await cachedJSON(eKey, eUrl, ELEV_TTL);
+        if (!isCurrent()) return;
+        const arr = Array.isArray(e.data.elevation) ? e.data.elevation : [];
+        const gpsAltM =
+          state.loc && Number.isFinite(state.loc.altitude)
+            ? state.loc.altitude
+            : null;
+        const userM = Number.isFinite(arr[0]) ? arr[0] : gpsAltM;
+        const lastIdx = arr.length - 1;
+        const targetM = Number.isFinite(arr[lastIdx]) ? arr[lastIdx] : userM;
+        const profileFt = arr.filter(Number.isFinite).map((m) => m * M_TO_FT);
+        // Blind-shot detection: max terrain height above the straight sight line.
+        let blindFt = 0;
+        if (profileFt.length >= 3) {
+          const u = profileFt[0],
+            t = profileFt[profileFt.length - 1],
+            n = profileFt.length - 1;
+          for (let i = 1; i < n; i++) {
+            const sight = u + ((t - u) * i) / n;
+            blindFt = Math.max(blindFt, profileFt[i] - sight);
+          }
+        }
+        state.context.elevation = {
+          userFt: Number.isFinite(userM) ? userM * M_TO_FT : 0,
+          targetFt: Number.isFinite(targetM)
+            ? targetM * M_TO_FT
+            : Number.isFinite(userM)
+              ? userM * M_TO_FT
+              : 0,
+          usedGpsFallback: !Number.isFinite(arr[0]) && gpsAltM !== null,
+          profileFt: profileFt.length ? profileFt : null,
+          blindFt: Math.max(0, blindFt),
+        };
+        state.context.offlineElevation = !!e.offline;
+        state.context.elevTs = e.ts;
+      } catch {
+        if (!isCurrent()) return;
+        const gpsFt =
+          state.loc && Number.isFinite(state.loc.altitude)
+            ? state.loc.altitude * M_TO_FT
+            : 0;
+        state.context.elevation = {
+          userFt: gpsFt,
+          targetFt: gpsFt,
+          usedGpsFallback: state.loc && Number.isFinite(state.loc.altitude),
+          profileFt: null,
+          blindFt: 0,
+        };
+        state.context.offlineElevation = true;
+      }
+    }
+    if (!isCurrent()) return;
+    updateWeatherUI();
+    if (state.target) calculateRange();
+  }
+
+  function updateWeatherUI() {
+    const w = getWeatherOrNeutral(),
+      e = getElevationOrNeutral();
+    if (state.context.weather && w.windMph >= 1) {
+      const gust =
+        Number.isFinite(w.gustMph) && w.gustMph > w.windMph + 2
+          ? `–${Math.round(w.gustMph)}`
+          : '';
+      els.windMetric.textContent = `${fmt(w.windMph)}${gust} mph`;
+      els.windSubMetric.textContent = `from ${bearingToCompass(w.windFromDeg)}`;
+    } else {
+      els.windMetric.textContent = state.context.weather
+        ? `${fmt(w.windMph)} mph`
+        : 'Neutral';
+      els.windSubMetric.textContent = '';
+    }
+    els.tempMetric.textContent = state.context.weather
+      ? `${fmt(w.tempF)}° / ${fmt(w.rh)}%`
+      : `${STD_TEMP_F}° / ${STD_RH}%`;
+    if (state.context.elevation) {
+      const diff = e.targetFt - e.userFt;
+      els.elevMetric.textContent = `${diff >= 0 ? '+' : ''}${fmt(diff)} ft`;
+    } else els.elevMetric.textContent = '0 ft';
+
+    const bits = [];
+    if (!state.context.weather) bits.push('Neutral');
+    if (state.context.offlineWeather) bits.push('Cached wx');
+    if (state.context.offlineElevation) bits.push('Cached elev');
+    // Density ratio is the single most informative status number for a golfer.
+    const rho = airDensity({
+      tempF: w.tempF,
+      rh: w.rh,
+      altitudeFt: (e.targetFt + e.userFt) / 2,
+      pressureHpa: w.pressureHpa,
+    });
+    bits.push(`ρ ${fmt((rho / RHO_STD) * 100)}%`);
+    if (Number.isFinite(w.pressureHpa)) bits.push('baro');
+    if (
+      !state.context.offlineWeather &&
+      !state.context.offlineElevation &&
+      state.context.weather
+    )
+      bits.push('Live');
+    els.weatherStatus.textContent = bits.join(' · ');
+  }
+
+  function stampText() {
+    const wt = state.context.weatherTs
+      ? new Date(state.context.weatherTs).toLocaleTimeString()
+      : '—';
+    const et = state.context.elevTs
+      ? new Date(state.context.elevTs).toLocaleTimeString()
+      : '—';
+    const c = state.lastCalc;
+    const model =
+      c && Number.isFinite(c.rhoKgM3)
+        ? ` · ρ=${fmt(c.rhoKgM3, 4)} kg/m³ (${fmt(
+          c.densityRatio * 100,
+          1
+        )}% of std)`
+        : '';
+    const solver =
+      c && c.solverReached === false
+        ? ' · target above apex (extrapolated)'
+        : '';
+    return (
+      `Weather as of ${wt}${state.context.offlineWeather ? ' (offline)' : ''}` +
+      ` · Elevation as of ${et}${state.context.offlineElevation ? ' (offline)' : ''
+      }` +
+      `${model}${solver} · 3-DOF RK4 trajectory solve, lie assumed neutral (0 yd).`
+    );
+  }
+  // ============================================================
+  //  BLOCK 11 — WIND LABELING + TIP SCORING
+  //  Replaces: bearingToCompass, windRelative, caddyTips, coachTips
+  // ============================================================
+
+  const COMPASS_32 = [
+    'N',
+    'NbE',
+    'NNE',
+    'NEbN',
+    'NE',
+    'NEbE',
+    'ENE',
+    'EbN',
+    'E',
+    'EbS',
+    'ESE',
+    'SEbE',
+    'SE',
+    'SEbS',
+    'SSE',
+    'SbE',
+    'S',
+    'SbW',
+    'SSW',
+    'SWbS',
+    'SW',
+    'SWbW',
+    'WSW',
+    'WbS',
+    'W',
+    'WbN',
+    'WNW',
+    'NWbW',
+    'NW',
+    'NWbN',
+    'NNW',
+    'NbW',
+  ]; // 32-point mariner's compass — Bowditch, American Practical Navigator, Table of Compass Points
+  // SIGNATURE PRESERVED; optional second arg selects 32-point resolution (11.25° bins).
+  function bearingToCompass(bearing, points) {
+    const b = norm(num(bearing, 0));
+    if (points === 32) return COMPASS_32[Math.round(b / 11.25) % 32];
+    return COMPASS_16[Math.round(b / 22.5) % 16];
+  }
+
+  /**
+   * SIGNATURE PRESERVED: windRelative(windFromDeg, shotBearing, speedMph)
+   *   -> { along, cross, primary, fromLabel }
+   * BUG FIX: the old implementation computed `cross` from the wind's TOWARD vector, giving
+   * it the OPPOSITE sign to windComponents().crosswindMph. Both now use one convention:
+   *   along > 0 => tailwind   (unchanged)
+   *   cross > 0 => wind FROM the right => ball pushed LEFT => aim RIGHT  (was inverted)
+   */
+  const WIND_CALM_MPH = 1.5; // below this the wind is inside model and gauge noise — WMO-No. 8 anemometer starting threshold
+  function windRelative(windFromDeg, shotBearing, speedMph) {
+    const { headwindMph, crosswindMph } = windComponents({
+      windMph: speedMph,
+      windFromDeg,
+      bearingDeg: shotBearing,
+    });
+    const along = -headwindMph; // + = tail, matching the original meaning
+    const cross = crosswindMph; // + = from the right => aim right
+    const a = Math.abs(along),
+      c = Math.abs(cross);
+    let primary;
+    if (num(speedMph, 0) < WIND_CALM_MPH) primary = 'calm';
+    else if (a >= c) primary = along > 0 ? 'tail' : 'head';
+    else primary = cross > 0 ? 'cross→' : 'cross←';
+    return { along, cross, primary, fromLabel: bearingToCompass(windFromDeg) };
+  }
+
+  /**
+   * SIGNATURE PRESERVED: caddyTips(ctx, max = 2) -> string[]
+   * ctx keys used by the existing caller are unchanged (plays, along, cross, elevFt, gap,
+   * longerName, beyondLongest, accYd). New optional keys are additive.
+   *
+   * Scoring is now an estimated stroke cost, so ranking is meaningful rather than ordinal.
+   */
+  const TIP_STROKE_PER_YD_ERROR = 0.011; // marginal strokes per yard of proximity error near a green — differentiated from Broadie (2014) proximity-to-strokes curves
+  const TIP_MIN_SCORE = 0.012; // suppress tips worth less than ~0.012 strokes; below this it is noise
+  const HAZARD_CORRIDOR_YD = 28; // ignore hazards wider than this off the line
+  const HAZARD_BAND_YD = 12; // assumed half-depth of an imported hazard
+  const HAZARD_MIN_CARRY_YD = 30; // anything nearer is not a carry decision
+
+  // Imported hazards, projected onto the current aim line. Returns carries
+  // ahead of the ball, nearest first. This is only possible because the OSM
+  // import now stores bunker/water centroids per hole.
+  function holeHazardCarries() {
+    if (!state.loc || !state.target) return [];
+    const hole = getCurrentHoleData();
+    const list = hole && Array.isArray(hole.hazards) ? hole.hazards : [];
+    if (!list.length) return [];
+
+    const out = [];
+    for (const h of list) {
+      if (!Number.isFinite(h.lat) || !Number.isFinite(h.lng)) continue;
+      const carryYd = alongTrackYd(state.loc, state.target, h);
+      const lateralYd = crossTrackYd(state.loc, state.target, h);
+      if (!(carryYd > HAZARD_MIN_CARRY_YD)) continue;
+      if (Math.abs(lateralYd) > HAZARD_CORRIDOR_YD) continue;
+      out.push({
+        type: h.type === 'bunker' ? 'bunker' : 'water',
+        carryYd,
+        lateralYd,
+      });
+    }
+    return out.sort((a, b) => a.carryYd - b.carryYd);
+  }
+
+  // Probability the recommended club finishes inside a hazard band.
+  function hazardRisk(carryYd, muYd, sigmaYd) {
+    const s = Math.max(1, sigmaYd);
+    return (
+      normCdf((carryYd + HAZARD_BAND_YD - muYd) / s) -
+      normCdf((carryYd - HAZARD_BAND_YD - muYd) / s)
+    );
+  }
+
+  function caddyTips(ctx, max = 2) {
+    const plays = num(ctx.plays, 0);
+    const along = num(ctx.along, 0),
+      cross = num(ctx.cross, 0);
+    const elevFt = num(ctx.elevFt, 0),
+      accYd = num(ctx.accYd, 0);
+    const gap = ctx.gap == null ? null : num(ctx.gap, 0);
+    const aimYd = num(ctx.aimYd, 0),
+      gustYd = num(ctx.gustYd, 0);
+    const densityRatio = num(ctx.densityRatio, 1);
+    const descentDeg = num(ctx.descentDeg, NaN);
+    const blindFt = num(ctx.blindFt, 0);
+    const S = TIP_STROKE_PER_YD_ERROR;
+
+    // --- new, from the OSM import + round session ---
+    const hazards = Array.isArray(ctx.hazards) ? ctx.hazards : [];
+    const recName = ctx.recClubName || 'that club';
+    const recMu = num(ctx.recCarryYd, NaN);
+    const recSig = num(ctx.recSigmaYd, NaN);
+    const greenDepth = num(ctx.greenDepthYds, NaN);
+    const hasGreenModel = !!ctx.hasGreenModel;
+    const holePar = num(ctx.holePar, NaN);
+    const holeYards = num(ctx.holeYards, NaN);
+    const strokeIndex = num(ctx.strokeIndex, NaN);
+    const toPar = num(ctx.toPar, NaN);
+    const holesPlayed = num(ctx.holesPlayed, 0);
+
+    // Worst hazard = highest chance of actually finishing in it.
+    let worstHaz = null;
+    if (hazards.length && Number.isFinite(recMu) && Number.isFinite(recSig)) {
+      for (const h of hazards) {
+        const risk = hazardRisk(h.carryYd, recMu, recSig);
+        if (!worstHaz || risk > worstHaz.risk) worstHaz = { ...h, risk };
+      }
+    }
+    // Nearest hazard you must physically carry, regardless of club.
+    const carryHaz = hazards.find((h) => h.carryYd < plays - 8) || null;
+
+    const TIPS = [
+      {
+        id: 'hazardRisk',
+        cat: 'hazard',
+        score: () =>
+          worstHaz && worstHaz.risk > 0.1 ? worstHaz.risk * 0.9 : 0,
+        text: () => {
+          const side =
+            Math.abs(worstHaz.lateralYd) < 10
+              ? 'straight down your line'
+              : `${Math.round(Math.abs(worstHaz.lateralYd))} yd ${worstHaz.lateralYd > 0 ? 'right' : 'left'
+              }`;
+          const noun = worstHaz.type === 'bunker' ? 'Sand' : 'Water';
+          return `${noun} at ${Math.round(
+            worstHaz.carryYd
+          )} yd, ${side}. ${recName} finishes in it about ${Math.round(
+            worstHaz.risk * 100
+          )}% of the time — take the club that flies it, or lay back short of it deliberately.`;
+        },
+      },
+      {
+        id: 'hazardCarry',
+        cat: 'hazard',
+        score: () => {
+          if (!carryHaz || !Number.isFinite(recMu) || !Number.isFinite(recSig))
+            return 0;
+          const pCover =
+            1 - normCdf((carryHaz.carryYd - recMu) / Math.max(1, recSig));
+          return pCover < 0.85 ? (0.85 - pCover) * 0.5 : 0;
+        },
+        text: () => {
+          const pCover =
+            1 - normCdf((carryHaz.carryYd - recMu) / Math.max(1, recSig));
+          return `You have to carry ${carryHaz.type === 'bunker' ? 'sand' : 'water'
+            } at ${Math.round(
+              carryHaz.carryYd
+            )} yd and ${recName} clears it only ${Math.round(
+              pCover * 100
+            )}% of the time. That is not a carry you own — go up a club or play around it.`;
+        },
+      },
+      {
+        id: 'greenDepth',
+        cat: 'green',
+        score: () =>
+          !hasGreenModel && Number.isFinite(greenDepth) && plays > 60
+            ? greenDepth <= 16 || greenDepth >= 30
+              ? 0.035
+              : 0
+            : 0,
+        text: () =>
+          greenDepth <= 16
+            ? `Mapped green is only ~${Math.round(
+              greenDepth
+            )} yd deep — distance control is the whole shot here. Favour the middle and accept pin-high.`
+            : `Mapped green is ~${Math.round(
+              greenDepth
+            )} yd deep, so there is real room front to back. Be aggressive at your number.`,
+      },
+      {
+        id: 'holeShape',
+        cat: 'hole',
+        score: () =>
+          Number.isFinite(strokeIndex) && strokeIndex <= 4 && plays > 70
+            ? 0.03
+            : 0,
+        text: () =>
+          `Stroke index ${strokeIndex}${Number.isFinite(holePar) ? ` on a par ${holePar}` : ''
+          } — one of the hardest holes on the card. Par is a good score; play to the fat side and take bogey over double.`,
+      },
+      {
+        id: 'reachable',
+        cat: 'hole',
+        score: () =>
+          holePar === 5 && Number.isFinite(holeYards) && plays > 200
+            ? 0.025
+            : 0,
+        text: () =>
+          `Par 5 at ${Math.round(
+            holeYards
+          )} yd — going for it from ${Math.round(
+            plays
+          )} yd is a long-iron or wood into a green built for a wedge. Laying up to a full-swing number usually wins on expected strokes.`,
+      },
+      {
+        id: 'scoreState',
+        cat: 'mind',
+        score: () =>
+          holesPlayed >= 3 && Number.isFinite(toPar) && toPar >= 5 ? 0.02 : 0,
+        text: () =>
+          `You are ${formatToPar(
+            toPar
+          )} through ${holesPlayed}. Nothing on this shot gets that back — pick the middle of the green and stop the bleeding.`,
+      },
+      {
+        id: 'headwind',
+        cat: 'wind',
+        score: () =>
+          along < -3 ? Math.abs(num(ctx.windAdjYd, along * -1.5)) * S : 0,
+        text: () =>
+          `~${Math.abs(
+            Math.round(along)
+          )} mph into you — worth about ${Math.abs(
+            Math.round(num(ctx.windAdjYd, 0))
+          )} yd of club. Swing ~80%: forcing it adds spin and balloons the ball short.`,
+      },
+      {
+        id: 'tailwind',
+        cat: 'wind',
+        score: () =>
+          along > 5 ? Math.abs(num(ctx.windAdjYd, 0)) * S * 1.2 : 0,
+        text: () =>
+          `Helping wind takes ~${Math.abs(
+            Math.round(num(ctx.windAdjYd, 0))
+          )} yd off and kills spin — the ball will not stop. Land it short of the flag and plan for release.`,
+      },
+      {
+        id: 'cross',
+        cat: 'wind',
+        score: () => (Math.abs(aimYd) >= 2 ? Math.abs(aimYd) * S * 0.8 : 0),
+        text: () => {
+          const lr =
+            cross > 0 ? 'right-to-left across you' : 'left-to-right across you';
+          const side = aimYd > 0 ? 'right' : 'left';
+          return `~${Math.abs(
+            Math.round(cross)
+          )} mph ${lr} — start it ~${Math.abs(
+            aimYd
+          )} yd ${side} of the pin (${fmt(
+            Math.abs(num(ctx.aimDeg, 0)),
+            1
+          )}°) and let it ride back. Do not fight it.`;
+        },
+      },
+      {
+        id: 'gust',
+        cat: 'wind',
+        score: () => (gustYd >= 4 ? gustYd * S * 0.9 : 0),
+        text: () =>
+          `Gusting — the same swing is worth ±${Math.round(
+            gustYd
+          )} yd depending on when you pull the trigger. Wait for a lull or take more club and swing easy.`,
+      },
+      {
+        id: 'uphill',
+        cat: 'elev',
+        score: () =>
+          elevFt > 6 ? Math.abs(num(ctx.elevAdjYd, elevFt / 3)) * S : 0,
+        text: () =>
+          `Plays ~${Math.abs(
+            Math.round(num(ctx.elevAdjYd, elevFt / 3))
+          )} yd uphill — already in your number. Take enough club; uphill shots land steeper and stop faster.`,
+      },
+      {
+        id: 'downhill',
+        cat: 'elev',
+        score: () =>
+          elevFt < -6 ? Math.abs(num(ctx.elevAdjYd, elevFt / 3)) * S : 0,
+        text: () =>
+          `Plays ~${Math.abs(
+            Math.round(num(ctx.elevAdjYd, elevFt / 3))
+          )} yd downhill — club down, and expect a shallower landing angle and more roll.`,
+      },
+      {
+        id: 'blind',
+        cat: 'elev',
+        score: () => (blindFt > BLIND_CLEARANCE_FT ? 0.05 : 0),
+        text: () =>
+          `Terrain rises ~${Math.round(
+            blindFt
+          )} ft above your sight line — this is a blind shot. Pick an aim point on the horizon before you address the ball.`,
+      },
+      {
+        id: 'density',
+        cat: 'air',
+        score: () =>
+          Math.abs(densityRatio - 1) > 0.03
+            ? Math.abs(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0)) * S
+            : 0,
+        text: () =>
+          densityRatio < 1
+            ? `Thin air (${fmt(
+              densityRatio * 100
+            )}% of standard density) — carrying ~${Math.abs(
+              Math.round(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0))
+            )} yd farther than your stock numbers.`
+            : `Heavy air (${fmt(
+              densityRatio * 100
+            )}% of standard density) — costs ~${Math.abs(
+              Math.round(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0))
+            )} yd. Take the extra club.`,
+      },
+      {
+        id: 'between',
+        cat: 'club',
+        score: () => (gap !== null && gap > 3 && gap <= 16 ? 0.04 : 0),
+        text: () =>
+          `Between clubs — take the ${ctx.longerName} and smooth it. Most amateur approach misses are short, and pin-high is rarely a bad result.`,
+      },
+      {
+        id: 'stock',
+        cat: 'club',
+        score: () => (gap !== null && Math.abs(gap) <= 3 ? 0.018 : 0),
+        text: () =>
+          `Stock ${ctx.longerName} number — commit and make your normal swing.`,
+      },
+      {
+        id: 'wedge',
+        cat: 'club',
+        score: () => (plays > 20 && plays < 60 ? 0.045 : 0),
+        text: () =>
+          `Partial wedge — control distance with swing length, never by decelerating. Pick a stock 3/4 or 1/2 carry you have actually practiced.`,
+      },
+      {
+        id: 'steep',
+        cat: 'flight',
+        score: () =>
+          Number.isFinite(descentDeg) && descentDeg > 48 && plays > 60
+            ? 0.02
+            : 0,
+        text: () =>
+          `Steep ${fmt(
+            descentDeg
+          )}° descent — this one will stop quickly. You can fly it at the flag.`,
+      },
+      {
+        id: 'shallow',
+        cat: 'flight',
+        score: () =>
+          Number.isFinite(descentDeg) && descentDeg < 35 && plays > 120
+            ? 0.03
+            : 0,
+        text: () =>
+          `Shallow ${fmt(
+            descentDeg
+          )}° descent — the ball will run out. Land it short and use the ground.`,
+      },
+      {
+        id: 'layup',
+        cat: 'strategy',
+        score: () => (ctx.beyondLongest ? 0.1 : 0),
+        text: () =>
+          `Beyond your longest club — lay up to a full-wedge number rather than forcing a hero shot. Expected strokes favour the layup here.`,
+      },
+      {
+        id: 'accuracy',
+        cat: 'strategy',
+        score: () => (accYd > ACCURACY_WARN_YD ? accYd * S * 0.6 : 0),
+        text: () =>
+          `GPS is only ±${fmt(
+            accYd
+          )} yd — real distance uncertainty on top of your swing. Favour the centre of the green.`,
+      },
+    ];
+
+    const seen = new Set();
+    return TIPS.map((t) => {
+      let s = 0;
+      try {
+        s = t.score();
+      } catch {
+        s = 0;
+      }
+      return { ...t, s: Number.isFinite(s) ? s : 0 };
+    })
+      .filter((t) => t.s > TIP_MIN_SCORE)
+      .sort((a, b) => b.s - a.s)
+      .filter((t) => (seen.has(t.cat) ? false : seen.add(t.cat)))
+      .slice(0, max)
+      .map((t) => {
+        try {
+          return t.text();
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  }
+
+  const COACH_TRUST_N = 8;
+  const GAP_IDEAL_YD = 12; // target spacing between adjacent clubs, yd — standard full-bag fitting practice
+  const GAP_OVERLAP_FRAC = 0.55; // adjacent clubs whose gap is under this fraction of combined σ are redundant
+
+  // Which clubs this course will genuinely put in your hands, from imported
+  // Which clubs this course will genuinely put in your hands, from imported
+  // hole yardages. Par 4 approach ≈ yards − driver; par 5 ≈ − driver − next.
+  function courseApproachDemand(course) {
+    const desc = sortedClubsDesc();
+    if (!desc.length || !course || !Array.isArray(course.holes)) return [];
+
+    const drv = num(desc[0].yards, 0);
+    const second = desc[1] ? num(desc[1].yards, drv * 0.9) : drv * 0.9;
+    if (drv <= 0) return [];
+
+    const counts = new Map();
+    for (const h of course.holes) {
+      const y = num(h.yards, 0);
+      if (y <= 0) continue;
+      const par = clamp(Math.round(num(h.par, 4)), 3, 6);
+
+      const approach =
+        par <= 3
+          ? y
+          : par === 4
+            ? Math.max(15, y - drv)
+            : Math.max(15, y - drv - second);
+
+      let best = null;
+      for (const c of desc) {
+        const d = Math.abs(num(c.yards, 0) - approach);
+        if (!best || d < best.d) best = { c, d };
+      }
+      if (best) counts.set(best.c.id, (counts.get(best.c.id) || 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .map(([id, n]) => ({ club: desc.find((c) => c.id === id), n }))
+      .filter((o) => o.club)
+      .sort((a, b) => b.n - a.n);
+  }
+
+  function coachTips(ctx) {
+    const tips = [];
+    const { total, clubs: clubCount } = shotDataSummary();
+    const desc = sortedClubsDesc();
+    const course = getCurrentCourse() || state.selectedCourseTemplate || null;
+    const courseName =
+      course && course.name !== 'Casual Round' ? course.name : null;
+
+    if (!total) {
+      tips.push(
+        'No tracked shots yet. Start Round mode, choose a club, tap Start shot, walk to your ball, then tap Finish shot. Each accepted shot sharpens your distance and dispersion model.'
+      );
+      tips.push(
+        `Until then Caddy assumes about ${fmt(
+          priorRelSigma(150) * 100,
+          1
+        )}% relative dispersion. Real data usually beats that guess within 10 shots per club.`
+      );
+      if (courseName) {
+        const demand = courseApproachDemand(course);
+        if (demand.length) {
+          tips.push(
+            `${courseName} will hand you ${demand
+              .slice(0, 3)
+              .map((d) => d.club.name)
+              .join(
+                ', '
+              )} most often. Those are the three worth dialling in first.`
+          );
+        }
+      }
+      return tips;
+    }
+
+    tips.push(
+      `${total} shot${total === 1 ? '' : 's'} logged across ${clubCount} club${clubCount === 1 ? '' : 's'
+      }. Posterior dispersion is now driving your club choices.`
+    );
+
+    // Course-weighted practice prescription: thin data × high demand.
+    const demand = courseApproachDemand(course);
+    if (demand.length) {
+      const priority = demand
+        .map((d) => ({ ...d, st: clubStats(d.club.id) }))
+        .filter((d) => (d.st.nEff || 0) < COACH_TRUST_N)
+        .slice(0, 3);
+      if (priority.length) {
+        tips.push(
+          `Highest-leverage practice${courseName ? ` for ${courseName}` : ''
+          }: ${priority
+            .map(
+              (d) =>
+                `${d.club.name} (${d.n} hole${d.n === 1 ? '' : 's'}, only ${fmt(
+                  d.st.nEff,
+                  1
+                )} effective shots)`
+            )
+            .join(
+              '; '
+            )}. Those clubs decide the most shots and have the least data.`
+        );
+      } else {
+        tips.push(
+          `Your data covers the clubs${courseName ? ` ${courseName}` : ' this course'
+          } actually demands — ${demand
+            .slice(0, 3)
+            .map((d) => d.club.name)
+            .join(
+              ', '
+            )}. Recommendations there are evidence-driven, not prior-driven.`
+        );
+      }
+    } else {
+      const thin = desc
+        .map((c) => ({ c, st: clubStats(c.id) }))
+        .filter((o) => (o.st.nEff || 0) < COACH_TRUST_N)
+        .sort((a, b) => (a.st.nEff || 0) - (b.st.nEff || 0));
+      if (thin.length) {
+        tips.push(
+          `Thinnest data: ${thin
+            .slice(0, 3)
+            .map((o) => o.c.name)
+            .join(
+              ', '
+            )}. About ${COACH_TRUST_N} tracked shots each and the model stops guessing for them.`
+        );
+      }
+    }
+
+    // Stock numbers the data contradicts.
+    for (const c of desc) {
+      const st = clubStats(c.id);
+      if ((st.nEff || 0) < SHOT_MIN_TRUST_N || !Number.isFinite(st.ciLo))
+        continue;
+      const stock = num(c.yards, 0);
+      if (stock > 0 && (stock < st.ciLo || stock > st.ciHi)) {
+        tips.push(
+          `${c.name} is set to ${stock} yd but your tracked carry is ${fmt(
+            st.meanPost
+          )} yd (95% CI ${fmt(st.ciLo)}–${fmt(
+            st.ciHi
+          )}). Update it in the Clubs tab — every recommendation keys off that number.`
+        );
+        break;
+      }
+    }
+
+    // Widest club, by relative dispersion — where strokes leak fastest.
+    const spread = desc
+      .map((c) => ({ c, st: clubStats(c.id) }))
+      .filter((o) => (o.st.nEff || 0) >= SHOT_MIN_TRUST_N && o.st.meanPost > 0)
+      .map((o) => ({ ...o, rel: o.st.sigmaPost / o.st.meanPost }))
+      .sort((a, b) => b.rel - a.rel);
+    if (
+      spread.length &&
+      spread[0].rel > priorRelSigma(spread[0].st.meanPost) * 1.15
+    ) {
+      tips.push(
+        `${spread[0].c.name} is your least repeatable club at ±${fmt(
+          spread[0].st.sigmaPost,
+          1
+        )} yd (${fmt(
+          spread[0].rel * 100,
+          1
+        )}% of carry) — wider than expected for that distance. Strike quality, not yardage, is the fix.`
+      );
+    }
+
+    // Trend.
+    for (const c of desc) {
+      const st = clubStats(c.id);
+      if (
+        Number.isFinite(st.trendYdPer30d) &&
+        Math.abs(st.trendYdPer30d) >= 3
+      ) {
+        tips.push(
+          st.trendYdPer30d > 0
+            ? `${c.name} is trending ~${fmt(
+              st.trendYdPer30d,
+              1
+            )} yd longer per month — you are gaining speed. Re-check its stock number.`
+            : `${c.name} is trending ~${fmt(
+              -st.trendYdPer30d,
+              1
+            )} yd shorter per month — worth checking strike or equipment.`
+        );
+        break;
+      }
+    }
+
+    // Gapping, weighted toward gaps this course exposes.
+    const gaps = gapAnalysis().filter((g) => g.verdict !== 'ok');
+    if (gaps.length) {
+      const demandIds = new Set(demand.map((d) => d.club.id));
+      const relevant =
+        gaps.find((g) => demandIds.has(g.hi.id) || demandIds.has(g.lo.id)) ||
+        gaps[0];
+      tips.push(relevant.note);
+    }
+
+    return tips;
+  }
+  // ============================================================
+  //  BLOCK 12 — SHOT CAPTURE & REJECTION
+  //  Replaces: gpsAccMeters, fixIsUsable, finishShot
+  // ============================================================
+
+  const SHOT_SNR_MIN = 4.0; // require the measured displacement to exceed 4σ of its own uncertainty
+  const SHOT_LATERAL_MAX_DEG = 45; // beyond this off-line the "shot" is a re-tee or a walk, not a swing
+  const SHOT_DWELL_MS = 1500; // require the fix to have settled this long before trusting a capture
+
+  function gpsAccMeters() {
+    return state.loc && Number.isFinite(state.loc.accuracy)
+      ? state.loc.accuracy
+      : Infinity;
+  }
+  function fixIsUsable() {
+    if (!state.loc || state.locStale) return false;
+    if (gpsAccMeters() > ROUND_GPS_OK_M) return false;
+    // Also require the player to be roughly still: a fix captured mid-stride carries a
+    // velocity-lag bias of (speed x filter lag), several yards at walking pace.
+    return kalman.speedMps() < 1.4;
+  }
+  // 1σ uncertainty, in yards, of a distance measured between two independent fixes.
+  function shotDistanceSigmaYd(accAm, accBm) {
+    const sa = num(accAm, ROUND_GPS_OK_M) * GPS_ACC_TO_SIGMA;
+    const sb = num(accBm, ROUND_GPS_OK_M) * GPS_ACC_TO_SIGMA;
+    return Math.sqrt(sa * sa + sb * sb) * M_TO_YD;
+  }
+
+  // SIGNATURE PRESERVED: finishShot(discard)
+  function finishShot(discard) {
+    const rs = state.roundSession;
+    if (!rs || !rs.pending) return;
+    if (discard && !state.loc) {
+      // Discarding with no fix at all: drop the pending shot cleanly.
+      rs.pending = null;
+      rs.status = 'active';
+      saveRoundSession();
+      renderRoundShotUI();
+      setNotice('Shot discarded.', 'greenish');
+      return;
+    }
+    if (!discard && !fixIsUsable()) {
+      setNotice(
+        'Need a good, settled GPS fix to measure the shot. Stand still for a moment, or discard.',
+        'danger'
+      );
+      haptic(12);
+      return;
+    }
+    const p = rs.pending;
+    const endPt = { lat: state.loc.lat, lng: state.loc.lng };
+    const distanceYd = haversineMeters(p.startPt, endPt) * M_TO_YD;
+    const bearingDeg = initialBearingDeg(p.startPt, endPt);
+
+    // Signed lateral offset from the intended line via the exact cross-track projection.
+    let lateralYd = null;
+    if (p.intendedBearing != null && distanceYd > 0) {
+      const aimPt = geodesicDirect(
+        p.startPt,
+        p.intendedBearing,
+        distanceYd * YD_TO_M
+      );
+      lateralYd = Math.round(-crossTrackYd(p.startPt, aimPt, endPt));
+    }
+
+    const club = state.clubs.find((c) => c.id === p.clubId);
+    const baseline = club ? num(club.yards, 0) : 0;
+
+    // Statistical rejection instead of a fixed 8 yd floor.
+    const sigYd = shotDistanceSigmaYd(p.startAcc, gpsAccMeters());
+    const belowNoise =
+      distanceYd < Math.max(ROUND_MIN_SHOT_YD, SHOT_SNR_MIN * sigYd);
+    const wayOffLine =
+      p.intendedBearing != null &&
+      Math.abs(angleDiff(bearingDeg, p.intendedBearing)) > SHOT_LATERAL_MAX_DEG;
+    const doDiscard = !!discard || belowNoise;
+
+    let counted = false;
+    if (!doDiscard && p.clubId && !wayOffLine)
+      counted = logShot(
+        p.clubId,
+        distanceYd,
+        baseline,
+        lateralYd,
+        gpsAccMeters()
+      );
+
+    rs.shots.push({
+      clubId: p.clubId,
+      startPt: p.startPt,
+      endPt,
+      distanceYd: Math.round(distanceYd),
+      bearingDeg: Math.round(bearingDeg),
+      intendedBearing:
+        p.intendedBearing == null ? null : Math.round(p.intendedBearing),
+      lateralYd,
+      hole: rs.hole,
+      ts: Date.now(),
+      discarded: doDiscard,
+      counted,
+    });
+    rs.pending = null;
+    rs.status = 'active';
+    saveRoundSession();
+    renderRoundShotUI();
+
+    if (belowNoise && !discard)
+      setNotice(
+        `Only ${Math.round(distanceYd)} yd — inside GPS noise (±${fmt(
+          sigYd
+        )} yd). Logged as non-counting.`,
+        'greenish'
+      );
+    else if (doDiscard)
+      setNotice(
+        'Shot discarded — kept in history, excluded from your model.',
+        'greenish'
+      );
+    else if (wayOffLine)
+      setNotice(
+        `${Math.round(distanceYd)} yd but ${Math.round(
+          Math.abs(angleDiff(bearingDeg, p.intendedBearing))
+        )}° off line — recorded, excluded from distance stats.`,
+        'greenish'
+      );
+    else if (counted) {
+      const st = clubStats(p.clubId);
+      setNotice(
+        `${club ? club.name : 'Shot'}: ${Math.round(distanceYd)} yd (±${fmt(
+          sigYd
+        )} yd GPS). ` +
+        `Carry model now ${fmt(st.meanPost)} ± ${fmt(st.sigmaPost)} yd from ${st.n
+        } shot${st.n === 1 ? '' : 's'}.`,
+        'greenish'
+      );
+    } else
+      setNotice(
+        `${Math.round(
+          distanceYd
+        )} yd recorded (outside normal range — excluded from club stats).`,
+        'greenish'
+      );
+
+    haptic(10);
+    if (state.target && state.loc) calculateRange();
+  }
+  // ============================================================
+  //  BLOCK 13 — PRACTICE ANALYTICS + GAPPING
+  //  Replaces: renderPracticeSection.  Adds: gapAnalysis.
+  // ============================================================
+
+  /**
+   * Gapping analysis. A gap is "bad" not at a fixed yardage but relative to the
+   * dispersion of the two clubs bracketing it: if the gap exceeds the combined
+   * predictive spread you have a distance you cannot cover; if it is far smaller,
+   * the two clubs are statistically indistinguishable and one is wasted.
+   */
+  function gapAnalysis() {
+    const desc = sortedClubsDesc();
+    const out = [];
+    for (let i = 0; i < desc.length - 1; i++) {
+      const hi = desc[i],
+        lo = desc[i + 1];
+      const gap = hi.yards - lo.yards;
+      const sHi = clubSigmaDistYd(hi),
+        sLo = clubSigmaDistYd(lo);
+      const sComb = Math.sqrt(sHi * sHi + sLo * sLo);
+      // Probability that a shot aimed at the midpoint misses both clubs' comfortable range.
+      const mid = (hi.yards + lo.yards) / 2;
+      const pMid = Math.max(
+        1 - normCdf((mid - lo.yards) / Math.max(EPS, sLo)),
+        normCdf((mid - hi.yards) / Math.max(EPS, sHi))
+      );
+      let verdict = 'ok',
+        note = '';
+      if (gap > 1.9 * sComb && gap > GAP_IDEAL_YD * 1.6) {
+        verdict = 'gap';
+        note = `${gap} yd between ${hi.name} and ${lo.name
+          } is wider than your dispersion (±${fmt(
+            sComb
+          )} yd) can bridge — around ${Math.round(
+            mid
+          )} yd you have no comfortable club.`;
+      } else if (gap < GAP_OVERLAP_FRAC * sComb) {
+        verdict = 'overlap';
+        note = `${hi.name} and ${lo.name
+          } are only ${gap} yd apart versus ±${fmt(
+            sComb
+          )} yd of spread — statistically the same club. One slot is wasted.`;
+      }
+      out.push({ hi, lo, gap, sComb, pMid, verdict, note });
+    }
+    return out;
+  }
+
+  // SIGNATURE PRESERVED: renderPracticeSection()
+  function renderPracticeSection() {
+    const { total, clubs: clubCount } = shotDataSummary();
+    const pc = document.getElementById('practiceShots');
+    const pcl = document.getElementById('practiceClubs');
+    const pb = document.getElementById('practiceBreakdown');
+    const chip = document.getElementById('practiceSessionChip');
+
+    if (pc) pc.textContent = String(total);
+    if (pcl) pcl.textContent = String(clubCount);
+    if (chip) chip.textContent = total ? 'Active' : 'No session';
+    if (!pb) return;
+
+    const desc = sortedClubsDesc();
+    if (!total || !desc.length) {
+      pb.innerHTML =
+        '<div class="hint">Track shots to see per-club posterior carry, dispersion and gapping here.</div>';
+      return;
+    }
+    const rows = [];
+    for (const c of desc) {
+      const st = clubStats(c.id);
+      if (!st.n) continue;
+      const disp = clubDispersionYd(c);
+      const rel = st.meanPost > 0 ? (st.sigmaPost / st.meanPost) * 100 : NaN;
+      const ci = Number.isFinite(st.ciLo)
+        ? `${fmt(st.ciLo)}–${fmt(st.ciHi)}`
+        : '—';
+      const flag =
+        num(c.yards, 0) > 0 &&
+          Number.isFinite(st.ciLo) &&
+          (c.yards < st.ciLo || c.yards > st.ciHi)
+          ? ' ⚠︎'
+          : '';
+      rows.push(
+        `<div class="break-row"><span>${escapeHtml(c.name)}${flag}</span>` +
+        `<b>${fmt(st.meanPost)} ±${fmt(st.sigmaPost, 1)} yd · ${fmt(
+          rel,
+          1
+        )}% · ` +
+        `n=${st.n} (n<sub>eff</sub> ${fmt(
+          st.nEff,
+          1
+        )}) · CI ${ci} · band ±${disp}</b></div>`
+      );
+      if (Number.isFinite(st.lateralSigma))
+        rows.push(
+          `<div class="break-row"><span style="opacity:.6">↳ lateral σ</span>` +
+          `<b style="opacity:.75">±${fmt(st.lateralSigma, 1)} yd (${fmt(
+            (st.lateralSigma / Math.max(1, st.meanPost)) * 100,
+            1
+          )}%)</b></div>`
+        );
+      if (
+        Number.isFinite(st.trendYdPer30d) &&
+        Math.abs(st.trendYdPer30d) >= 1.5
+      )
+        rows.push(
+          `<div class="break-row"><span style="opacity:.6">↳ trend</span>` +
+          `<b style="opacity:.75">${st.trendYdPer30d > 0 ? '+' : ''}${fmt(
+            st.trendYdPer30d,
+            1
+          )} yd / 30 d</b></div>`
+        );
+    }
+    const gaps = gapAnalysis().filter((g) => g.verdict !== 'ok');
+    if (gaps.length) {
+      rows.push(
+        '<div class="break-row" style="margin-top:6px"><span><b>— Gapping —</b></span><b></b></div>'
+      );
+      for (const g of gaps)
+        rows.push(
+          `<div class="break-row"><span>${escapeHtml(g.hi.name)} → ${escapeHtml(
+            g.lo.name
+          )}</span>` +
+          `<b>${g.gap} yd · ${g.verdict === 'gap' ? 'too wide' : 'redundant'
+          }</b></div>`
+        );
+    }
+    pb.innerHTML = rows.length
+      ? rows.join('')
+      : '<div class="hint">No shots tracked yet.</div>';
+  }
+  // ============================================================
+  //  BLOCK 14 — ROUND STATISTICS
+  //  Replaces: summarizeRound, renderStats
+  // ============================================================
+
+  const STATS_CONF = 0.9; // reporting confidence for rate intervals; 90% is the right call at ~14 samples
+  const HISTORY_HALFLIFE_ROUNDS = 8; // exponential recency half-life for history averages, rounds
+  const PUTTS_PAR_BASELINE = 1.75; // Tour putts per green hit in regulation — Broadie, Every Shot Counts (2014) ch.5
+
+  /**
+   * SIGNATURE PRESERVED: summarizeRound(round) -> all original keys, plus extras.
+   * Original keys: played, totalScore, puttRows, totalPutts, firRows, firMade, girRows, girMade.
+   */
+  function summarizeRound(round) {
+    const rows = Array.isArray(round) ? round : [];
+    const played = rows.filter(
+      (r) => r.score !== '' && Number.isFinite(Number(r.score))
+    );
+    const totalScore = played.reduce((s, r) => s + num(r.score, 0), 0);
+    const puttRows = rows.filter(
+      (r) => r.putts !== '' && Number.isFinite(Number(r.putts))
+    );
+    const totalPutts = puttRows.reduce((s, r) => s + num(r.putts, 0), 0);
+    const firRows = rows.filter((r) => r.fir === 'Y' || r.fir === 'N');
+    const firMade = firRows.filter((r) => r.fir === 'Y').length;
+    const girRows = rows.filter((r) => r.gir === 'Y' || r.gir === 'N');
+    const girMade = girRows.filter((r) => r.gir === 'Y').length;
+
+    // Putts split by whether the green was hit — the single most diagnostic split available
+    // from this scorecard, because putts on missed greens conflate chipping with putting.
+    const girHoles = rows.filter(
+      (r) => r.gir === 'Y' && r.putts !== '' && Number.isFinite(Number(r.putts))
+    );
+    const nonGirHoles = rows.filter(
+      (r) => r.gir === 'N' && r.putts !== '' && Number.isFinite(Number(r.putts))
+    );
+    const puttsOnGir = girHoles.length
+      ? girHoles.reduce((s, r) => s + num(r.putts, 0), 0) / girHoles.length
+      : null;
+    const puttsOffGir = nonGirHoles.length
+      ? nonGirHoles.reduce((s, r) => s + num(r.putts, 0), 0) /
+      nonGirHoles.length
+      : null;
+    const scores = played.map((r) => num(r.score, 0));
+    const scoreSd =
+      scores.length >= 2
+        ? Math.sqrt(
+          scores.reduce(
+            (a, b) => a + (b - totalScore / scores.length) ** 2,
+            0
+          ) /
+          (scores.length - 1)
+        )
+        : null;
+    // Unbiased 18-hole projection with its own standard error, rather than a bare sum.
+    const proj = played.length ? (totalScore / played.length) * 18 : null;
+    const projSe =
+      played.length >= 2 && scoreSd != null
+        ? 18 *
+        (scoreSd / Math.sqrt(played.length)) *
+        Math.sqrt(Math.max(0, (18 - played.length) / 17))
+        : null;
+
+    return {
+      played: played.length,
+      totalScore,
+      puttRows: puttRows.length,
+      totalPutts,
+      firRows: firRows.length,
+      firMade,
+      girRows: girRows.length,
+      girMade,
+      // extras
+      firCI: wilsonInterval(firMade, firRows.length, STATS_CONF),
+      girCI: wilsonInterval(girMade, girRows.length, STATS_CONF),
+      puttsOnGir,
+      puttsOffGir,
+      scoreSd,
+      projected18: proj,
+      projected18Se: projSe,
+      threePutts: puttRows.filter((r) => num(r.putts, 0) >= 3).length,
+      onePutts: puttRows.filter((r) => num(r.putts, 0) === 1).length,
+    };
+  }
+
+  // SIGNATURE PRESERVED: renderStats()
+  function renderStats() {
+    const s = summarizeRound(state.round);
+    els.statScore.textContent = s.played ? `${s.totalScore}` : '—';
+    els.statPutts.textContent = s.puttRows ? `${s.totalPutts}` : '—';
+    els.statFir.textContent = s.firRows
+      ? `${Math.round(s.firCI.p * 100)}%`
+      : '—';
+    els.statGir.textContent = s.girRows
+      ? `${Math.round(s.girCI.p * 100)}%`
+      : '—';
+
+    const avgScore = s.played ? s.totalScore / s.played : null;
+    const avgPutts = s.puttRows ? s.totalPutts / s.puttRows : null;
+    const pctCI = (ci) =>
+      ci && ci.n
+        ? `${Math.round(ci.p * 100)}% (${Math.round(ci.lo * 100)}–${Math.round(
+          ci.hi * 100
+        )}%, n=${ci.n})`
+        : '—';
+
+    const rows = [
+      ['Holes entered', `${s.played} / 18`],
+      ['Avg score / hole', avgScore === null ? '—' : fmt(avgScore, 2)],
+      ['Score SD / hole', s.scoreSd === null ? '—' : fmt(s.scoreSd, 2)],
+      [
+        'Projected 18',
+        s.projected18 === null
+          ? '—'
+          : `${fmt(s.projected18, 1)}${s.projected18Se ? ` ± ${fmt(s.projected18Se, 1)}` : ''
+          }`,
+      ],
+      ['Avg putts / hole', avgPutts === null ? '—' : fmt(avgPutts, 2)],
+      [
+        'Putts when GIR',
+        s.puttsOnGir === null
+          ? '—'
+          : `${fmt(s.puttsOnGir, 2)} (Tour ${PUTTS_PAR_BASELINE})`,
+      ],
+      [
+        'Putts when missed',
+        s.puttsOffGir === null ? '—' : fmt(s.puttsOffGir, 2),
+      ],
+      [
+        '1-putts / 3-putts',
+        s.puttRows ? `${s.onePutts} / ${s.threePutts}` : '—',
+      ],
+      [`Fairways (${Math.round(STATS_CONF * 100)}% CI)`, pctCI(s.firCI)],
+      [`Greens (${Math.round(STATS_CONF * 100)}% CI)`, pctCI(s.girCI)],
+    ];
+
+    const hist = state.history || [];
+    if (hist.length) {
+      // Recency-weighted history: an eight-round half-life keeps averages responsive.
+      const w = hist.map((_, i) =>
+        Math.pow(0.5, (hist.length - 1 - i) / HISTORY_HALFLIFE_ROUNDS)
+      );
+      const wAvg = (vals) => {
+        const pairs = vals
+          .map((v, i) => [v, w[i]])
+          .filter(([v]) => Number.isFinite(v));
+        if (!pairs.length) return null;
+        const sw = pairs.reduce((a, [, ww]) => a + ww, 0);
+        return pairs.reduce((a, [v, ww]) => a + v * ww, 0) / sw;
+      };
+      const scores = hist.map((h) => h.totalScore);
+      const putts = hist.map((h) => h.totalPutts);
+      const firPct = hist.map((h) =>
+        h.firRows ? (100 * h.firMade) / h.firRows : NaN
+      );
+      const girPct = hist.map((h) =>
+        h.girRows ? (100 * h.girMade) / h.girRows : NaN
+      );
+      const valid = scores.filter(Number.isFinite);
+      // Robust trend in score over rounds.
+      const idx = scores
+        .map((_, i) => i)
+        .filter((i) => Number.isFinite(scores[i]));
+      const ts =
+        idx.length >= 4
+          ? theilSen(
+            idx,
+            idx.map((i) => scores[i])
+          )
+          : null;
+
+      rows.push([
+        '— History —',
+        `${hist.length} round${hist.length > 1 ? 's' : ''}`,
+      ]);
+      rows.push(['Best score', valid.length ? Math.min(...valid) : '—']);
+      rows.push([
+        'Recent avg score',
+        wAvg(scores) === null ? '—' : fmt(wAvg(scores), 1),
+      ]);
+      rows.push([
+        'Recent avg putts',
+        wAvg(putts) === null ? '—' : fmt(wAvg(putts), 1),
+      ]);
+      rows.push([
+        'Recent avg FIR',
+        wAvg(firPct) === null ? '—' : `${fmt(wAvg(firPct))}%`,
+      ]);
+      rows.push([
+        'Recent avg GIR',
+        wAvg(girPct) === null ? '—' : `${fmt(wAvg(girPct))}%`,
+      ]);
+      if (ts)
+        rows.push([
+          'Trend',
+          `${ts.slope >= 0 ? '+' : ''}${fmt(ts.slope, 2)} strokes / round`,
+        ]);
+    }
+    els.statsBreakdown.innerHTML = rows
+      .map(
+        ([k, v]) =>
+          `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(
+            v
+          )}</b></div>`
+      )
+      .join('');
+  }
+  // ============================================================
+  //  BLOCK 15 — RANGE PIPELINE
+  //  Replaces: calculateRange, renderBreakdown
+  // ============================================================
+
+  function calculateRange() {
+    if (!state.loc || !state.target) {
+      els.rawYards.textContent = '—';
+      els.rawLabel.textContent = 'Tap a target';
+      els.playsLikeYards.textContent = '—';
+      els.clubRecommendation.textContent = 'No target selected';
+      els.clubRecommendationSub.textContent =
+        'Tap a point on the map for club guidance.';
+      renderCaddyTips([]);
+      updateAdvice([], 'neutral');
+      renderFcb();
+      return;
+    }
+    const w = getWeatherOrNeutral(),
+      e = getElevationOrNeutral();
+    const meanAltM = ((e.targetFt + e.userFt) / 2) * FT_TO_M;
+    const horizontalYd =
+      haversineMeters(state.loc, state.target, meanAltM) * M_TO_YD;
+    const bearing = initialBearingDeg(state.loc, state.target);
+
+    const calc = playsLike({
+      horizontalYd,
+      bearingDeg: bearing,
+      elevDiffFt: e.targetFt - e.userFt,
+      courseAltitudeFt: (e.targetFt + e.userFt) / 2,
+      tempF: w.tempF,
+      rh: w.rh,
+      windMph: w.windMph,
+      windFromDeg: w.windFromDeg,
+      pressureHpa: w.pressureHpa,
+      gustMph: w.gustMph,
+      shearAlpha: w.shearAlpha,
+      latDeg: state.loc.lat,
+      lieYd: 0,
+    });
+    state.lastCalc = calc;
+
+    els.rawYards.textContent = fmt(horizontalYd);
+    let label = `actual yds · aim ${bearingToCompass(bearing)} (${fmt(
+      bearing
+    )}°)`;
+    if (state.greenCenter && state.target) {
+      const lo = leftoverToGreen(state.loc, state.target, state.greenCenter);
+      if (lo)
+        label = `actual yds · ${formatLeftover(lo)} · aim ${bearingToCompass(
+          bearing
+        )}`;
+    }
+    els.rawLabel.textContent = label;
+    els.playsLikeYards.textContent = fmt(calc.playsLikeYd);
+    updateLine();
+    renderFcb();
+
+    const accYd = state.loc.accuracy ? state.loc.accuracy * M_TO_YD : 999;
+
+    if (horizontalYd <= 3)
+      setNotice('Very close target — no full shot needed.', 'greenish');
+    else if (horizontalYd < 20)
+      setNotice('Very close — chip or putt; no full swing.', 'greenish');
+    else if (state.locStale)
+      setNotice(
+        'Using last-known location (stale). Tap the GPS pill for a fresh fix.',
+        'danger'
+      );
+    else if (accYd > ACCURACY_WARN_YD)
+      setNotice(
+        `GPS accuracy is ±${fmt(
+          accYd
+        )} yd (worse than ${ACCURACY_WARN_YD} yd). Yardage may be unreliable.`,
+        'danger'
+      );
+    else if (calc.solverReached === false)
+      setNotice(
+        'Target sits above the ball flight apex for this distance — the number is extrapolated. Treat it as a minimum.',
+        'danger'
+      );
+    else if (e.blindFt > BLIND_CLEARANCE_FT)
+      setNotice(
+        `Blind shot — terrain rises ~${Math.round(
+          e.blindFt
+        )} ft above your sight line. Pick a horizon aim point.`,
+        'greenish'
+      );
+    else if (state.context.offlineWeather || state.context.offlineElevation)
+      setNotice(
+        'Using cached/offline weather or elevation where available. Neutral defaults fill any gaps.',
+        'greenish'
+      );
+    else
+      setNotice(
+        'Tap another point to move the target. Long-press the green (or Set Front/Back) for edge yardages.',
+        'greenish'
+      );
+
+    const geo = greenGeometry();
+    const hasGreen =
+      geo && (geo.front != null || geo.back != null || geo.center != null);
+
+    // FCB should influence strategy only when the selected pin is on the green.
+    // A target short of the green is a layup target and must retain its own yardage.
+    const useGreenStrategy = hasGreen && targetIsOnMarkedGreen(geo);
+
+    let rec;
+    let smart = null;
+    let smartTips = [];
+    let verdict = 'neutral';
+
+    if (useGreenStrategy) {
+      smart = recommendSmart(calc.playsLikeYd, geo, bearing, accYd);
+
+      rec = {
+        main: smart.main,
+        sub: smart.sub,
+      };
+
+      smartTips = smart.tips;
+      verdict = smart.verdict;
+    } else {
+      // Target-only recommendation: selected pin always wins.
+      rec = recommendClub(calc.playsLikeYd);
+
+      // Still explain the green relationship in advice, without changing club.
+      const greenContextTip = hasGreen ? targetToGreenTip() : null;
+      if (greenContextTip) smartTips.push(greenContextTip);
+    }
+    // Use the optimizer's actual winning club when green strategy is active.
+    // Otherwise use the selected-target recommendation.
+    const recClub =
+      smart && smart.club
+        ? smart.club
+        : sortedClubsAsc().find((c) => c.yards >= calc.playsLikeYd) ||
+        sortedClubsDesc()[0];
+
+    state.lastRecClubId = recClub ? recClub.id : state.lastRecClubId;
+
+    els.clubRecommendation.textContent = rec.main;
+    let sub = rec.sub;
+    const g = selectedClubGuidance(calc.playsLikeYd);
+    if (g) sub += ' · ' + g;
+    els.clubRecommendationSub.textContent = sub;
+    setVerdict(verdict);
+    renderShotPlan({
+      calc,
+      wind: windRelative(w.windFromDeg, bearing, w.windMph),
+      elevation: e,
+      accuracyYd: accYd,
+      smart,
+      verdict,
+    });
+    const ascC = sortedClubsAsc();
+    const longerC = ascC.find((c) => c.yards >= calc.playsLikeYd);
+    const longestC = sortedClubsDesc()[0];
+    const wr = windRelative(w.windFromDeg, bearing, w.windMph);
+    const holeNow = state.roundSession ? getCurrentHoleData() : null;
+    const scoreNow = state.roundSession ? roundScoreToPar() : null;
+    const recSigmaYd = recClub ? clubSigmaDistYd(recClub) : NaN;
+
+    const baseTips = caddyTips(
+      {
+        plays: calc.playsLikeYd,
+        along: wr.along,
+        cross: wr.cross,
+        elevFt: calc.elevDiffFt,
+        gap: longerC ? longerC.yards - calc.playsLikeYd : null,
+        longerName: longerC ? longerC.name : '',
+        beyondLongest: longestC && calc.playsLikeYd > longestC.yards * 1.08,
+        accYd,
+        aimYd: calc.aimYd,
+        aimDeg: calc.aimDeg,
+        gustYd: calc.gustYd,
+        windAdjYd: calc.windAdjYd,
+        elevAdjYd: calc.elevAdjYd,
+        tempAdjYd: calc.tempAdjYd,
+        altitudeAdjYd: calc.altitudeAdjYd,
+        densityRatio: calc.densityRatio,
+        apexFt: calc.apexFt,
+        descentDeg: calc.descentDeg,
+        blindFt: e.blindFt,
+
+        // imported-course context
+        hazards: holeHazardCarries(),
+        recClubName: recClub ? recClub.name : null,
+        recCarryYd: recClub ? num(recClub.yards, NaN) : NaN,
+        recSigmaYd,
+        greenDepthYds: holeNow ? num(holeNow.greenDepthYds, NaN) : NaN,
+        hasGreenModel: useGreenStrategy,
+        holePar: holeNow ? num(holeNow.par, NaN) : NaN,
+        holeYards: holeNow ? num(holeNow.yards, NaN) : NaN,
+        strokeIndex: holeNow ? num(holeNow.strokeIndex, NaN) : NaN,
+        toPar: scoreNow ? scoreNow.toPar : NaN,
+        holesPlayed: scoreNow ? scoreNow.holesPlayed : 0,
+      },
+      3
+    );
+
+    if (state.prefs.mode === 'range') {
+      const cTips = coachTips({ clubCount: Object.keys(loadShotLog()).length });
+      renderCaddyTips([]);
+      updateAdvice(cTips, 'neutral', {
+        main: rec.main,
+        sub: rec.sub,
+        plays: calc.playsLikeYd,
+      });
+    } else {
+      // `smartTips` contains either true green-strategy advice or the
+      // selected-target-versus-green explanation for an intentional layup.
+      const tips = [...smartTips, ...baseTips].filter(Boolean).slice(0, 4);
+
+      // Tips live in the map popover.
+      renderCaddyTips([]);
+
+      updateAdvice(tips, verdict, {
+        main: rec.main,
+        sub: els.shotAction?.textContent || rec.sub,
+        plays: calc.playsLikeYd,
+      });
+    }
+
+    renderBreakdown(calc, els.rangeBreakdown);
+    els.rangeStamp.textContent = stampText();
+    renderClubChips(calc.playsLikeYd);
+  }
+
+  // SIGNATURE PRESERVED: renderBreakdown(calc, el)
+  function renderBreakdown(calc, el) {
+    if (!calc || !el) return;
+    const sgn = (v, d = 1) => `${v >= 0 ? '+' : ''}${fmt(v, d)}`;
+    const windKind = calc.headwindMph >= 0 ? 'head' : 'tail';
+    const rows = [
+      ['Horizontal (WGS-84 geodesic)', `${fmt(calc.horizontalYd, 1)} yd`],
+      [
+        'Bearing',
+        `${bearingToCompass(calc.bearingDeg, 32)} (${fmt(
+          calc.bearingDeg,
+          1
+        )}°)`,
+      ],
+      [
+        'Elevation',
+        `${sgn(calc.elevAdjYd)} yd (${sgn(calc.elevDiffFt, 0)} ft)`,
+      ],
+      [
+        `Wind (${windKind})`,
+        `${sgn(calc.windAdjYd)} yd (${fmt(
+          Math.abs(calc.headwindMph),
+          1
+        )} mph ${windKind}, from ${bearingToCompass(calc.windFromDeg)})`,
+      ],
+      [
+        'Crosswind aim',
+        Math.abs(calc.crosswindMph) < PHYSICS.MIN_CROSSWIND_MPH
+          ? 'minimal'
+          : `${fmt(Math.abs(calc.crosswindMph), 1)} mph — ${calc.crossFrom
+          } ${Math.abs(calc.aimYd)} yd (${fmt(Math.abs(calc.aimDeg), 1)}°)`,
+      ],
+      ['Temperature', `${sgn(calc.tempAdjYd)} yd (${fmt(calc.tempF)}°F)`],
+      [
+        'Altitude',
+        `${sgn(calc.altitudeAdjYd)} yd (${fmt(calc.courseAltitudeFt)} ft)`,
+      ],
+      ['Humidity', `${sgn(calc.humidityAdjYd, 2)} yd (${fmt(calc.rh)}% RH)`],
+      [
+        'Air density',
+        `${fmt(calc.rhoKgM3, 4)} kg/m³ · ${fmt(
+          calc.densityRatio * 100,
+          1
+        )}% of standard`,
+      ],
+      ['Lie', `${sgn(calc.lieYd)} yd (neutral)`],
+      ['Plays-like', `${fmt(calc.playsLikeYd)} yd`],
+    ];
+    if (Number.isFinite(calc.apexFt))
+      rows.push([
+        'Apex / flight',
+        `${fmt(calc.apexFt)} ft · ${fmt(calc.flightTimeS, 2)} s`,
+      ]);
+    if (Number.isFinite(calc.descentDeg))
+      rows.push([
+        'Descent / landing',
+        `${fmt(calc.descentDeg, 1)}° at ${fmt(calc.landSpeedMph)} mph`,
+      ]);
+    if (calc.rolloutYd > 0)
+      rows.push(['Est. rollout', `${fmt(calc.rolloutYd, 1)} yd (medium turf)`]);
+    if (calc.gustYd > 0)
+      rows.push(['Gust exposure', `±${fmt(calc.gustYd, 1)} yd`]);
+    el.innerHTML = rows
+      .map(
+        ([k, v]) =>
+          `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(
+            v
+          )}</b></div>`
+      )
+      .join('');
+  }
+  // ============================================================
+  //  BLOCK 16 — MANUAL CALCULATOR
+  //  Replaces: initManualCalc (entire function)
+  // ============================================================
+
+  function initManualCalc() {
+    els.prefillBtn.addEventListener('click', () => {
+      const w = getWeatherOrNeutral(),
+        e = getElevationOrNeutral();
+      if (state.loc && state.target) {
+        els.manualYards.value = Math.round(
+          haversineMeters(state.loc, state.target) * M_TO_YD
+        );
+        els.manualBearing.value = Math.round(
+          initialBearingDeg(state.loc, state.target)
+        );
+        els.manualElevDiff.value = Math.round(e.targetFt - e.userFt);
+        els.manualAltitude.value = Math.round((e.targetFt + e.userFt) / 2);
+      }
+      if (state.context.weather) {
+        els.manualTemp.value = Math.round(w.tempF);
+        els.manualRh.value = Math.round(w.rh);
+        els.manualWindSpeed.value = Math.round(w.windMph);
+        els.manualWindDir.value = Math.round(w.windFromDeg);
+      }
+    });
+
+    els.manualCalcBtn.addEventListener('click', () => {
+      const horizontalYd = num(els.manualYards.value, NaN);
+      if (!Number.isFinite(horizontalYd) || horizontalYd < 0) {
+        alert('Enter horizontal yards.');
+        return;
+      }
+      // Pull live barometer / wind-shear / latitude when available. These are not
+      // exposed as manual inputs, but passing them keeps the manual calculator on
+      // the same physics as the map. All three degrade safely to NaN defaults.
+      const w = getWeatherOrNeutral();
+      const calc = playsLike({
+        horizontalYd,
+        bearingDeg: num(els.manualBearing.value, 0),
+        elevDiffFt: num(els.manualElevDiff.value, 0),
+        courseAltitudeFt: num(els.manualAltitude.value, 0),
+        tempF: num(els.manualTemp.value, STD_TEMP_F),
+        rh: num(els.manualRh.value, STD_RH),
+        windMph: num(els.manualWindSpeed.value, 0),
+        windFromDeg: num(els.manualWindDir.value, 0),
+        pressureHpa: w.pressureHpa,
+        shearAlpha: w.shearAlpha,
+        latDeg: state.loc ? state.loc.lat : STD_LAT,
+        lieYd: 0,
+      });
+      const rec = recommendClub(calc.playsLikeYd);
+      els.manualRec.textContent = `${fmt(calc.playsLikeYd)} yd · ${rec.main}`;
+      let sub = rec.sub;
+      const g = selectedClubGuidance(calc.playsLikeYd);
+      if (g) sub += ' · ' + g;
+      // aimYd is SIGNED (+ = aim right). The old `calc.aimYd > 0` test silently
+      // dropped this line for every right-to-left crosswind.
+      if (Math.abs(calc.aimYd) > 0)
+        sub += ` · Crosswind ${fmt(
+          Math.abs(calc.crosswindMph),
+          1
+        )} mph — aim ${Math.abs(calc.aimYd)} yd ${calc.aimYd > 0 ? 'right' : 'left'
+          } (${fmt(Math.abs(calc.aimDeg), 1)}°).`;
+      els.manualRecSub.textContent = sub;
+      renderBreakdown(calc, els.manualBreakdown);
+    });
+  }
+  // ============================================================
+  //  BLOCK 17 — SELF-CHECK (dev only; safe to ship, costs nothing until called)
+  // ============================================================
+  window.__caddySelfTest = function () {
+    const out = [];
+    const ok = (name, pass, detail) =>
+      out.push(`${pass ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`);
+
+    // 1. Geodesy: meridian arc, lat 40->41 on WGS-84.
+    // Simpson's rule on M(φ)=a(1-e²)/(1-e²sin²φ)^1.5 over 40°..41° gives 111046.6 m;
+    // cross-checks against the standard table value of 111.048 km per degree at 40.5°.
+    const g = geodesicInverse({ lat: 40, lng: -105 }, { lat: 41, lng: -105 });
+    ok(
+      'Vincenty meridian arc 40°→41°',
+      Math.abs(g.s - 111046.6) < 5,
+      `${g.s.toFixed(1)} m (expect ≈111047 m)`
+    );
+
+    // 2. Direct/inverse round trip.
+    const p2 = geodesicDirect({ lat: 33.5, lng: -84.4 }, 73.2, 4211.7);
+    const back = geodesicInverse({ lat: 33.5, lng: -84.4 }, p2);
+    ok(
+      'Geodesic direct/inverse round trip',
+      Math.abs(back.s - 4211.7) < 1e-3 &&
+      Math.abs(angleDiff(back.az1, 73.2)) < 1e-6,
+      `Δs=${(back.s - 4211.7).toExponential(2)} m`
+    );
+
+    // 3. Air density at CIPM reference: 20 °C, 101325 Pa, 50% RH -> 1.1992 kg/m³.
+    const rho = airDensityCIPM(20, 101325, 50);
+    ok(
+      'CIPM-2007 density @20°C/101325Pa/50%RH',
+      Math.abs(rho - 1.1992) < 0.0005,
+      `${rho.toFixed(5)} kg/m³`
+    );
+
+    // 4. Standard atmosphere: ISA at 5000 ft -> 843.1 hPa.
+    const pIsa = pressureFromISA(5000 * FT_TO_M) / 100;
+    ok(
+      'ISA pressure @5000 ft',
+      Math.abs(pIsa - 843.1) < 1.0,
+      `${pIsa.toFixed(1)} hPa`
+    );
+
+    // 5. Special functions.
+    ok('erf(1)', Math.abs(erf(1) - 0.8427007929) < 1e-9, erf(1).toFixed(10));
+    ok(
+      'invNorm(0.975)',
+      Math.abs(invNorm(0.975) - 1.959963985) < 1e-8,
+      invNorm(0.975).toFixed(9)
+    );
+    ok(
+      'tQuantile(0.975, 10)',
+      Math.abs(tQuantile(0.975, 10) - 2.228138852) < 1e-6,
+      tQuantile(0.975, 10).toFixed(9)
+    );
+    ok(
+      'chi2Inv(0.995, 2)',
+      Math.abs(chi2Inv(0.995, 2) - 10.5966347) < 1e-5,
+      chi2Inv(0.995, 2).toFixed(7)
+    );
+
+    // 6. Trajectory family monotone and physically plausible.
+    const F = referenceLaunchFamily();
+    let mono = true;
+    for (let i = 1; i < F.rows.length; i++)
+      if (F.rows[i].carryYd <= F.rows[i - 1].carryYd) mono = false;
+    ok(
+      'Launch family monotone in carry',
+      mono,
+      `${fmt(F.minCarry)}–${fmt(F.maxCarry)} yd`
+    );
+    const drv = F.rows[F.rows.length - 1];
+    ok(
+      'Driver carry plausible (230–320 yd)',
+      drv.carryYd > 230 && drv.carryYd < 320,
+      `${drv.carryYd.toFixed(1)} yd`
+    );
+
+    // 6b. Truncation guard. TRAJ_DT and the step budget are coupled: if dt shrinks
+    // without the cap rising, long trajectories end mid-flight and the entire
+    // plays-like scale compresses — while the identity test below still passes.
+    const drvTraj = integrateTrajectory(
+      {
+        speedMps: 167 * MPH_TO_MPS,
+        launchDeg: 10.9,
+        spinRadS: 2686 * RPM_TO_RADS,
+        aimOffsetDeg: 0,
+      },
+      STILL_AIR_ENV
+    );
+    ok(
+      'Driver trajectory reaches the ground (not step-capped)',
+      drvTraj.reached === true,
+      `t=${drvTraj.timeS.toFixed(2)} s of ${(TRAJ_MAX_STEPS * TRAJ_DT).toFixed(
+        1
+      )} s budget`
+    );
+    ok(
+      'Driver descent angle plausible (32–48°)',
+      drvTraj.descentDeg > 32 && drvTraj.descentDeg < 48,
+      `${drvTraj.descentDeg.toFixed(1)}°`
+    );
+
+    // 7. Inverse solver identity: standard conditions must be a fixed point.
+    const idn = playsLike({
+      horizontalYd: 165,
+      bearingDeg: 0,
+      elevDiffFt: 0,
+      courseAltitudeFt: 0,
+      tempF: STD_TEMP_F,
+      rh: STD_RH,
+      windMph: 0,
+      windFromDeg: 0,
+      latDeg: STD_LAT,
+    });
+    ok(
+      'Plays-like identity in standard conditions',
+      Math.abs(idn.playsLikeYd - 165) <= 1,
+      `${idn.playsLikeYd} yd`
+    );
+
+    // 8. Monotonicity and direction of each physical effect at 165 yd.
+    const base = (o) =>
+      playsLike(
+        Object.assign(
+          {
+            horizontalYd: 165,
+            bearingDeg: 0,
+            elevDiffFt: 0,
+            courseAltitudeFt: 0,
+            tempF: STD_TEMP_F,
+            rh: STD_RH,
+            windMph: 0,
+            windFromDeg: 0,
+            latDeg: STD_LAT,
+          },
+          o
+        )
+      ).playsLikeYd;
+    ok(
+      'Headwind plays longer',
+      base({ windMph: 15, windFromDeg: 0 }) > 165 + 6,
+      `${base({ windMph: 15, windFromDeg: 0 })} yd`
+    );
+    ok(
+      'Tailwind plays shorter',
+      base({ windMph: 15, windFromDeg: 180 }) < 165 - 3,
+      `${base({ windMph: 15, windFromDeg: 180 })} yd`
+    );
+    ok(
+      'Headwind costs more than tail gains (asymmetry)',
+      base({ windMph: 15, windFromDeg: 0 }) - 165 >
+      165 - base({ windMph: 15, windFromDeg: 180 })
+    );
+    ok(
+      'Uphill plays longer',
+      base({ elevDiffFt: 30 }) > 165 + 6,
+      `${base({ elevDiffFt: 30 })} yd`
+    );
+    ok(
+      'Altitude plays shorter',
+      base({ courseAltitudeFt: 5280 }) < 165 - 6,
+      `${base({ courseAltitudeFt: 5280 })} yd`
+    );
+    ok(
+      'Cold plays longer',
+      base({ tempF: 40 }) > 165,
+      `${base({ tempF: 40 })} yd`
+    );
+    ok(
+      'Humid plays marginally longer (shorter required)',
+      base({ rh: 95 }) <= base({ rh: 5 })
+    );
+
+    // 9. Wind sign convention consistency (the bug that was fixed).
+    const wc = windComponents({ windMph: 10, windFromDeg: 90, bearingDeg: 0 });
+    const wr = windRelative(90, 0, 10);
+    ok(
+      'windComponents/windRelative crosswind signs agree',
+      Math.sign(wc.crosswindMph) === Math.sign(wr.cross),
+      `${wc.crosswindMph.toFixed(2)} vs ${wr.cross.toFixed(2)}`
+    );
+    ok(
+      'Wind from the east on a north shot is from the right',
+      wc.crosswindMph > 0
+    );
+
+    // 10. Expected-strokes baselines sane and monotone.
+    ok(
+      'E[strokes] fairway monotone 100→200 yd',
+      expectedStrokes('fairway', 200) > expectedStrokes('fairway', 100)
+    );
+    ok(
+      'Rough costs more than fairway',
+      expectedStrokes('rough', 150) > expectedStrokes('fairway', 150)
+    );
+    ok(
+      'E[strokes] 8 ft putt ≈ 1.5',
+      Math.abs(expectedStrokes('green', 8 / 3) - 1.515) < 0.05
+    );
+
+    // 11. Dispersion posterior shrinks with data.
+    const prior = formulaDispersionYd(165);
+    ok(
+      'Prior dispersion plausible at 165 yd',
+      prior >= 8 && prior <= 22,
+      `±${prior} yd`
+    );
+
+    // 12. GPS fuser is not overconfident.
+    const fx = Array.from({ length: 10 }, () => ({
+      lat: 33.5,
+      lng: -84.4,
+      accuracy: 10,
+      ts: Date.now(),
+    }));
+    const fused = weightedAverage(fx);
+    ok(
+      'Fused accuracy respects correlated-error floor',
+      fused.accuracy >= GPS_CORRELATED_FRAC * 10,
+      `±${fused.accuracy.toFixed(2)} m from ten ±10 m fixes`
+    );
+
+    console.log(out.join('\n'));
+    return out;
+  };
+
+
+
+  // ============================================================
+  //  OSM STANDARD BASEMAP (Option A) — worldwide, no key, no account
+  //  Themed-vector (Option C) will later swap this base layer.
+  // ============================================================
+  (() => {
+    function buildOsmStd() {
+      return L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 21,
+        maxNativeZoom: 19,
+        crossOrigin: true,
+        updateWhenIdle: true,
+        keepBuffer: 2,
+        className: 'osm-std-tiles',
+      });
+    }
+    function ensureLayer() {
+      if (!state.mapReady || !state.layers || state.layers.osmstd) return;
+      state.layers.osmstd = buildOsmStd();
+    }
+
+    // Reassign LOCAL bindings (all one closure — no window.* needed).
+    const _initMap = initMap;
+    initMap = function () {
+      _initMap();
+      ensureLayer();
+    };
+
+    const _setMapLayer = setMapLayer;
+    setMapLayer = function (name, silent) {
+      if (name !== 'osmstd') return _setMapLayer(name, silent);
+      ensureLayer();
+      if (!state.mapReady) return;
+      const all = [state.layers.satellite, state.layers.osmstd];
+      all.forEach((l) => {
+        if (l && state.map.hasLayer(l)) state.map.removeLayer(l);
+      });
+      state.layers.osmstd.addTo(state.map);
+      els.rangeWrap.classList.remove('is-sat');
+      state.prefs.mapLayer = 'osmstd';
+      save('caddy:prefs', state.prefs);
+      updateAimColor();
+      restyleShotLines();
+      ['lineCasing', 'lineHalo', 'line', 'target', 'user'].forEach((k) => {
+        if (state.markers[k] && state.markers[k].bringToFront)
+          state.markers[k].bringToFront();
+      });
+    };
+
+    const _updateAimColor = updateAimColor;
+    updateAimColor = function () {
+      if (state.prefs.mapLayer === 'osmstd') {
+        document.documentElement.style.setProperty('--aim', '#1677ff');
+        return;
+      }
+      _updateAimColor();
+    };
+
+    const _isImagery = isImagery;
+    isImagery = function () {
+      if (state.prefs.mapLayer === 'osmstd') return false;
+      return _isImagery();
+    };
+  })();
+  bootstrap();
+})();

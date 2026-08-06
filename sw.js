@@ -1,0 +1,186 @@
+/* sw.js — offline-first service worker for Caddy. */
+const CACHE_VERSION = 'v1.0.28';
+
+const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
+const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
+const CACHE_PREFIX = 'caddy-';
+
+const MAX_TILE_ENTRIES = 400;
+
+const APP_SHELL = [
+  './',
+  './index.html',
+  './app.css',
+  './app.js',
+  './leaflet.css',
+  './leaflet.js',
+];
+
+const isTile = (url) =>
+  /\/\d+\/\d+\/\d+(@2x)?\.(png|jpg|jpeg|webp)(\?|$)/i.test(url.pathname) ||
+  /(tile\.|tiles\.|arcgisonline|openstreetmap|cartocdn|mapbox|maptiler|stadiamaps)/i.test(
+    url.hostname
+  );
+
+const cacheable = (response) =>
+  !!response && (response.ok || response.type === 'opaque');
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(SHELL_CACHE);
+
+      // If a required app file is missing, keep the old worker active.
+      await Promise.all(
+        APP_SHELL.map(async (asset) => {
+          const response = await fetch(new Request(asset, { cache: 'reload' }));
+
+          if (!cacheable(response)) {
+            throw new Error(`Unable to precache ${asset}`);
+          }
+
+          await cache.put(asset, response);
+        })
+      );
+
+      await self.skipWaiting();
+    })()
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+
+      await Promise.all(
+        keys.map((key) => {
+          const oldCaddyCache =
+            key.startsWith(CACHE_PREFIX) &&
+            key !== SHELL_CACHE &&
+            key !== TILE_CACHE;
+
+          return oldCaddyCache ? caches.delete(key) : null;
+        })
+      );
+
+      await self.clients.claim();
+    })()
+  );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+
+  if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
+
+  if (request.mode === 'navigate') {
+    event.respondWith(handleNavigation(request));
+    return;
+  }
+
+  if (isTile(url)) {
+    event.respondWith(staleWhileRevalidate(event, request, TILE_CACHE));
+    return;
+  }
+
+  if (url.origin === self.location.origin) {
+    event.respondWith(cacheFirstAsset(request, SHELL_CACHE));
+    return;
+  }
+
+  event.respondWith(
+    fetch(request).catch(async () => {
+      return (await caches.match(request)) || new Response('', { status: 504 });
+    })
+  );
+});
+
+async function handleNavigation(request) {
+  const cache = await caches.open(SHELL_CACHE);
+  const shellRequest = new Request('./index.html');
+
+  const cached = await cache.match(shellRequest);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+
+    if (cacheable(response)) {
+      cache.put(shellRequest, response.clone()).catch(() => { });
+    }
+
+    return response;
+  } catch {
+    return new Response(
+      '<!doctype html><title>Offline</title><h1>You are offline</h1><p>Open Caddy once while online before using it offline.</p>',
+      {
+        status: 503,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+        },
+      }
+    );
+  }
+}
+
+async function cacheFirstAsset(request, cacheName) {
+  const cache = await caches.open(cacheName);
+
+  const cached = await cache.match(request, { ignoreSearch: true });
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+
+    if (cacheable(response)) {
+      cache.put(request, response.clone()).catch(() => { });
+    }
+
+    return response;
+  } catch {
+    return new Response('', { status: 504 });
+  }
+}
+
+async function staleWhileRevalidate(event, request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+
+  const network = fetch(request)
+    .then(async (response) => {
+      if (cacheable(response)) {
+        await cache.put(request, response.clone());
+        event.waitUntil(trimCache(cacheName, MAX_TILE_ENTRIES));
+      }
+
+      return response;
+    })
+    .catch(() => null);
+
+  if (cached) {
+    event.waitUntil(network);
+    return cached;
+  }
+
+  return (await network) || new Response('', { status: 504 });
+}
+
+async function trimCache(cacheName, maxEntries) {
+  const cache = await caches.open(cacheName);
+  const keys = await cache.keys();
+
+  if (keys.length <= maxEntries) return;
+
+  await Promise.all(
+    keys.slice(0, keys.length - maxEntries).map((key) => cache.delete(key))
+  );
+}
