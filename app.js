@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.10.3'; // live FCB solve from player position; no duplicate course polygons
+  const APP_VERSION = '1.9.6';
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -10,23 +10,9 @@
   const ONBOARD_KEY = 'caddy:onboarded';
   const COURSE_PROFILES_KEY = 'caddy:courseProfiles:v1';
   const LAST_ROUND_SETUP_KEY = 'caddy:lastRoundSetup:v1';
-
-  // OSM CACHE KEYS
-  const NEARBY_COURSES_OSM_KEY = 'caddy:osm:nearby:v1';
-  const OSM_COURSE_CACHE_PREFIX = 'caddy:osm:course:';
-  const NEARBY_COURSES_TTL = 6 * 60 * 60 * 1000; // 6 hours
-  const OSM_COURSE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+  const NEARBY_COURSES_CACHE_KEY = 'caddy:nearbyCourses:v3';
+  const NEARBY_COURSES_TTL = 6 * 60 * 60 * 1000;
   const NEARBY_COURSE_RADIUS_M = 12000;
-  const OSM_OVERPASS_DEBOUNCE = 400; // ms between Overpass calls
-  const OSM_AROUND_M = 2200; // radius for full course data query
-  const OSM_WATER_AROUND_M = 1200; // lake polygons dominate the payload past this
-  const OSM_SEARCH_TIMEOUT_MS = 8000; // per-mirror budget for the nearby search
-  const OSM_COURSE_TIMEOUT_MS = 20000; // per-mirror budget for the full course pull
-  const OSM_HAZARD_MAX_SPAN_M = 500; // reject features larger than this
-  const NEARBY_EMPTY_TTL = 15 * 60 * 1000; // don't re-hammer a genuinely empty area
-  const OUTLINE_MAX_POINTS = 60; // stored overlay rings never need more
-  const RANGE_RECALC_MIN_MS = 1200; // floor between full plays-like solves
-
   const MAX_GPS_SPEED_MPS = 18;
   const MAX_CONSECUTIVE_REJECTS = 3;
   const REBASE_AFTER_MS = 20000;
@@ -69,7 +55,6 @@
     onboard: $('onboard'),
     obStartBtn: $('obStartBtn'),
     findNearbyCoursesBtn: $('findNearbyCoursesBtn'),
-    refreshOsmBtn: $('refreshOsmBtn'), // NEW
     nearbyCourseStatus: $('nearbyCourseStatus'),
     nearbyCourseList: $('nearbyCourseList'),
     roundMapScoreBtn: $('roundMapScoreBtn'),
@@ -233,7 +218,6 @@
     nearbyCourseLoading: false,
     nearbyCourseLoadingScorecard: false,
     nearbySearchRequested: false,
-    nearbyCourseError: null,
     selectedNearbyCourse: null,
     selectedCourseTemplate: null,
     courseProfiles: load(COURSE_PROFILES_KEY, []),
@@ -257,15 +241,6 @@
     greenCenter: null, // {lat,lng} — persistent green center for the hole
     frontPt: null,
     backPt: null,
-    // Imported green ring for the active hole. Pure geometry: it drives the
-    // live front/centre/back solve and is never drawn (the basemap and the
-    // satellite imagery both already show the green).
-    greenOutline: null,
-    // true => F/C/B are solved from greenOutline and may be re-solved as the
-    // player walks. Any manual Set Front/Center/Back turns this off for good.
-    fcbAuto: false,
-    _fcbSolvedAt: null, // {lat,lng} the last auto solve was run from
-    _fcbSolveHole: null, // holeGeoKey the last auto solve belonged to
     twoTapA: null,
     twoTapComplete: false,
     placeMode: null,
@@ -290,15 +265,6 @@
     followUser: false,
     contextTimer: null,
     sheet: null,
-    // Guard so the hole overlay rebuilds once per hole, not per GPS tick.
-    holeGeoKey: null,
-    // Set when hole geometry was applied but the map had no size yet (a
-    // round started from the Round tab); the Range tab frames the hole
-    // once it is actually shown.
-    _pendingHoleFocus: false,
-    // OSM state
-    _osmLastCall: 0, // timestamp of last Overpass call (debounce)
-    _osmAbortController: null, // current Overpass fetch abort controller
   };
   const FollowMode = { IDLE: 'idle', LOCKED: 'locked' };
   state.followMode = FollowMode.IDLE;
@@ -322,21 +288,19 @@
       handicap: '',
       yards: '',
 
+      tee: null,
       greenCenter: null,
       front: null,
       back: null,
+
       teePoint: null,
+      pin: null,
+      fairwayCenter: null,
 
-      // Imported OSM geometry used for map overlays.
-      greenOutline: [],
-      teeOutline: [],
-      fairwayOutline: [],
       hazards: [],
-
       source: 'manual',
     };
   }
-
   function defaultCourseHoles() {
     return Array.from({ length: 18 }, (_, i) => defaultHole(i + 1));
   }
@@ -364,26 +328,22 @@
 
     const location =
       raw.location &&
-      Number.isFinite(Number(raw.location.lat)) &&
-      Number.isFinite(Number(raw.location.lng)) &&
-      Math.abs(Number(raw.location.lat)) <= 90 &&
-      Math.abs(Number(raw.location.lng)) <= 180
+        Number.isFinite(Number(raw.location.lat)) &&
+        Number.isFinite(Number(raw.location.lng)) &&
+        Math.abs(Number(raw.location.lat)) <= 90 &&
+        Math.abs(Number(raw.location.lng)) <= 180
         ? {
-            lat: Number(raw.location.lat),
-            lng: Number(raw.location.lng),
-          }
+          lat: Number(raw.location.lat),
+          lng: Number(raw.location.lng),
+        }
         : null;
 
     const rawHoles = Array.isArray(raw.holes) ? raw.holes : [];
 
     return {
+      // Preserve importer-added keys (teeSets, activeTeeSet, importReport,
+      // osmType, osmId). The explicit keys below still override these.
       ...raw,
-      // Preserve importer-added keys
-      osmType: raw.osmType || undefined,
-      osmId: raw.osmId || undefined,
-      importReport: raw.importReport || undefined,
-      teeSets: raw.teeSets || undefined,
-      activeTeeSet: raw.activeTeeSet || undefined,
 
       id:
         typeof raw.id === 'string' && raw.id.trim()
@@ -401,12 +361,16 @@
           : fallback.teeName,
 
       source:
-        typeof raw.source === 'string' && raw.source ? raw.source : 'manual',
+        typeof raw.source === 'string' && raw.source
+          ? raw.source
+          : 'manual',
 
       updatedAt: Number(raw.updatedAt) || Date.now(),
 
       rating:
-        raw.rating === '' || raw.rating == null ? '' : num(raw.rating, ''),
+        raw.rating === '' || raw.rating == null
+          ? ''
+          : num(raw.rating, ''),
 
       slope:
         raw.slope === '' || raw.slope == null
@@ -425,11 +389,19 @@
           rawHoles[index] && typeof rawHoles[index] === 'object'
             ? rawHoles[index]
             : {};
+
         return {
           ...defaultHole(index + 1),
           ...sourceHole,
+
           number: index + 1,
-          par: clamp(Math.round(num(sourceHole.par, 4)), 3, 6),
+
+          par: clamp(
+            Math.round(num(sourceHole.par, 4)),
+            3,
+            6
+          ),
+
           yards:
             sourceHole.yards === '' || sourceHole.yards == null
               ? ''
@@ -447,33 +419,31 @@
     save(COURSE_PROFILES_KEY, state.courseProfiles);
   }
 
-  // A fresh scorecard is identical to an empty round — one source of truth.
-  function scorecardForCourse() {
-    return emptyRound();
+  function scorecardForCourse(course) {
+    return Array.from({ length: 18 }, (_, i) => ({
+      hole: i + 1,
+      score: '',
+      putts: '',
+      fir: '',
+      gir: '',
+      penalties: '',
+      notes: '',
+    }));
   }
 
   function getCurrentHoleNumber() {
     const rs = state.roundSession;
-    return clamp(Math.round(num(rs?.hole || rs?.currentHole, 1)), 1, 18);
+    return clamp(
+      Math.round(num(rs?.hole || rs?.currentHole, 1)),
+      1,
+      18
+    );
   }
 
-  // The session course is already normalized by beginRound() and
-  // migrateRoundSession(), yet this rebuilt all 18 hole objects on every
-  // single read. getCurrentHoleData() alone is hit several times per GPS
-  // tick, plus once per hazard in caddyTips().
   function getCurrentCourse() {
-    const course = state.roundSession?.course;
-    if (!course) return null;
-    if (course.__normalized) return course;
-
-    const normalized = normalizeCourse(course);
-    // Non-enumerable so it never reaches JSON.stringify / localStorage.
-    Object.defineProperty(normalized, '__normalized', {
-      value: true,
-      enumerable: false,
-    });
-    state.roundSession.course = normalized;
-    return normalized;
+    return state.roundSession?.course
+      ? normalizeCourse(state.roundSession.course)
+      : null;
   }
 
   function getCurrentHoleData() {
@@ -486,7 +456,10 @@
   }
 
   function getScorecardRows() {
-    if (state.roundSession && Array.isArray(state.roundSession.scorecard)) {
+    if (
+      state.roundSession &&
+      Array.isArray(state.roundSession.scorecard)
+    ) {
       return state.roundSession.scorecard;
     }
 
@@ -585,7 +558,7 @@
   function cryptoId() {
     try {
       if (crypto && crypto.randomUUID) return crypto.randomUUID();
-    } catch {}
+    } catch { }
     try {
       if (crypto && crypto.getRandomValues) {
         const b = new Uint8Array(16);
@@ -605,7 +578,7 @@
           h.slice(10, 16).join('')
         );
       }
-    } catch {}
+    } catch { }
     return (
       'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
     );
@@ -621,7 +594,7 @@
   function save(k, v) {
     try {
       localStorage.setItem(k, JSON.stringify(v));
-    } catch {}
+    } catch { }
   }
   function clamp(n, mn, mx) {
     return Math.min(mx, Math.max(mn, n));
@@ -637,19 +610,19 @@
     return String(s).replace(
       /[&<>"']/g,
       (c) =>
-        ({
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          '"': '&quot;',
-          "'": '&#039;',
-        }[c])
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;',
+      }[c])
     );
   }
   function haptic(ms) {
     try {
       if (navigator.vibrate && !reduceMotion) navigator.vibrate(ms);
-    } catch {}
+    } catch { }
   }
 
   const d2r = (d) => (d * Math.PI) / 180,
@@ -673,13 +646,13 @@
     requestAnimationFrame(() => {
       try {
         els.obStartBtn.focus();
-      } catch {}
+      } catch { }
     });
   }
   function dismissOnboard() {
     try {
       localStorage.setItem(ONBOARD_KEY, '1');
-    } catch {}
+    } catch { }
     els.onboard.classList.add('hide');
     haptic(10);
     const done = () => {
@@ -688,7 +661,7 @@
       if (lastFocusBeforeOnboard instanceof HTMLElement) {
         try {
           lastFocusBeforeOnboard.focus();
-        } catch {}
+        } catch { }
       }
       if (state.map) state.map.invalidateSize();
       if (state.sheet) state.sheet.measure();
@@ -771,13 +744,7 @@
       return;
     }
     try {
-      const registration = await navigator.serviceWorker.register('./sw.js', {
-        scope: './',
-        updateViaCache: 'none',
-      });
-
-      registration.update().catch(() => {});
-
+      await navigator.serviceWorker.register('./sw.js', { scope: './' });
       els.pwaStatus.textContent =
         'Offline support active. Previously-viewed map areas work offline.';
     } catch {
@@ -822,11 +789,13 @@
     // Toggle buttons
     const opts = els.modeToggle?.querySelectorAll('.mode-opt');
     if (opts) {
-      opts.forEach((b) => {
+      opts.forEach(b => {
         b.classList.toggle('active', b.dataset.mode === m);
         b.setAttribute('aria-checked', String(b.dataset.mode === m));
       });
     }
+
+
 
     // Practice card → only in Range
     const pc = document.getElementById('practiceCard');
@@ -847,21 +816,17 @@
     // Close any open pop when switching
     closeAdvice();
 
-    // Range mode hides the Round and Stats tabs — never leave one active.
-    if (m === 'range' && ['round', 'stats'].includes(state.prefs.activeTab)) {
-      state.prefs.activeTab = 'range';
-      showTab('range');
-    }
-
     // Recalc if we have a target
     if (state.target && state.loc) calculateRange();
 
     save('caddy:prefs', state.prefs);
     haptic(5);
   }
+
+
   function initModeToggle() {
     if (!els.modeToggle) return;
-    els.modeToggle.querySelectorAll('.mode-opt').forEach((btn) => {
+    els.modeToggle.querySelectorAll('.mode-opt').forEach(btn => {
       btn.addEventListener('click', () => {
         state.prefs.mode = btn.dataset.mode;
         applyMode();
@@ -909,20 +874,13 @@
         if (state.map) {
           state.map.invalidateSize();
           if (state.sheet) state.sheet.measure();
-          // Hole geometry may have been applied while the map had no size
-          // (round started from the Round tab). Frame it now that we can.
-          if (state._pendingHoleFocus) {
-            state._pendingHoleFocus = false;
-            focusOnHole();
-          }
         }
       }, 80);
       setTimeout(() => {
         if (state.sheet) state.sheet.measure();
       }, 400);
       if (state.prefs.gpsEnabled && !state.gpsRunning) startGPS(true);
-    } else if (tab !== 'round' && roundStatus() === 'idle') {
-      // Never kill GPS mid-round — a pending shot needs a live fix.
+    } else if (tab !== 'round') {
       stopGPS();
     } else if (state.prefs.gpsEnabled && !state.gpsRunning) {
       // Keep GPS active in Round so nearby course recognition and
@@ -992,15 +950,6 @@
       p.style.zIndex = 410;
       p.style.pointerEvents = 'none'; // never intercept map taps
     }
-    if (!state.map.getPane('coursePane')) {
-      state.map.createPane('coursePane');
-
-      const coursePane = state.map.getPane('coursePane');
-
-      // Above base tiles, below the target/user markers and map UI.
-      coursePane.style.zIndex = 390;
-      coursePane.style.pointerEvents = 'none';
-    }
     const topUI = document.querySelector('.range-top-ui');
     if (topUI && window.L && L.DomEvent) {
       L.DomEvent.disableClickPropagation(topUI);
@@ -1017,15 +966,6 @@
     const initial = migrateLayer(state.prefs.mapLayer || 'satellite');
     setMapLayer(initial, true);
     if (state.loc) updateUserMarker();
-
-    if (state.roundSession) {
-      // renderHoleOverlay() only draws hazards/tee. The F/C/B state, the
-      // auto-placed green-centre target and the hole framing live in
-      // applyHoleGeometryToMap(), so route through syncHoleGeometry().
-      // Without this, a round started from the Round tab (map not yet
-      // initialized) showed no target pin and blank F/C/B on the map.
-      syncHoleGeometry();
-    }
   }
 
   function setMapLayer(name, silent) {
@@ -1073,9 +1013,13 @@
       iconSize: [19, 19],
       iconAnchor: [9, 9],
     });
-  // greenCenterIcon() removed: the green centre is data, not a map pin. The
-  // "Course" (OSM) basemap already draws the green, and the auto-placed target
-  // pin already marks its centre — the extra dot was pure visual noise.
+  const greenCenterIcon = () =>
+    L.divIcon({
+      className: '',
+      html: "<div class='green-center-dot'></div>",
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
   const fbIcon = (kind) =>
     L.divIcon({
       className: '',
@@ -1083,6 +1027,8 @@
       iconSize: [15, 15],
       iconAnchor: [7.5, 7.5],
     });
+
+
 
   function startGPS(silentResume) {
     if (!navigator.geolocation) {
@@ -1124,66 +1070,11 @@
       );
     }
   }
-
-  // Searching a 12 km radius needs a city-block fix, not a survey-grade one.
-  // watchPosition({enableHighAccuracy:true, maximumAge:0}) commonly takes
-  // 10-20 s for its FIRST fix; getCurrentPosition with a relaxed maximumAge
-  // returns a cached network fix almost immediately. This is the single
-  // biggest cause of "it takes forever to find courses".
-  function requestCoarseFix() {
-    if (!navigator.geolocation || state._coarseFixPending) return;
-    state._coarseFixPending = true;
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        state._coarseFixPending = false;
-        const c = pos.coords;
-        if (!Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) {
-          return;
-        }
-        if (num(c.accuracy, Infinity) > 20000) return;
-
-        // Never let a coarse fix clobber a good live one.
-        const haveBetter =
-          state.loc &&
-          !state.locStale &&
-          num(state.loc.accuracy, Infinity) <= num(c.accuracy, Infinity);
-
-        if (!haveBetter) {
-          state.loc = {
-            lat: c.latitude,
-            lng: c.longitude,
-            accuracy: c.accuracy,
-            altitude: null,
-            ts: pos.timestamp || Date.now(),
-          };
-          // Flagged stale on purpose: good enough to search, not to aim.
-          state.locStale = true;
-          save('caddy:lastLocation', state.loc);
-          updateGpsUI();
-          updateUserMarker();
-        }
-
-        if (state.nearbySearchRequested && !state.nearbyCourseLoading) {
-          findNearbyCourses();
-        }
-      },
-      () => {
-        state._coarseFixPending = false;
-      },
-      {
-        enableHighAccuracy: false,
-        maximumAge: 5 * 60 * 1000,
-        timeout: 8000,
-      }
-    );
-  }
-
   function stopGPS() {
     if (state.watchId !== null) {
       try {
         navigator.geolocation.clearWatch(state.watchId);
-      } catch {}
+      } catch { }
       state.watchId = null;
     }
     state.gpsRunning = false;
@@ -1235,24 +1126,29 @@
     updateLine();
   }
 
+  let ignoreNextClick = false;
+
   function handleMapTap(latlng) {
     initMap();
+    if (ignoreNextClick) {
+      ignoreNextClick = false;
+      return;
+    }
     if (state.placeMode && state.loc) {
       if (state.placeMode === 'front') {
         state.frontPt = latlng;
       } else if (state.placeMode === 'back') {
         state.backPt = latlng;
       } else if (state.placeMode === 'center') {
-        // Center is a reference point, not a pin: it feeds the Center yardage,
-        // the leftover-to-green readout and the green model. Drawing it left a
-        // stray dot sitting next to the target pin.
         state.greenCenter = latlng;
+        if (!state.markers.greenCenter)
+          state.markers.greenCenter = L.marker([latlng.lat, latlng.lng], {
+            icon: greenCenterIcon(),
+            interactive: false,
+            zIndexOffset: 840,
+          }).addTo(state.map);
+        else state.markers.greenCenter.setLatLng([latlng.lat, latlng.lng]);
       }
-
-      // The player has overridden the imported green, so the live solver must
-      // stop re-deriving F/C/B and silently discarding that edit.
-      state.fcbAuto = false;
-
       disarmPlaceMode();
       renderFcb();
       updateLine();
@@ -1350,14 +1246,14 @@
       if (state.markers[k]) {
         try {
           state.map.removeLayer(state.markers[k]);
-        } catch {}
+        } catch { }
         state.markers[k] = null;
       }
     });
     if (!keepA && state.markers.tapA) {
       try {
         state.map.removeLayer(state.markers.tapA);
-      } catch {}
+      } catch { }
       state.markers.tapA = null;
     }
   }
@@ -1366,7 +1262,7 @@
       if (state.markers[k]) {
         try {
           state.map.removeLayer(state.markers[k]);
-        } catch {}
+        } catch { }
         state.markers[k] = null;
       }
     });
@@ -1431,22 +1327,17 @@
         state.markers.lineCasing.setStyle({ opacity: 0.32, weight: 9 });
     }
     // --- Also restyle leg2 (leftover) line ---
-    if (
-      state.markers.leg2 &&
-      state.map &&
-      state.map.hasLayer(state.markers.leg2)
-    ) {
-      const lo =
-        state.greenCenter && state.target
-          ? leftoverToGreen(state.loc, state.target, state.greenCenter)
-          : null;
+    if (state.markers.leg2 && state.map && state.map.hasLayer(state.markers.leg2)) {
+      const lo = state.greenCenter && state.target
+        ? leftoverToGreen(state.loc, state.target, state.greenCenter)
+        : null;
       const col =
         lo && lo.state === 'over' ? '#ff5252' : img ? '#ffffff' : '#1677ff';
       state.markers.leg2.setStyle({ color: col });
     }
   }
   function setNotice(text, kind = 'greenish') {
-    if (!els.rangeNotice) return; // ← ADD
+    if (!els.rangeNotice) return;  // ← ADD
     els.rangeNotice.className = 'notice ' + kind;
     els.rangeNotice.textContent = text;
   }
@@ -1460,16 +1351,9 @@
     else if (v === 'bail') card.classList.add('v-bail');
   }
 
-  function scheduleContextUpdate(force) {
-    // Debounce, but never *reset* an already-pending update: with a 1 Hz GPS
-    // the old version rescheduled on every fix, so it fired only once you
-    // stood still.
-    if (state.contextTimer && !force) return;
+  function scheduleContextUpdate() {
     clearTimeout(state.contextTimer);
-    state.contextTimer = setTimeout(() => {
-      state.contextTimer = null;
-      updateContext();
-    }, 900);
+    state.contextTimer = setTimeout(updateContext, 900);
   }
   async function cachedJSON(key, url, ttlMs) {
     const fullKey = 'caddy:api:' + key,
@@ -1494,6 +1378,7 @@
       throw e;
     }
   }
+
 
   function sortedClubsDesc() {
     return [...state.clubs]
@@ -1529,9 +1414,8 @@
 
     // One primary instruction only.
     if (Math.abs(calc.aimYd) >= 2) {
-      action = `Aim ${Math.abs(calc.aimYd)} yd ${
-        calc.aimYd > 0 ? 'right' : 'left'
-      } of the target and let the wind move it back.`;
+      action = `Aim ${Math.abs(calc.aimYd)} yd ${calc.aimYd > 0 ? 'right' : 'left'
+        } of the target and let the wind move it back.`;
     } else if (along > 5) {
       action = 'Land it short of the flag — helping wind means more release.';
     } else if (along < -5) {
@@ -1553,9 +1437,8 @@
 
     if (Math.abs(along) >= 3) {
       chips.push({
-        label: `${Math.round(Math.abs(along))} mph ${
-          along > 0 ? 'helping' : 'into'
-        }`,
+        label: `${Math.round(Math.abs(along))} mph ${along > 0 ? 'helping' : 'into'
+          }`,
         tone: 'wind',
       });
     } else if (Math.abs(cross) >= 3) {
@@ -1587,9 +1470,9 @@
       .slice(0, 3)
       .map(
         (chip) =>
-          `<span class="rec-chip rec-chip--${escapeHtml(
-            chip.tone
-          )}">${escapeHtml(chip.label)}</span>`
+          `<span class="rec-chip rec-chip--${escapeHtml(chip.tone)}">${escapeHtml(
+            chip.label
+          )}</span>`
       )
       .join('');
   }
@@ -1613,7 +1496,7 @@
     const n = state.adviceTips.length;
 
     // Always a lightbulb; the badge carries the dynamic tip count.
-    els.advicePillIc.textContent = state.prefs.mode === 'range' ? '📋' : '💡';
+    els.advicePillIc.textContent = (state.prefs.mode === 'range') ? '📋' : '💡';
     if (n > 0) {
       els.advicePillCount.hidden = false;
       els.advicePillCount.textContent = String(n);
@@ -1649,20 +1532,18 @@
     if (rec) {
       html += `<div class="advice-pop-rec">
                 <div class="advice-pop-rec-main">${escapeHtml(rec.main)}</div>
-                ${
-                  Number.isFinite(rec.plays)
-                    ? `<div class="advice-pop-rec-plays">${fmt(
-                        rec.plays
-                      )} yd plays-like</div>`
-                    : ''
-                }
-                ${
-                  rec.sub
-                    ? `<div class="advice-pop-rec-sub">${escapeHtml(
-                        rec.sub
-                      )}</div>`
-                    : ''
-                }
+                ${Number.isFinite(rec.plays)
+          ? `<div class="advice-pop-rec-plays">${fmt(
+            rec.plays
+          )} yd plays-like</div>`
+          : ''
+        }
+                ${rec.sub
+          ? `<div class="advice-pop-rec-sub">${escapeHtml(
+            rec.sub
+          )}</div>`
+          : ''
+        }
               </div>`;
     }
 
@@ -1702,9 +1583,7 @@
         tips
           .map((tip) => {
             const cleanTip = String(tip).replace(/^[🟢🟡🔴]\s*/u, '');
-            return `<div class="inline-advice-tip">${escapeHtml(
-              cleanTip
-            )}</div>`;
+            return `<div class="inline-advice-tip">${escapeHtml(cleanTip)}</div>`;
           })
           .join('')
       );
@@ -1819,174 +1698,80 @@
       }
     });
   }
-  const FCB_MIN_DEPTH_YD = 4; // below this the line barely clips the ring — reject
-  const FCB_RESOLVE_MOVE_YD = 3; // re-solve the edges only after real movement
-
-  /**
-   * Front / centre / back of a green, measured along the line from `fromPt`
-   * through the green's centroid.
-   *
-   * The importer solves this once from the TEE, which is only correct while you
-   * are on the tee: from an angled approach the tee-derived edge points sit on
-   * the SIDE of the green, so Front reads long and Back reads short. Solving
-   * from the player's actual position fixes that.
-   *
-   * Uses an unbounded line rather than a ray so that standing ON the green
-   * (where a ray crosses the boundary only once) still yields both edges.
-   */
-  function greenEdgesFrom(fromPt, outline) {
-    if (!fromPt || !Array.isArray(outline) || outline.length < 3) return null;
-
-    const center = polygonCentroid(outline);
-    if (
-      !center ||
-      !Number.isFinite(center.lat) ||
-      !Number.isFinite(center.lng)
-    ) {
-      return null;
-    }
-
-    const fr = enuFrame(fromPt);
-    const c = toENU(fr, center);
-    const len = hypot2(c.e, c.n);
-    if (!(len > 1)) return null; // standing on the centroid: no usable axis
-
-    const ue = c.e / len;
-    const un = c.n / len;
-
-    // 2-D cross product; a x b = a.e*b.n - a.n*b.e
-    const cross = (ae, an, be, bn) => ae * bn - an * be;
-
-    let tMin = Infinity;
-    let tMax = -Infinity;
-    const n = outline.length;
-
-    for (let i = 0; i < n; i++) {
-      const a = toENU(fr, outline[i]);
-      const b = toENU(fr, outline[(i + 1) % n]);
-      const se = b.e - a.e;
-      const sn = b.n - a.n;
-
-      // Solve t*U = A + u*S for t (metres along U) and u (position on edge).
-      const us = cross(ue, un, se, sn);
-      if (Math.abs(us) < 1e-9) continue; // edge parallel to the shot line
-
-      const u = cross(a.e, a.n, ue, un) / us;
-      if (u < 0 || u > 1) continue; // intersection lies off this edge
-
-      const t = cross(a.e, a.n, se, sn) / us;
-      if (t < tMin) tMin = t;
-      if (t > tMax) tMax = t;
-    }
-
-    if (!Number.isFinite(tMin) || !Number.isFinite(tMax)) return null;
-
-    const depthYd = (tMax - tMin) * M_TO_YD;
-    if (!(depthYd >= FCB_MIN_DEPTH_YD)) return null;
-
-    // A negative front means the near edge is already behind you (you are on
-    // the green) — clamp it to your feet so Front reads 0 rather than negative.
-    const frontT = Math.max(0, tMin);
-
-    return {
-      center,
-      front: fromENU(fr, ue * frontT, un * frontT),
-      back: fromENU(fr, ue * tMax, un * tMax),
-      depthYd,
-    };
-  }
-
-  // Re-derive F/C/B from the imported outline when the player has moved far
-  // enough to matter. Never touches manually placed points.
-  function syncAutoFcb() {
-    if (!state.fcbAuto || !state.loc) return;
-
-    const outline = state.greenOutline;
-    if (!Array.isArray(outline) || outline.length < 3) return;
-
-    const sameHole = state._fcbSolveHole === state.holeGeoKey;
-
-    if (
-      sameHole &&
-      state._fcbSolvedAt &&
-      haversineMeters(state._fcbSolvedAt, state.loc) * M_TO_YD <
-        FCB_RESOLVE_MOVE_YD
-    ) {
+  function renderFcb() {
+    if (!state.loc) {
+      els.fcbFront.textContent = '—';
+      els.fcbCenter.textContent = '—';
+      els.fcbBack.textContent = '—';
       return;
     }
-
-    const solved = greenEdgesFrom(state.loc, outline);
-
-    // Mark the attempt either way so a degenerate green does not re-solve on
-    // every single GPS fix.
-    state._fcbSolvedAt = { lat: state.loc.lat, lng: state.loc.lng };
-    state._fcbSolveHole = state.holeGeoKey;
-
-    if (!solved) return;
-
-    state.greenCenter = solved.center;
-    state.frontPt = solved.front;
-    state.backPt = solved.back;
+    // Center = green center if set, otherwise aim target
+    const centerRef = state.greenCenter || state.target;
+    els.fcbCenter.textContent = centerRef
+      ? Math.round(haversineMeters(state.loc, centerRef) * M_TO_YD)
+      : '—';
+    if (state.frontPt) {
+      const fy = Math.round(
+        haversineMeters(state.loc, state.frontPt) * M_TO_YD
+      );
+      els.fcbFront.textContent = fy;
+      if (!state.markers.frontMarker)
+        state.markers.frontMarker = L.marker(
+          [state.frontPt.lat, state.frontPt.lng],
+          {
+            icon: fbIcon('front'),
+            interactive: false,
+            zIndexOffset: 820,
+          }
+        ).addTo(state.map);
+      else
+        state.markers.frontMarker.setLatLng([
+          state.frontPt.lat,
+          state.frontPt.lng,
+        ]);
+    } else {
+      els.fcbFront.textContent = '—';
+      if (state.markers.frontMarker) {
+        try {
+          state.map.removeLayer(state.markers.frontMarker);
+        } catch { }
+        state.markers.frontMarker = null;
+      }
+    }
+    if (state.backPt) {
+      const by = Math.round(haversineMeters(state.loc, state.backPt) * M_TO_YD);
+      els.fcbBack.textContent = by;
+      if (!state.markers.backMarker)
+        state.markers.backMarker = L.marker(
+          [state.backPt.lat, state.backPt.lng],
+          { icon: fbIcon('back'), interactive: false, zIndexOffset: 820 }
+        ).addTo(state.map);
+      else
+        state.markers.backMarker.setLatLng([
+          state.backPt.lat,
+          state.backPt.lng,
+        ]);
+    } else {
+      els.fcbBack.textContent = '—';
+      if (state.markers.backMarker) {
+        try {
+          state.map.removeLayer(state.markers.backMarker);
+        } catch { }
+        state.markers.backMarker = null;
+      }
+    }
   }
 
-  function renderFcb() {
-    // Front/back are solved along YOUR line to the green, not the tee's.
-    syncAutoFcb();
-
-    const hasLoc = !!state.loc;
-
-    // Marker placement is deliberately independent of GPS: front/back are
-    // imported course data, so they must appear the moment a hole loads.
-    // The old version returned early with no fix and silently skipped them.
-    const syncFbMarker = (key, point, kind) => {
-      if (!state.mapReady || !state.map) return;
-
-      if (!point) {
-        if (state.markers[key]) {
-          try {
-            state.map.removeLayer(state.markers[key]);
-          } catch {}
-          state.markers[key] = null;
-        }
-        return;
-      }
-
-      if (!state.markers[key]) {
-        state.markers[key] = L.marker([point.lat, point.lng], {
-          icon: fbIcon(kind),
-          interactive: false,
-          zIndexOffset: 820,
-        }).addTo(state.map);
-      } else {
-        state.markers[key].setLatLng([point.lat, point.lng]);
-      }
-    };
-
-    syncFbMarker('frontMarker', state.frontPt, 'front');
-    syncFbMarker('backMarker', state.backPt, 'back');
-
-    const ydTo = (point) =>
-      hasLoc && point
-        ? String(Math.round(haversineMeters(state.loc, point) * M_TO_YD))
-        : '—';
-
-    // Center = green centre if known, otherwise the current aim target.
-    els.fcbCenter.textContent = ydTo(state.greenCenter || state.target);
-    els.fcbFront.textContent = ydTo(state.frontPt);
-    els.fcbBack.textContent = ydTo(state.backPt);
-  }
 
   function renderClubChips(playsYd) {
     const desc = sortedClubsDesc();
     els.clubChips.innerHTML =
-      `<button class="club-chip${
-        state.prefs.selectedClubId === '' ? ' active' : ''
+      `<button class="club-chip${state.prefs.selectedClubId === '' ? ' active' : ''
       }" data-id="">Auto</button>` +
       desc
         .map(
           (c) =>
-            `<button class="club-chip${
-              state.prefs.selectedClubId === c.id ? ' active' : ''
+            `<button class="club-chip${state.prefs.selectedClubId === c.id ? ' active' : ''
             }" data-id="${escapeHtml(c.id)}">${escapeHtml(c.name)}</button>`
         )
         .join('');
@@ -2012,11 +1797,11 @@
         (c) => `
         <div class="club-row" data-id="${escapeHtml(c.id)}">
           <input class="club-name-input" value="${escapeHtml(
-            c.name
-          )}" aria-label="${escapeHtml(c.name)} name" />
+          c.name
+        )}" aria-label="${escapeHtml(c.name)} name" />
           <input class="club-yard-input" type="number" inputmode="numeric" value="${escapeHtml(
-            c.yards
-          )}" aria-label="${escapeHtml(c.name)} yards" />
+          c.yards
+        )}" aria-label="${escapeHtml(c.name)} yards" />
           <button class="small-btn delete-club" title="Delete">Delete</button>
         </div>`
       )
@@ -2109,11 +1894,11 @@
             </div>
           </div>
           <input class="round-score" type="number" inputmode="numeric" value="${escapeHtml(
-            r.score
-          )}" aria-label="Hole ${i + 1} score" />
+          r.score
+        )}" aria-label="Hole ${i + 1} score" />
           <input class="round-putts" type="number" inputmode="numeric" value="${escapeHtml(
-            r.putts
-          )}" aria-label="Hole ${i + 1} putts" />
+          r.putts
+        )}" aria-label="Hole ${i + 1} putts" />
           <select class="round-fir" aria-label="Hole ${i + 1} FIR">
             <option value="" ${r.fir === '' ? 'selected' : ''}>—</option>
             <option value="Y" ${r.fir === 'Y' ? 'selected' : ''}>Y</option>
@@ -2132,7 +1917,6 @@
       const i = Number(row.dataset.i);
       const sync = () => {
         state.round[i] = {
-          ...state.round[i],
           hole: i + 1,
           score: sanitizeInt(row.querySelector('.round-score').value),
           putts: sanitizeInt(row.querySelector('.round-putts').value),
@@ -2176,6 +1960,7 @@
   const ROUND_MIN_SHOT_YD = 8; // below this it's a putt/tap — ignore
   const ROUND_GPS_OK_M = 15; // need a fix at least this good to capture
 
+
   function startRound() {
     // Course setup is available.
     if (
@@ -2191,43 +1976,12 @@
     beginRound(makeCasualCourse(), 1);
   }
   function endRound() {
-    if (!confirm('End round mode? Logged shots stay in your club data.')) {
+    if (!confirm('End round mode? Logged shots stay in your club data.'))
       return;
-    }
-
-    state.roundSession = null;
-    state.holeGeoKey = null;
-
-    // Stop the live solver: there is no active hole to derive edges from.
-    state.greenOutline = null;
-    state.fcbAuto = false;
-    state._fcbSolvedAt = null;
-    state._fcbSolveHole = null;
-
-    // The last hole's green reference must not linger on the map or in the
-    // F/C/B readout after the round ends (the old code left the front/back
-    // dots and green yardages on screen indefinitely).
-    state.greenCenter = null;
-    state.frontPt = null;
-    state.backPt = null;
-    state._pendingHoleFocus = false;
-    disarmPlaceMode();
-    clearFbMarkers();
-
-    clearHoleOverlay();
-    renderFcb();
-
-    saveRoundSession();
+      state.roundSession = null;
+      state.holeGeoKey = null;
+      saveRoundSession();
     renderRoundShotUI();
-
-    // Refresh recommendation/advice without the green model.
-    if (state.target && state.loc) {
-      calculateRange();
-      scheduleContextUpdate();
-    } else {
-      updateAdvice([], 'neutral');
-    }
-
     haptic(8);
   }
 
@@ -2254,7 +2008,7 @@
     rs.pending = {
       clubId,
       startPt: { lat: state.loc.lat, lng: state.loc.lng },
-      startAcc: gpsAccMeters(), // ← ADD THIS LINE
+      startAcc: gpsAccMeters(),        // ← ADD THIS LINE
       intendedBearing,
       ts: Date.now(),
     };
@@ -2267,6 +2021,8 @@
     );
     haptic(8);
   }
+
+
 
   function nextHole() {
     const rs = state.roundSession;
@@ -2344,9 +2100,11 @@
 
     els.roundHoleStrip.hidden = false;
 
-    els.roundCourseName.textContent = course?.name || 'Casual Round';
+    els.roundCourseName.textContent =
+      course?.name || 'Casual Round';
 
-    els.roundHoleNumber.textContent = `Hole ${getCurrentHoleNumber()}`;
+    els.roundHoleNumber.textContent =
+      `Hole ${getCurrentHoleNumber()}`;
 
     const holeMeta = [
       `Par ${hole.par || 4}`,
@@ -2361,159 +2119,10 @@
     if (!score.holesPlayed) {
       els.roundScoreSummary.textContent = 'E through 0';
     } else {
-      els.roundScoreSummary.textContent = `${formatToPar(
-        score.toPar
-      )} through ${score.holesPlayed}`;
+      els.roundScoreSummary.textContent =
+        `${formatToPar(score.toPar)} through ${score.holesPlayed}`;
     }
   }
-
-  function validLatLng(point) {
-    return (
-      point &&
-      Number.isFinite(Number(point.lat)) &&
-      Number.isFinite(Number(point.lng)) &&
-      Math.abs(Number(point.lat)) <= 90 &&
-      Math.abs(Number(point.lng)) <= 180
-    );
-  }
-
-  function toLeafletLatLngs(points) {
-    if (!Array.isArray(points)) return [];
-
-    return points
-      .filter(validLatLng)
-      .map((point) => [Number(point.lat), Number(point.lng)]);
-  }
-
-  function clearHoleOverlay() {
-    const layer = state.layers.holeOverlay;
-
-    if (!layer || !state.map) return;
-
-    try {
-      layer.clearLayers();
-    } catch {
-      // A partially initialized Leaflet layer should never break the round.
-    }
-  }
-
-  function ensureHoleOverlayLayer() {
-    if (!state.mapReady || !state.map) return null;
-
-    if (!state.layers.holeOverlay) {
-      state.layers.holeOverlay = L.layerGroup().addTo(state.map);
-    }
-
-    return state.layers.holeOverlay;
-  }
-
-  function addHoleOutline(layer, latLngs, style) {
-    if (!layer || latLngs.length < 3) return null;
-
-    return L.polygon(latLngs, {
-      pane: 'coursePane',
-      interactive: false,
-      ...style,
-    }).addTo(layer);
-  }
-
-  function renderHoleOverlay() {
-    if (!state.mapReady || !state.map) return;
-
-    const layer = ensureHoleOverlayLayer();
-    if (!layer) return;
-
-    clearHoleOverlay();
-
-    const hole = getCurrentHoleData();
-    if (!hole) return;
-
-    const isSatellite = isImagery();
-
-    // Neither the green NOR the fairway is drawn here.
-    //
-    // openstreetmap-carto (the "Course" basemap) already renders golf=green,
-    // golf=fairway, golf=bunker, golf=tee and natural=water, and on satellite
-    // the imagery shows all of it directly. The fairway overlay in particular
-    // was the "extra green polygons" problem: a pale-green fill matched within
-    // 300 m of the hole corridor, so several neighbouring fairways stacked up
-    // around each green. It fed no yardage and no tip, so it is gone.
-    //
-    // What still draws: hazards (they drive the carry tips) and the tee, plus
-    // the front/back yardage dots from renderFcb().
-    const colors = isSatellite
-      ? {
-          bunker: '#ffd166',
-          water: '#58b8ff',
-          tee: '#ffffff',
-        }
-      : {
-          bunker: '#d69a2d',
-          water: '#1688e8',
-          tee: '#0f7a43',
-        };
-
-    // Render exact bunker/water polygons when available.
-    const hazards = Array.isArray(hole.hazards) ? hole.hazards : [];
-
-    for (const hazard of hazards) {
-      const outline = toLeafletLatLngs(hazard.outline);
-
-      const isBunker = hazard.type === 'bunker';
-      const color = isBunker ? colors.bunker : colors.water;
-
-      if (outline.length >= 3) {
-        addHoleOutline(layer, outline, {
-          color,
-          weight: 1.8,
-          opacity: 0.95,
-          fillColor: color,
-          fillOpacity: isSatellite ? 0.24 : 0.34,
-        });
-        continue;
-      }
-
-      // Fallback for old cached courses that only stored a hazard centroid.
-      if (validLatLng(hazard)) {
-        L.circleMarker([hazard.lat, hazard.lng], {
-          pane: 'coursePane',
-          radius: isBunker ? 7 : 8,
-          color: '#ffffff',
-          weight: 1.5,
-          opacity: 0.95,
-          fillColor: color,
-          fillOpacity: 0.9,
-          interactive: false,
-        }).addTo(layer);
-      }
-    }
-
-    // Tee marker.
-    if (validLatLng(hole.teePoint)) {
-      L.circleMarker([hole.teePoint.lat, hole.teePoint.lng], {
-        pane: 'coursePane',
-        radius: 7,
-        color: '#ffffff',
-        weight: 2,
-        opacity: 1,
-        fillColor: colors.tee,
-        fillOpacity: 0.95,
-        interactive: false,
-      }).addTo(layer);
-    }
-
-    // Keep the user's location, target, and F/C/B controls visibly above
-    // the imported geometry.
-    if (state.markers.user?.bringToFront) state.markers.user.bringToFront();
-    if (state.markers.target?.bringToFront) state.markers.target.bringToFront();
-    if (state.markers.frontMarker?.bringToFront) {
-      state.markers.frontMarker.bringToFront();
-    }
-    if (state.markers.backMarker?.bringToFront) {
-      state.markers.backMarker.bringToFront();
-    }
-  }
-
   // Push the current hole's imported geometry onto the map: green centre,
   // front/back edges, and an initial aim target. Keyed so it runs once per
   // hole change, not on every GPS tick.
@@ -2522,7 +2131,9 @@
     if (!hole) return;
 
     const pt = (p) =>
-      p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))
+      p &&
+        Number.isFinite(Number(p.lat)) &&
+        Number.isFinite(Number(p.lng))
         ? { lat: Number(p.lat), lng: Number(p.lng) }
         : null;
 
@@ -2530,98 +2141,40 @@
     const front = pt(hole.front);
     const back = pt(hole.back);
 
-    const hasOverlayData =
-      (Array.isArray(hole.greenOutline) && hole.greenOutline.length >= 3) ||
-      (Array.isArray(hole.fairwayOutline) && hole.fairwayOutline.length > 0) ||
-      (Array.isArray(hole.hazards) && hole.hazards.length > 0) ||
-      !!hole.teePoint;
-
-    const hasFcbData = !!center || !!front || !!back;
-
-    // A hole can have mapped hazards even if it has no usable green centre.
-    // Draw what OSM provided either way.
-    if (!hasFcbData && !hasOverlayData) {
-      // Auto-derived points from the PREVIOUS hole must not linger here.
-      // A manual override is the player's own work — leave it alone.
-      if (state.fcbAuto) {
-        state.greenCenter = null;
-        state.frontPt = null;
-        state.backPt = null;
-        clearFbMarkers();
-      }
-
-      state.greenOutline = null;
-      state.fcbAuto = false;
-      state._fcbSolvedAt = null;
-      state._fcbSolveHole = null;
-
-      clearHoleOverlay();
-      renderFcb();
-      state._pendingHoleFocus = false; // nothing on this hole to frame
-      return;
-    }
+    if (!center && !front && !back) return;
 
     disarmPlaceMode();
     clearFbMarkers();
 
-    // The ring is kept as data only. It is what makes front/back correct from
-    // an angled approach instead of only from the tee.
-    const ring =
-      Array.isArray(hole.greenOutline) && hole.greenOutline.length >= 3
-        ? hole.greenOutline
-        : null;
-
-    state.greenOutline = ring;
-    state.fcbAuto = !!ring;
-    state._fcbSolvedAt = null;
-    state._fcbSolveHole = null;
-
-    // Importer values are the fallback: they are solved from the tee, so they
-    // are only right on a tee shot. syncAutoFcb() replaces them with a solve
-    // from the player's real position as soon as a fix exists.
     state.greenCenter = center;
     state.frontPt = front;
     state.backPt = back;
 
-    syncAutoFcb();
+    if (center && state.mapReady) {
+      state.markers.greenCenter = L.marker([center.lat, center.lng], {
+        icon: greenCenterIcon(),
+        interactive: false,
+        zIndexOffset: 840,
+      }).addTo(state.map);
+    }
 
-    renderHoleOverlay();
-
-    // No green-centre marker. `state.greenCenter` still drives the auto Center
-    // yardage, leftoverToGreen(), targetIsOnMarkedGreen() and the green-aware
-    // strategy engine — it just isn't drawn, because the target pin placed
-    // immediately below already sits on it.
-
-    // Default the aim point to green centre for the new hole. state.target
-    // must be set even if the marker can't be drawn yet, so a later
-    // calculateRange()/focusOnHole() sees the right aim.
-    const aim = state.greenCenter || center;
-
-    if (aim) {
-      state.target = aim;
+    // Default the aim point to green centre for the new hole.
+    if (center && state.mapReady) {
+      state.target = center;
       save('caddy:lastTarget', state.target);
 
-      if (state.mapReady && state.map) {
-        if (!state.markers.target) {
-          state.markers.target = L.marker([aim.lat, aim.lng], {
-            icon: targetIcon(),
-            zIndexOffset: 850,
-          }).addTo(state.map);
-        } else {
-          state.markers.target.setLatLng([aim.lat, aim.lng]);
-        }
+      if (!state.markers.target) {
+        state.markers.target = L.marker([center.lat, center.lng], {
+          icon: targetIcon(),
+          zIndexOffset: 850,
+        }).addTo(state.map);
+      } else {
+        state.markers.target.setLatLng([center.lat, center.lng]);
       }
     }
 
     renderFcb();
     updateLine();
-
-    // Frame the new hole on screen (FOUND.js-style hole framing). Without
-    // this the target pin was placed at the green centre but the viewport
-    // stayed on the previous hole — the "green centre is never right" bug.
-    // When the map has no size yet (round started on the Round tab), defer
-    // until showTab('range').
-    state._pendingHoleFocus = !focusOnHole();
 
     if (state.target && state.loc) {
       calculateRange();
@@ -2632,9 +2185,7 @@
   function syncHoleGeometry() {
     if (!state.roundSession || !state.mapReady) return;
 
-    const key = `${
-      state.roundSession.course?.id || ''
-    }:${getCurrentHoleNumber()}`;
+    const key = `${state.roundSession.course?.id || ''}:${getCurrentHoleNumber()}`;
     if (key === state.holeGeoKey) return;
 
     state.holeGeoKey = key;
@@ -2653,8 +2204,8 @@
       status === 'idle'
         ? 'Not started'
         : status === 'pending'
-        ? `Hole ${rs.hole} · shot in flight`
-        : `Hole ${rs.hole} · ready`;
+          ? `Hole ${rs.hole} · shot in flight`
+          : `Hole ${rs.hole} · ready`;
     els.roundStatusChip.textContent = chipText;
 
     // Primary morphing button
@@ -2690,9 +2241,8 @@
         live = `${Math.round(d)} yd`;
       }
       els.roundShotReadout.style.display = 'block';
-      els.roundShotReadout.innerHTML = `<div class="v">${live}</div><div class="l">from start${
-        club ? ` · ${escapeHtml(club.name)}` : ''
-      } · walk to your ball</div>`;
+      els.roundShotReadout.innerHTML = `<div class="v">${live}</div><div class="l">from start${club ? ` · ${escapeHtml(club.name)}` : ''
+        } · walk to your ball</div>`;
     } else {
       els.roundShotReadout.style.display = 'none';
     }
@@ -2739,9 +2289,10 @@
       .filter(Boolean)
       .join(' · ');
 
-    els.roundMapScore.textContent = score.holesPlayed
-      ? `${formatToPar(score.toPar)}`
-      : 'E';
+    els.roundMapScore.textContent =
+      score.holesPlayed
+        ? `${formatToPar(score.toPar)}`
+        : 'E';
 
     els.roundMapStatus.textContent = pending
       ? 'Shot in flight'
@@ -2821,8 +2372,7 @@
     els.roundClubPop.innerHTML = sortedClubsDesc()
       .map(
         (c) =>
-          `<button class="round-club-opt${
-            c.id === activeId ? ' active' : ''
+          `<button class="round-club-opt${c.id === activeId ? ' active' : ''
           }" data-id="${escapeHtml(c.id)}" type="button">${escapeHtml(
             c.name
           )}<span class="yd">${fmt(c.yards)}</span></button>`
@@ -2869,13 +2419,12 @@
         let tag = sh.counted
           ? 'logged'
           : sh.discarded
-          ? 'discarded'
-          : 'uncounted';
+            ? 'discarded'
+            : 'uncounted';
         return `<div class="shot-item${sh.discarded ? ' discarded' : ''}">
                 <span>H${sh.hole} · ${escapeHtml(name)}</span>
-                <span><b>${
-                  sh.distanceYd
-                } yd</b> <span class="tag">${tag}</span></span>
+                <span><b>${sh.distanceYd
+          } yd</b> <span class="tag">${tag}</span></span>
               </div>`;
       })
       .join('');
@@ -2884,849 +2433,6 @@
       `<div class="hint" style="margin:4px 0 6px;font-weight:800">Shots this round · ${rs.shots.length} (${counted} logged)</div>` +
       rows;
   }
-
-  // ═══════════════════════════════════════════════════════════════
-  //  OSM COURSE DATA PIPELINE
-  // ═══════════════════════════════════════════════════════════════
-
-  // Per-endpoint timeout, POST body, and explicit non-JSON detection.
-  // Overpass answers HTTP 200 with an XML/HTML error page when it rate-limits,
-  // so `res.json()` throwing is a *rate limit*, not a bug — say so.
-  // Browser-friendly mirrors first. overpass-api.de now rejects
-  // browser-originated requests with 406 unless they carry an identifying
-  // User-Agent — which browsers are forbidden from setting — so it is
-  // demoted to last. kumi.systems is gone (it now serves the Private.coffee
-  // landing page; its redirect can turn our POST into a GET).
-  // GitHub Pages is static hosting, so this app queries public Overpass
-  // servers directly. No Netlify function or /api/overpass route is used.
-  const OVERPASS_ENDPOINTS = [
-    'https://overpass.private.coffee/api/interpreter',
-    'https://overpass.osm.jp/api/interpreter',
-    'https://overpass-api.de/api/interpreter',
-  ];
-  // Fire the next mirror if the current one hasn't answered within
-  // OVERPASS_HEDGE_MS and take whichever finishes first. The old sequential
-  // chain meant a single slow/overloaded mirror cost the entire per-endpoint
-  // timeout before we even tried the others — that was most of the wait.
-  const OVERPASS_HEDGE_MS = 1800;
-
-  function overpassOnce(endpoint, encodedQuery, timeoutMs, outerSignal) {
-    const ctrl = new AbortController();
-    const relay = () => ctrl.abort();
-
-    outerSignal?.addEventListener('abort', relay, { once: true });
-
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-
-    const separator = endpoint.includes('?') ? '&' : '?';
-    const url = `${endpoint}${separator}data=${encodedQuery}`;
-
-    return fetch(url, {
-      method: 'GET',
-      mode: 'cors',
-      signal: ctrl.signal,
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-      .then(async (response) => {
-        if (response.status === 429 || response.status === 504) {
-          throw new Error(`Overpass is busy (${response.status}).`);
-        }
-
-        if (!response.ok) {
-          throw new Error(`Overpass HTTP ${response.status}.`);
-        }
-
-        const text = await response.text();
-
-        try {
-          return JSON.parse(text);
-        } catch {
-          throw new Error(
-            'Overpass returned an invalid response. Please try again.'
-          );
-        }
-      })
-      .finally(() => {
-        clearTimeout(timer);
-        outerSignal?.removeEventListener('abort', relay);
-      });
-  }
-
-  function fetchOverpass(query, signal, timeoutMs = OSM_COURSE_TIMEOUT_MS) {
-    const encodedQuery = encodeURIComponent(query.trim());
-
-    if (signal?.aborted) {
-      return Promise.reject(
-        new DOMException('Overpass request cancelled', 'AbortError')
-      );
-    }
-
-    return new Promise((resolve, reject) => {
-      const total = OVERPASS_ENDPOINTS.length;
-      let nextIndex = 0;
-      let failures = 0;
-      let settled = false;
-      let hedgeTimer = null;
-      let lastError = null;
-
-      const finish = (fn, value) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(hedgeTimer);
-        signal?.removeEventListener('abort', onAbort);
-        fn(value);
-      };
-
-      function onAbort() {
-        finish(
-          reject,
-          new DOMException('Overpass request cancelled', 'AbortError')
-        );
-      }
-      signal?.addEventListener('abort', onAbort, { once: true });
-
-      const launchNext = () => {
-        if (settled || nextIndex >= total) return;
-        const endpoint = OVERPASS_ENDPOINTS[nextIndex++];
-
-        clearTimeout(hedgeTimer);
-        if (nextIndex < total) {
-          hedgeTimer = setTimeout(launchNext, OVERPASS_HEDGE_MS);
-        }
-
-        overpassOnce(endpoint, encodedQuery, timeoutMs, signal).then(
-          (data) => finish(resolve, data),
-          (error) => {
-            lastError = error;
-            failures += 1;
-            console.warn(`Overpass failed at ${endpoint}`, error);
-            if (nextIndex < total) launchNext();
-            else if (failures >= total) {
-              finish(
-                reject,
-                lastError || new Error('All Overpass servers failed.')
-              );
-            }
-          }
-        );
-      };
-
-      launchNext();
-    });
-  }
-
-  async function searchNearbyCoursesOSM(lat, lng, signal) {
-    // `nwr` is node+way+relation in one line (Overpass 0.7.55+).
-    // `qt` ordering is markedly cheaper server-side than sorting by id, and a
-    // short server-side timeout makes a busy mirror fail fast so the hedged
-    // fetch can move on instead of us staring at a spinner.
-    const query = `
-[out:json][timeout:12];
-(
-  nwr["leisure"="golf_course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
-  nwr["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
-);
-out tags center qt 40;
-`;
-
-    {
-      const data = await fetchOverpass(query, signal, OSM_SEARCH_TIMEOUT_MS);
-
-      const elements = Array.isArray(data.elements) ? data.elements : [];
-      const seen = new Set();
-
-      return elements
-        .map((el) => {
-          const tags = el.tags || {};
-          const name = String(tags.name || '').trim();
-          const clat = Number(el.lat ?? el.center?.lat);
-          const clng = Number(el.lon ?? el.center?.lon);
-
-          if (!name || !Number.isFinite(clat) || !Number.isFinite(clng)) {
-            return null;
-          }
-
-          const key = `${name.toLowerCase()}|${clat.toFixed(4)}|${clng.toFixed(
-            4
-          )}`;
-
-          if (seen.has(key)) {
-            return null;
-          }
-
-          seen.add(key);
-
-          // A 12 km ranking does not need a 60-iteration Vincenty solve, and
-          // `tags` was only ever cached into localStorage and never read.
-          const distanceM = fastDistM({ lat, lng }, { lat: clat, lng: clng });
-
-          return {
-            id: `osm:${el.type}/${el.id}`,
-            name,
-            lat: clat,
-            lng: clng,
-            source: 'openstreetmap',
-            osmType: el.type,
-            osmId: el.id,
-            distanceM,
-            distanceYd: distanceM * M_TO_YD,
-          };
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.distanceM - b.distanceM)
-        .slice(0, 10);
-    }
-  }
-
-  async function fetchCourseOSM(courseNode, controller) {
-    const lat = courseNode.lat;
-    const lng = courseNode.lng;
-    const radius = OSM_AROUND_M;
-
-    // One `around` evaluation (value regex on a fixed key is cheap) instead of
-    // six, `qt` ordering instead of id sort, and a tight radius on water so a
-    // neighbouring lake's multi-thousand-node polygon stays out of the
-    // payload. The server timeout is now BELOW our client timeout — the old
-    // timeout:60 vs 30 s abort meant we killed and re-issued the query to the
-    // next mirror while the first one was still working, tripling the load.
-    // `fairway` is deliberately absent: it is never drawn (both basemaps
-    // already render it) and fairway rings are among the largest polygons on a
-    // course, so dropping them is a straight payload win.
-    const query = `[out:json][timeout:18];
-(
-  nwr["golf"~"^(hole|green|tee|bunker|water_hazard)$"](around:${radius},${lat},${lng});
-  nwr["natural"="water"](around:${OSM_WATER_AROUND_M},${lat},${lng});
-);
-out geom qt;`;
-
-    const data = await fetchOverpass(
-      query,
-      controller?.signal,
-      OSM_COURSE_TIMEOUT_MS
-    );
-
-    return { elements: Array.isArray(data.elements) ? data.elements : [] };
-  }
-
-  // Memoized on the coords array identity, which osmWayCoords now guarantees.
-  const _centroidCache = new WeakMap();
-
-  function polygonCentroid(coords) {
-    if (!coords || coords.length < 3) return null;
-    const hit = _centroidCache.get(coords);
-    if (hit !== undefined) return hit;
-    const out = computePolygonCentroid(coords);
-    _centroidCache.set(coords, out);
-    return out;
-  }
-
-  function computePolygonCentroid(coords) {
-    if (!coords || coords.length < 3) return null;
-    let area = 0,
-      cx = 0,
-      cy = 0;
-    const n = coords.length;
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      const xi = coords[i].lng,
-        yi = coords[i].lat;
-      const xj = coords[j].lng,
-        yj = coords[j].lat;
-      const cross = xi * yj - xj * yi;
-      area += cross;
-      cx += (xi + xj) * cross;
-      cy += (yi + yj) * cross;
-    }
-    area /= 2;
-    if (Math.abs(area) < 1e-12)
-      return { lat: coords[0].lat, lng: coords[0].lng };
-    return { lat: cy / (6 * area), lng: cx / (6 * area) };
-  }
-
-  function rayIntersectPolygon(origin, bearingDeg, coords) {
-    if (!coords || coords.length < 3) return null;
-    const farPoint = geodesicDirect(origin, bearingDeg, 10000);
-    const fr = enuFrame(origin);
-    const rs = toENU(fr, origin);
-    const re = toENU(fr, farPoint);
-    const rdx = re.e - rs.e,
-      rdy = re.n - rs.n;
-
-    const intersections = [];
-    const n = coords.length;
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      const ss = toENU(fr, coords[i]);
-      const se = toENU(fr, coords[j]);
-      const sdx = se.e - ss.e,
-        sdy = se.n - ss.n;
-      const denom = rdx * sdy - rdy * sdx;
-      if (Math.abs(denom) < 1e-12) continue;
-      const t = ((ss.e - rs.e) * sdy - (ss.n - rs.n) * sdx) / denom;
-      const u = ((ss.e - rs.e) * rdy - (ss.n - rs.n) * rdx) / denom;
-      if (t >= 0 && u >= 0 && u <= 1) {
-        const ix = rs.e + t * rdx,
-          iy = rs.n + t * rdy;
-        const latlng = fromENU(fr, ix, iy);
-        const distM = geodesicInverse(origin, latlng).s;
-        intersections.push({ ...latlng, distM });
-      }
-    }
-    if (intersections.length < 2)
-      return intersections.length === 1
-        ? [intersections[0], intersections[0]]
-        : null;
-    intersections.sort((a, b) => a.distM - b.distM);
-    return [intersections[0], intersections[intersections.length - 1]];
-  }
-
-  function computeGreenFCB(greenCoords, teePoint) {
-    if (!greenCoords || greenCoords.length < 3 || !teePoint) return null;
-    const center = polygonCentroid(greenCoords);
-    if (!center) return null;
-    const bearing = initialBearingDeg(teePoint, center);
-    const inters = rayIntersectPolygon(teePoint, bearing, greenCoords);
-    if (!inters) return { center, front: center, back: center, depthYd: 0 };
-    const depthM = geodesicInverse(inters[0], inters[1]).s;
-    return {
-      center,
-      front: inters[0],
-      back: inters[1],
-      depthYd: depthM * M_TO_YD,
-    };
-  }
-
-  // Overpass emits nulls in `geometry` when a way is clipped, and puts
-  // *relation* geometry on the members rather than the element. Unfiltered,
-  // both produced NaN centroids that silently killed the whole hole.
-  // Coordinates are rounded to 6 dp (~0.11 m) — plenty of precision, and it
-  // roughly halves the JSON we push into localStorage.
-  const osmPt = (pt) =>
-    pt && Number.isFinite(pt.lat) && Number.isFinite(pt.lon)
-      ? {
-          lat: Math.round(pt.lat * 1e6) / 1e6,
-          lng: Math.round(pt.lon * 1e6) / 1e6,
-        }
-      : null;
-
-  // Keyed by element identity, which is stable for one Overpass response.
-  // Without this, a single green's ring was re-mapped and re-rounded once per
-  // tee box, once per hole field, and again for the FCB solve.
-  const _osmCoordsCache = new WeakMap();
-
-  function osmWayCoords(el) {
-    if (!el || typeof el !== 'object') return [];
-    const hit = _osmCoordsCache.get(el);
-    if (hit) return hit;
-    const out = computeOsmWayCoords(el);
-    _osmCoordsCache.set(el, out);
-    return out;
-  }
-
-  function computeOsmWayCoords(el) {
-    if (!el) return [];
-
-    if (Array.isArray(el.geometry)) {
-      return el.geometry.map(osmPt).filter(Boolean);
-    }
-
-    if (Array.isArray(el.members)) {
-      // Longest outer ring — good enough for a green/bunker outline, and it
-      // avoids stitching multiple ways into a scrambled polygon.
-      let best = [];
-      for (const m of el.members) {
-        if (!m || !Array.isArray(m.geometry)) continue;
-        if (m.role && m.role !== 'outer') continue;
-        const ring = m.geometry.map(osmPt).filter(Boolean);
-        if (ring.length > best.length) best = ring;
-      }
-      return best;
-    }
-
-    return [];
-  }
-
-  function osmTeeCentroid(el) {
-    if (!el) return null;
-    if (el.type === 'node') return osmPt({ lat: el.lat, lon: el.lon });
-    const coords = osmWayCoords(el);
-    return polygonCentroid(coords) || coords[0] || null;
-  }
-
-  // Hole numbers: `ref` is the convention, but plenty of courses only carry the
-  // number in `name` ("Hole 7") or `ref:hole`. Dropping those meant an
-  // otherwise well-mapped course imported as "0/18 holes mapped".
-  function osmHoleNumber(tags) {
-    if (!tags) return NaN;
-
-    const direct = parseInt(
-      tags.ref ?? tags['ref:hole'] ?? tags.hole ?? '',
-      10
-    );
-    if (direct >= 1 && direct <= 18) return direct;
-
-    const name = String(tags.name || '');
-    const match =
-      name.match(/(?:hole|loch|trou|hoyo)\D{0,3}(\d{1,2})/i) ||
-      name.match(/^\s*(\d{1,2})\s*$/);
-    const n = match ? parseInt(match[1], 10) : NaN;
-
-    return n >= 1 && n <= 18 ? n : NaN;
-  }
-
-  // Equirectangular metres. Feature→hole matching runs thousands of times;
-  // full Vincenty there is ~100x the cost for zero useful extra accuracy.
-  function fastDistM(a, b) {
-    const cosLat = Math.cos(d2r((a.lat + b.lat) / 2));
-    return hypot2((b.lng - a.lng) * cosLat * 111320, (b.lat - a.lat) * 110540);
-  }
-
-  // Distance to the nearest vertex of the hole corridor.
-  function holeDistanceM(point, coords) {
-    let best = Infinity;
-    for (const c of coords) {
-      const d = fastDistM(point, c);
-      if (d < best) best = d;
-    }
-    return best;
-  }
-
-  const _bboxCache = new WeakMap();
-
-  function coordsBBox(coords) {
-    const hit = _bboxCache.get(coords);
-    if (hit) return hit;
-
-    let minLat = Infinity,
-      maxLat = -Infinity;
-    let minLng = Infinity,
-      maxLng = -Infinity;
-    for (const c of coords) {
-      if (c.lat < minLat) minLat = c.lat;
-      if (c.lat > maxLat) maxLat = c.lat;
-      if (c.lng < minLng) minLng = c.lng;
-      if (c.lng > maxLng) maxLng = c.lng;
-    }
-
-    const box = { minLat, maxLat, minLng, maxLng };
-    _bboxCache.set(coords, box);
-    return box;
-  }
-
-  function bboxSpanM(coords) {
-    if (!coords.length) return 0;
-    const b = coordsBBox(coords);
-    return fastDistM(
-      { lat: b.minLat, lng: b.minLng },
-      { lat: b.maxLat, lng: b.maxLng }
-    );
-  }
-
-  // Lower bound on the distance from a point to anything inside the box.
-  // Used to skip whole hole corridors without touching their vertices.
-  function bboxGapM(p, b) {
-    const dLat =
-      p.lat < b.minLat
-        ? b.minLat - p.lat
-        : p.lat > b.maxLat
-        ? p.lat - b.maxLat
-        : 0;
-    const dLng =
-      p.lng < b.minLng
-        ? b.minLng - p.lng
-        : p.lng > b.maxLng
-        ? p.lng - b.maxLng
-        : 0;
-    if (dLat === 0 && dLng === 0) return 0;
-    return hypot2(dLat * 110540, dLng * Math.cos(d2r(p.lat)) * 111320);
-  }
-
-  // Stored outlines are only ever drawn as a map overlay at zoom <= 21, so
-  // one vertex per couple of metres is invisible. Keeping every OSM node
-  // tripled the localStorage payload and the blocking JSON.stringify cost of
-  // caching a course.
-  function thinRing(coords, maxPoints = OUTLINE_MAX_POINTS) {
-    if (!Array.isArray(coords) || coords.length <= maxPoints) return coords;
-    const step = coords.length / maxPoints;
-    const out = [];
-    for (let i = 0; i < maxPoints; i++) out.push(coords[Math.floor(i * step)]);
-    out.push(coords[coords.length - 1]);
-    return out;
-  }
-
-  function buildCourseFromOSM(osmData, courseNode) {
-    const elements = Array.isArray(osmData?.elements) ? osmData.elements : [];
-    const holes = [],
-      greens = [],
-      bunkers = [],
-      waters = [],
-      tees = [],
-      fairways = [];
-
-    for (const el of elements) {
-      const tags = el.tags || {};
-      const gTag = tags.golf || '';
-      if (el.type === 'way' || el.type === 'relation') {
-        if (gTag === 'hole') holes.push(el);
-        else if (gTag === 'green') greens.push(el);
-        else if (gTag === 'bunker') bunkers.push(el);
-        else if (gTag === 'water_hazard') waters.push(el);
-        else if (tags.natural === 'water') waters.push(el);
-        else if (gTag === 'tee') tees.push(el);
-        else if (gTag === 'fairway') fairways.push(el);
-      } else if (el.type === 'node' && gTag === 'tee') {
-        tees.push(el);
-      }
-    }
-
-    const holeMap = new Map();
-    for (const h of holes) {
-      const ref = osmHoleNumber(h.tags);
-      if (Number.isFinite(ref) && !holeMap.has(ref)) holeMap.set(ref, h);
-    }
-
-    // Cache each hole's corridor once. The old code re-derived it inside every
-    // matching loop — O(features x holes) Vincenty solves for no reason.
-    const holeGeom = new Map();
-    for (const [ref, h] of holeMap) {
-      const coords = osmWayCoords(h);
-      if (coords.length) holeGeom.set(ref, { coords, box: coordsBBox(coords) });
-    }
-
-    // Match against the nearest point ON the hole corridor, not the hole
-    // centroid. On a par 5 that centroid sits ~130 yd from both the tee and the
-    // green, which is exactly how greens ended up on the wrong hole.
-    const nearestHoleRef = (point, maxDistM) => {
-      let bestRef = null;
-      let bestDist = Infinity;
-      for (const [ref, geom] of holeGeom) {
-        // Rectangle reject first: a point further from the corridor's bounding
-        // box than our current best cannot possibly beat it, so skip the
-        // per-vertex scan entirely. On a full 18 this cuts the matcher from
-        // O(features x holes x vertices) to roughly O(features x vertices).
-        if (bboxGapM(point, geom.box) > Math.min(bestDist, maxDistM)) continue;
-        const dist = holeDistanceM(point, geom.coords);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestRef = ref;
-        }
-      }
-      return bestRef !== null && bestDist <= maxDistM
-        ? { ref: bestRef, distM: bestDist }
-        : null;
-    };
-
-    // Greens: keep the CLOSEST green per hole. The old code let whichever green
-    // happened to be last in the response win.
-    const holeGreenMap = new Map();
-    const greenDist = new Map();
-    for (const g of greens) {
-      const centroid = polygonCentroid(osmWayCoords(g));
-      if (!centroid) continue;
-      const match = nearestHoleRef(centroid, 250);
-      if (!match) continue;
-      if (!greenDist.has(match.ref) || match.distM < greenDist.get(match.ref)) {
-        greenDist.set(match.ref, match.distM);
-        holeGreenMap.set(match.ref, g);
-      }
-    }
-
-    // Tees: keep the tee FARTHEST from that hole's green, i.e. the back tee, so
-    // "Default tees" is consistent. Previously the last tee box in the response
-    // won, meaning every hole's yardage came from a random tee colour.
-    const holeTeeMap = new Map();
-    const teeReach = new Map();
-    for (const t of tees) {
-      const tc = osmTeeCentroid(t);
-      if (!tc) continue;
-      const match = nearestHoleRef(tc, 400);
-      if (!match) continue;
-      const greenWay = holeGreenMap.get(match.ref);
-      const greenCentroid = greenWay
-        ? polygonCentroid(osmWayCoords(greenWay))
-        : null;
-      const reach = greenCentroid ? fastDistM(tc, greenCentroid) : -match.distM;
-      if (!teeReach.has(match.ref) || reach > teeReach.get(match.ref)) {
-        teeReach.set(match.ref, reach);
-        holeTeeMap.set(match.ref, tc);
-      }
-    }
-
-    // Fairway matching removed. The 300 m corridor match attached several
-    // neighbouring holes' fairways to one hole, and none of it was ever drawn
-    // or measured — it only cost Overpass payload and localStorage quota.
-    // `fairways` stays collected above so an older cached course still parses.
-
-    const holeHazardsMap = new Map();
-    const allHazards = [
-      ...bunkers.map((b) => ({ ...b, hazType: 'bunker' })),
-      ...waters.map((w) => ({ ...w, hazType: 'water' })),
-    ];
-    for (const haz of allHazards) {
-      const coords = osmWayCoords(haz);
-      if (coords.length < 3) continue;
-
-      // A lakeside course pulls in multi-kilometre water polygons. They are not
-      // a hazard for any one hole, and they dominate the stored payload.
-      // Reject on the cheap bbox test BEFORE walking the ring for a centroid.
-      if (bboxSpanM(coords) > OSM_HAZARD_MAX_SPAN_M) continue;
-
-      const centroid = polygonCentroid(coords);
-      if (!centroid) continue;
-
-      // Matched against the corridor within 120 m, so tee-shot bunkers count.
-      // The old code measured to the GREEN within 400 m, which threw away every
-      // hazard you actually have to carry off the tee.
-      const match = nearestHoleRef(centroid, 120);
-      if (!match) continue;
-
-      const arr = holeHazardsMap.get(match.ref) || [];
-      arr.push({
-        type: haz.hazType,
-        lat: centroid.lat,
-        lng: centroid.lng,
-        outline: thinRing(coords),
-      });
-      holeHazardsMap.set(match.ref, arr);
-    }
-
-    const courseHoles = [];
-    let holesMapped = 0,
-      parsImported = 0,
-      parsEstimated = 0;
-    let yardsFromTag = 0,
-      yardsEstimated = 0;
-    let greensFound = 0,
-      fcbFound = 0,
-      hazardsFound = 0,
-      teesFound = 0;
-
-    for (let i = 1; i <= 18; i++) {
-      const holeWay = holeMap.get(i);
-      const tags = holeWay?.tags || {};
-      const greenWay = holeGreenMap.get(i);
-      const teePoint = holeTeeMap.get(i) || null;
-      const hazards = holeHazardsMap.get(i) || [];
-      // Schema-compatible placeholder; nothing reads or draws it any more.
-      const fairwayOutline = [];
-
-      // Full-resolution coords are still used for the FCB solve below; only
-      // the *stored* overlay ring is thinned.
-      const greenOutline = thinRing(greenWay ? osmWayCoords(greenWay) : []);
-
-      const parTag = parseInt(tags.par, 10);
-      const par = parTag >= 3 && parTag <= 6 ? parTag : 4;
-      if (holeWay) parsImported += parTag >= 3 && parTag <= 6 ? 1 : 0;
-      if (holeWay && !(parTag >= 3 && parTag <= 6)) parsEstimated++;
-
-      let yards = '',
-        yardageSource = 'none';
-      if (tags.distance && Number(tags.distance) > 0) {
-        yards = Math.round(Number(tags.distance));
-        yardageSource = 'osm:distance';
-        yardsFromTag++;
-      } else {
-        const greenCoords = greenWay ? osmWayCoords(greenWay) : null;
-        const greenCenter = greenCoords ? polygonCentroid(greenCoords) : null;
-        const effectiveTee =
-          teePoint || (holeWay ? polygonCentroid(osmWayCoords(holeWay)) : null);
-        if (effectiveTee && greenCenter) {
-          const distYd = geodesicInverse(effectiveTee, greenCenter).s * M_TO_YD;
-          yards = Math.round(distYd);
-          yardageSource = 'estimated';
-          yardsEstimated++;
-        }
-      }
-
-      let greenCenter = null,
-        front = null,
-        back = null,
-        greenDepthYds = null;
-      const greenCoords = greenWay ? osmWayCoords(greenWay) : null;
-      if (greenCoords && greenCoords.length >= 3) {
-        greensFound++;
-        const fcb = teePoint ? computeGreenFCB(greenCoords, teePoint) : null;
-        if (fcb && fcb.depthYd >= 3) {
-          greenCenter = fcb.center;
-          front = fcb.front;
-          back = fcb.back;
-          greenDepthYds = Math.round(fcb.depthYd);
-          fcbFound++;
-        } else {
-          greenCenter = polygonCentroid(greenCoords);
-        }
-      }
-
-      const handicap = tags.handicap || '';
-      if (teePoint) teesFound++;
-      hazardsFound += hazards.length;
-      const source = holeWay ? 'openstreetmap' : 'manual';
-
-      courseHoles.push({
-        number: i,
-        par,
-        yards,
-        yardageSource,
-        handicap,
-
-        greenCenter,
-        front,
-        back,
-        greenDepthYds,
-
-        teePoint,
-
-        // Geometry for the active-hole map overlay.
-        greenOutline,
-        fairwayOutline,
-        hazards,
-
-        source,
-
-        strokeIndex: handicap ? parseInt(handicap, 10) : undefined,
-      });
-      if (holeWay || yards) holesMapped++;
-    }
-
-    const report = {
-      holesMapped,
-      parsImported,
-      parsEstimated,
-      yardsFromTag,
-      yardsEstimated,
-      greensFound,
-      fcbFound,
-      hazardsFound,
-      teesFound,
-      source: 'openstreetmap',
-      osmId: `${courseNode.osmType}/${courseNode.osmId}`,
-    };
-
-    return normalizeCourse({
-      id: `osm:${courseNode.osmType}/${courseNode.osmId}`,
-      name: courseNode.name,
-      teeName: 'Default tees',
-      source: 'openstreetmap',
-      osmType: courseNode.osmType,
-      osmId: courseNode.osmId,
-      location: { lat: courseNode.lat, lng: courseNode.lng },
-      updatedAt: Date.now(),
-      importReport: report,
-      holes: courseHoles,
-    });
-  }
-
-  function cacheOSMCourse(course) {
-    if (!course || !course.osmId) return;
-    const key = OSM_COURSE_CACHE_PREFIX + `${course.osmType}/${course.osmId}`;
-    const payload = JSON.stringify({ ts: Date.now(), course });
-
-    try {
-      localStorage.setItem(key, payload);
-    } catch {
-      // Out of quota: drop every other cached course and retry once, rather
-      // than silently failing forever (save() swallows the exception).
-      try {
-        for (let i = localStorage.length - 1; i >= 0; i--) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith(OSM_COURSE_CACHE_PREFIX) && k !== key) {
-            localStorage.removeItem(k);
-          }
-        }
-        localStorage.setItem(key, payload);
-      } catch {
-        console.warn('Course cache is full; running without a cached copy.');
-      }
-    }
-  }
-
-  function getCachedOSMCourse(osmType, osmId) {
-    const key = OSM_COURSE_CACHE_PREFIX + `${osmType}/${osmId}`;
-    const cached = load(key, null);
-    if (cached && Date.now() - cached.ts < OSM_COURSE_CACHE_TTL)
-      return cached.course;
-    return null;
-  }
-
-  function invalidateOSMCourseCache(osmType, osmId) {
-    try {
-      localStorage.removeItem(OSM_COURSE_CACHE_PREFIX + `${osmType}/${osmId}`);
-    } catch {}
-  }
-
-  function describeOSMImport(course) {
-    const r = course && course.importReport;
-    if (!r) return 'No OSM data was found; add pars and yardages manually.';
-    const parts = [`${r.holesMapped}/18 holes mapped via OpenStreetMap`];
-    if (r.parsImported || r.parsEstimated) {
-      const bits = [];
-      if (r.parsImported) bits.push(`${r.parsImported} par tags`);
-      if (r.parsEstimated) bits.push(`${r.parsEstimated} estimated`);
-      parts.push(bits.join(' + '));
-    }
-    if (r.yardsFromTag || r.yardsEstimated) {
-      const bits = [];
-      if (r.yardsFromTag) bits.push(`${r.yardsFromTag} distance tags`);
-      if (r.yardsEstimated) bits.push(`${r.yardsEstimated} estimated`);
-      parts.push(bits.join(' + '));
-    }
-    if (r.greensFound) parts.push(`${r.greensFound} green polygons`);
-    if (r.fcbFound) parts.push(`${r.fcbFound} front/back computed`);
-    if (r.hazardsFound) parts.push(`${r.hazardsFound} hazards`);
-    if (r.teesFound) parts.push(`${r.teesFound} tee boxes`);
-    parts.push('source: OpenStreetMap');
-    return parts.join(' · ');
-  }
-
-  function updateRefreshButton() {
-    if (!els.refreshOsmBtn) return;
-    const course = state.selectedNearbyCourse;
-    const hasOSMCourse =
-      course &&
-      course.source === 'openstreetmap' &&
-      course.osmType &&
-      course.osmId;
-    els.refreshOsmBtn.hidden = !hasOSMCourse;
-  }
-
-  async function refreshSelectedOSMCourse() {
-    const course = state.selectedNearbyCourse;
-    if (!course || !course.osmType || !course.osmId) return;
-    invalidateOSMCourseCache(course.osmType, course.osmId);
-    state.nearbyCourseLoadingScorecard = true;
-    state._osmAbortController = new AbortController();
-    renderNearbyCourses();
-    els.nearbyCourseStatus.textContent = `Refreshing OSM data for ${course.name}…`;
-
-    try {
-      const now = Date.now();
-      const wait = state._osmLastCall + OSM_OVERPASS_DEBOUNCE - now;
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      state._osmLastCall = Date.now();
-      const osmData = await fetchCourseOSM(course, state._osmAbortController);
-      const newCourse = buildCourseFromOSM(osmData, course);
-      cacheOSMCourse(newCourse);
-      state.selectedCourseTemplate = newCourse;
-      els.roundSetupCourseName.value = newCourse.name;
-      els.roundSetupTeeName.value = newCourse.teeName;
-      renderRoundSetupHoles(newCourse.holes);
-      updateRefreshButton();
-      els.nearbyCourseStatus.textContent = `Refreshed ${
-        newCourse.name
-      }. ${describeOSMImport(newCourse)}.`;
-    } catch (error) {
-      console.warn('OSM refresh failed:', error);
-      els.nearbyCourseStatus.textContent = `Refresh failed for ${course.name}. Try again later.`;
-    } finally {
-      state.nearbyCourseLoadingScorecard = false;
-      renderNearbyCourses();
-      haptic(8);
-    }
-  }
-
   function openRoundSetup() {
     state.selectedNearbyCourse = null;
     state.selectedCourseTemplate = null;
@@ -3743,70 +2449,43 @@ out geom qt;`;
     renderRoundSetupCourseSelect();
     renderRoundSetupStartHoleOptions();
 
-    els.roundSetupCourseName.value = savedSetup.courseName || 'Casual Round';
-    els.roundSetupTeeName.value = savedSetup.teeName || 'Default tees';
+    els.roundSetupCourseName.value =
+      savedSetup.courseName || 'Casual Round';
+
+    els.roundSetupTeeName.value =
+      savedSetup.teeName || 'Default tees';
+
     els.roundSetupStartHole.value = String(
       clamp(Math.round(num(savedSetup.startHole, 1)), 1, 18)
     );
+
     els.roundSetupSaveCourse.checked =
-      !!savedSetup.courseName && savedSetup.courseName !== 'Casual Round';
+      !!savedSetup.courseName &&
+      savedSetup.courseName !== 'Casual Round';
 
     renderRoundSetupHoles(
-      Array.isArray(savedSetup.holes) ? savedSetup.holes : defaultCourseHoles()
+      Array.isArray(savedSetup.holes)
+        ? savedSetup.holes
+        : defaultCourseHoles()
     );
 
-    // `nearbyCourseLoading` must mean "a request is in flight" and nothing
-    // else. Setting it true here while waiting for a GPS fix permanently
-    // blocked the retry in onPosition() (which is gated on
-    // !nearbyCourseLoading), so the sheet sat on "Searching…" forever and the
-    // list only ever filled if you tapped Find nearby by hand.
-    state.nearbyCourseError = null;
-    state.nearbySearchRequested = true;
     renderNearbyCourses();
 
-    if (!state.loc) {
-      // Ask for a cheap coarse fix in parallel with the high-accuracy watch:
-      // a cached network fix usually lands in well under a second.
-      requestCoarseFix();
+    if (!state.loc || state.locStale) {
       if (!state.gpsRunning) startGPS(true);
-      if (els.nearbyCourseStatus) {
-        els.nearbyCourseStatus.textContent = 'Waiting for a GPS location…';
-      }
-    } else {
-      // Search immediately from a saved location, but refresh GPS in the background.
-      if (state.locStale && !state.gpsRunning) {
-        startGPS(true);
-      }
-
-      if (!state.nearbyCourses.length) {
-        findNearbyCourses();
-      }
+    } else if (!state.nearbyCourses.length) {
+      findNearbyCourses();
     }
-
-    updateRefreshButton(); // show/hide refresh button
 
     els.roundSetupSheet.classList.add('open');
     els.roundSetupScrim.classList.add('open');
     els.roundSetupSheet.setAttribute('aria-hidden', 'false');
+
     haptic(6);
   }
 
   function closeRoundSetup() {
     if (!els.roundSetupSheet || !els.roundSetupScrim) return;
-    // Abort any in-progress Overpass fetch
-    if (state._osmAbortController) {
-      state._osmAbortController.abort();
-      state._osmAbortController = null;
-    }
-    // The nearby search was never cancellable, so closing and reopening the
-    // sheet stacked up parallel Overpass queries against the same mirrors.
-    if (state._searchAbortController) {
-      state._searchAbortController.abort();
-      state._searchAbortController = null;
-    }
-    state.nearbyCourseLoadingScorecard = false;
-    state.nearbyCourseLoading = false;
-    state.nearbySearchRequested = false;
 
     els.roundSetupSheet.classList.remove('open');
     els.roundSetupScrim.classList.remove('open');
@@ -3818,7 +2497,8 @@ out geom qt;`;
 
     els.roundSetupStartHole.innerHTML = Array.from(
       { length: 18 },
-      (_, i) => `<option value="${i + 1}">Hole ${i + 1}</option>`
+      (_, i) =>
+        `<option value="${i + 1}">Hole ${i + 1}</option>`
     ).join('');
   }
 
@@ -3855,16 +2535,12 @@ out geom qt;`;
         const badges =
           (hole.source === 'openstreetmap'
             ? `<span class="hole-badge osm">OSM</span>`
-            : hole.source === 'opengolfapi'
-            ? `<span class="hole-badge osm">API</span>`
             : `<span class="hole-badge manual">—</span>`) +
-          (hole.yardageSource === 'estimated'
-            ? `<span class="hole-badge est">est</span>`
-            : '') +
+          (hole.parInferred ? `<span class="hole-badge est">est</span>` : '') +
           (hole.greenDepthYds
             ? `<span class="hole-badge fcb">${Math.round(
-                hole.greenDepthYds
-              )}yd</span>`
+              hole.greenDepthYds
+            )}yd</span>`
             : '');
 
         return `
@@ -3896,42 +2572,49 @@ out geom qt;`;
     const template = state.selectedCourseTemplate;
     const nearby = state.selectedNearbyCourse;
 
-    const templateHoles = Array.isArray(template?.holes) ? template.holes : [];
+    const templateHoles = Array.isArray(template?.holes)
+      ? template.holes
+      : [];
 
-    const holes = [
-      ...els.roundSetupPars.querySelectorAll('.round-setup-hole'),
-    ].map((row, index) => {
-      const parInput = row.querySelector('.setup-hole-par');
-      const yardsInput = row.querySelector('.setup-hole-yards');
+    const holes = [...els.roundSetupPars.querySelectorAll('.round-setup-hole')]
+      .map((row, index) => {
+        const parInput = row.querySelector('.setup-hole-par');
+        const yardsInput = row.querySelector('.setup-hole-yards');
 
-      // Start from the imported hole so geometry survives, then let the
-      // visible inputs win for par / yards only.
-      const base =
-        templateHoles[index] && typeof templateHoles[index] === 'object'
-          ? templateHoles[index]
-          : {};
+        // Start from the imported hole so geometry survives, then let the
+        // visible inputs win for par / yards only.
+        const base =
+          templateHoles[index] && typeof templateHoles[index] === 'object'
+            ? templateHoles[index]
+            : {};
 
-      return {
-        ...base,
+        return {
+          ...base,
 
-        number: index + 1,
+          number: index + 1,
 
-        par: clamp(Math.round(num(parInput.value, num(base.par, 4))), 3, 6),
+          par: clamp(
+            Math.round(num(parInput.value, num(base.par, 4))),
+            3,
+            6
+          ),
 
-        yards:
-          yardsInput.value.trim() === ''
-            ? ''
-            : Math.max(1, Math.round(num(yardsInput.value, 0))),
-      };
-    });
+          yards:
+            yardsInput.value.trim() === ''
+              ? ''
+              : Math.max(1, Math.round(num(yardsInput.value, 0))),
+        };
+      });
 
     const location =
       template?.location ||
-      (nearby && Number.isFinite(nearby.lat) && Number.isFinite(nearby.lng)
+      (nearby &&
+        Number.isFinite(nearby.lat) &&
+        Number.isFinite(nearby.lng)
         ? {
-            lat: nearby.lat,
-            lng: nearby.lng,
-          }
+          lat: nearby.lat,
+          lng: nearby.lng,
+        }
         : null);
 
     return normalizeCourse({
@@ -3964,10 +2647,8 @@ out geom qt;`;
 
     const existingIndex = state.courseProfiles.findIndex(
       (item) =>
-        String(item?.name || '').toLowerCase() ===
-          normalized.name.toLowerCase() &&
-        String(item?.teeName || '').toLowerCase() ===
-          normalized.teeName.toLowerCase()
+        item.name.toLowerCase() === normalized.name.toLowerCase() &&
+        item.teeName.toLowerCase() === normalized.teeName.toLowerCase()
     );
 
     if (existingIndex >= 0) {
@@ -3985,10 +2666,6 @@ out geom qt;`;
 
     state.roundSession = emptyRoundSession(normalizedCourse, startHole);
 
-    // Without this, restarting on the same course+hole leaves holeGeoKey
-    // matching and applyHoleGeometryToMap() never runs — no overlay at all.
-    state.holeGeoKey = null;
-
     // Keep legacy scorecard consumers working while course-aware round data
     // remains stored inside the active round session.
     state.round = state.roundSession.scorecard;
@@ -4004,34 +2681,34 @@ out geom qt;`;
     renderRoundShotUI();
     renderRoundHoleHeader();
 
-    // Frame the hole being played (FOUND.js-style). Fall back to the stored
-    // course location when the hole has no mapped geometry to frame.
-    initMap();
+    // Move the map to the selected course if it came from nearby-course search
+    // or a saved course profile with a stored location.
+    if (
+      normalizedCourse.location &&
+      Number.isFinite(normalizedCourse.location.lat) &&
+      Number.isFinite(normalizedCourse.location.lng)
+    ) {
+      initMap();
 
-    if (state.mapReady && !focusOnHole()) {
-      if (
-        normalizedCourse.location &&
-        Number.isFinite(normalizedCourse.location.lat) &&
-        Number.isFinite(normalizedCourse.location.lng)
-      ) {
-        state.map.setView(
-          [normalizedCourse.location.lat, normalizedCourse.location.lng],
-          16,
-          { animate: !reduceMotion }
-        );
+      const courseLatLng = [
+        normalizedCourse.location.lat,
+        normalizedCourse.location.lng,
+      ];
 
-        // A course-selected map location should not be immediately replaced
-        // by the first incoming GPS fix.
-        state.pannedOnce = true;
-      }
+      state.map.setView(courseLatLng, 16, {
+        animate: !reduceMotion,
+      });
+
+      // A course-selected map location should not be immediately replaced
+      // by the first incoming GPS fix.
+      state.pannedOnce = true;
     }
 
     haptic(10);
   }
   function nearbyCourseDistanceYd(course) {
-    if (course.distanceYd != null && Number.isFinite(course.distanceYd))
-      return course.distanceYd;
     if (!state.loc || !course) return null;
+
     return haversineMeters(state.loc, course) * M_TO_YD;
   }
 
@@ -4061,6 +2738,35 @@ out geom qt;`;
     });
   }
 
+  function renderTeeSetPicker(course) {
+    const wrap = document.getElementById('teeSetPickerWrap');
+    const sel = document.getElementById('teeSetPicker');
+    if (!wrap || !sel) return;
+
+    const sets = (course && course.teeSets) || [];
+    if (sets.length < 2) {
+      wrap.hidden = true;
+      return;
+    }
+
+    wrap.hidden = false;
+    sel.innerHTML = sets
+      .map(
+        (t) =>
+          `<option value="${escapeHtml(t.name)}"${t.name === course.activeTeeSet ? ' selected' : ''
+          }>${escapeHtml(t.name)} · ${Object.keys(t.holes).length} holes</option>`
+      )
+      .join('');
+
+    sel.onchange = () => {
+      const updated = applyTeeSet(state.selectedCourseTemplate, sel.value);
+      state.selectedCourseTemplate = updated;
+      els.roundSetupTeeName.value = updated.teeName;
+      renderRoundSetupHoles(updated.holes);
+      haptic(5);
+    };
+  }
+
   function renderNearbyCourses() {
     if (!els.nearbyCourseList || !els.nearbyCourseStatus) return;
 
@@ -4068,84 +2774,68 @@ out geom qt;`;
       ? state.nearbyCourses
       : [];
 
-    if (state.nearbyCourseLoading) {
+      if (state.nearbyCourseLoading) {
+        els.nearbyCourseStatus.textContent = 'Searching around your location…';
+        els.nearbyCourseList.innerHTML =
+          `<div class="hint">Looking for nearby golf courses…</div>`;
+        return;
+      }
+  
+      if (!state.loc) {
+        els.nearbyCourseStatus.textContent = 'Enable GPS first to find nearby courses.';
+        els.nearbyCourseList.innerHTML = '';
+        return;
+      }
+  
       if (!courses.length) {
         els.nearbyCourseStatus.textContent =
-          'Searching OpenStreetMap around your location…';
-        els.nearbyCourseList.innerHTML = `<div class="hint">Looking for nearby golf courses on OSM…</div>`;
-        updateRefreshButton();
-        return;
-      }
-      // A stale list is already on screen — keep it while we refresh.
-      els.nearbyCourseStatus.textContent = 'Refreshing nearby courses…';
-    }
-
-    if (!state.loc) {
-      els.nearbyCourseStatus.textContent = state.nearbySearchRequested
-        ? 'Waiting for a GPS location…'
-        : 'Enable GPS first to find nearby courses.';
-      els.nearbyCourseList.innerHTML = state.nearbySearchRequested
-        ? `<div class="hint">Locating you — the course list fills in automatically as soon as a fix arrives.</div>`
-        : '';
-      updateRefreshButton();
-      return;
-    }
-
-    if (state.nearbyCourseError) {
-      els.nearbyCourseStatus.textContent = state.nearbyCourseError;
-      if (!courses.length) {
+          'No mapped courses found nearby. You can still create one manually.';
         els.nearbyCourseList.innerHTML = '';
-        updateRefreshButton();
         return;
       }
-      // Keep the last-known list visible under the error note.
-    }
-
-    if (!courses.length) {
-      els.nearbyCourseStatus.textContent =
-        'No mapped courses found nearby on OpenStreetMap. You can add them to OSM or create one manually.';
-      els.nearbyCourseList.innerHTML = '';
-      updateRefreshButton();
-      return;
-    }
-
-    if (state.nearbyCourseLoadingScorecard) {
-      els.nearbyCourseStatus.textContent =
-        'Course selected — loading OSM map data…';
-    } else if (
-      !state.selectedNearbyCourse &&
-      !state.nearbyCourseLoading &&
-      !state.nearbyCourseError
-    ) {
-      els.nearbyCourseStatus.textContent = `${courses.length} nearby course${
-        courses.length === 1 ? '' : 's'
-      } found on OpenStreetMap.`;
-    }
+  
+      if (state.nearbyCourseLoadingScorecard) {
+        els.nearbyCourseStatus.textContent =
+          'Course selected — loading mapped scorecard data…';
+      } else if (!state.selectedNearbyCourse) {
+        els.nearbyCourseStatus.textContent =
+          `${courses.length} nearby course${courses.length === 1 ? '' : 's'} found.`;
+      }
+      // fall through to render the list either way
 
     els.nearbyCourseList.innerHTML = courses
       .map((course, index) => {
         const saved = getSavedCourseMatch(course.name);
         const distance = formatNearbyCourseDistance(course);
+
         const selected =
           state.selectedNearbyCourse &&
           state.selectedNearbyCourse.id === course.id;
+
         const label = saved
           ? 'Saved scorecard'
           : selected
-          ? 'Loading…'
-          : 'Tap to select';
+            ? 'Selected'
+            : 'Tap to select';
 
         return `
-          <button class="nearby-course-option${
-            selected ? ' selected' : ''
-          }" type="button" data-index="${index}" aria-pressed="${
-          selected ? 'true' : 'false'
-        }">
-            <span class="nearby-course-name">${escapeHtml(course.name)}</span>
-            <span class="nearby-course-meta">${escapeHtml(distance)}${
-          distance ? ' · ' : ''
-        }${escapeHtml(label)}</span>
-          </button>`;
+          <button
+            class="nearby-course-option${selected ? ' selected' : ''}"
+            type="button"
+            data-index="${index}"
+            aria-pressed="${selected ? 'true' : 'false'}"
+          >
+            <span class="nearby-course-name">
+              ${escapeHtml(course.name)}
+            </span>
+  
+            <span class="nearby-course-meta">
+              ${escapeHtml(distance)}
+              ${distance ? ' · ' : ''}
+              ${escapeHtml(label)}
+            </span>
+          </button>
+        `;
       })
       .join('');
 
@@ -4154,123 +2844,551 @@ out geom qt;`;
       .forEach((button) => {
         button.addEventListener('click', () => {
           const course = state.nearbyCourses[Number(button.dataset.index)];
-          if (course) selectNearbyCourse(course);
+
+          if (course) {
+            selectNearbyCourse(course);
+          }
         });
       });
+  }
 
-    updateRefreshButton();
+
+  /* ================= OSM tag parsing (priority-ordered) ================= */
+
+  function parseOsmHoleNumber(tags) {
+    if (!tags) return null;
+    const tries = [];
+
+    // 1. ref, strict integer only.
+    if (tags.ref != null) tries.push(String(tags.ref).trim().match(/^(\d{1,2})$/));
+
+    // 2/3. name, anchored patterns only — never a bare mid-string digit.
+    if (tags.name) {
+      tries.push(String(tags.name).match(/\bhole\s*#?\s*(\d{1,2})\b/i));
+      tries.push(String(tags.name).trim().match(/^(\d{1,2})(?:st|nd|rd|th)?\b/i));
+    }
+
+    // 4. Alternate keys.
+    for (const k of ['hole', 'number', 'golf_hole']) {
+      if (tags[k] != null) tries.push(String(tags[k]).trim().match(/^(\d{1,2})$/));
+    }
+
+    for (const m of tries) {
+      if (m) {
+        const n = Number(m[1]);
+        if (n >= 1 && n <= 27) return n; // 27-hole facilities exist
+      }
+    }
+    return null;
+  }
+
+  function parseOsmPar(tags) {
+    const n = Number(tags && tags.par);
+    return Number.isInteger(n) && n >= 3 && n <= 6 ? n : null;
+  }
+
+  // 'par' -> { red: 4, blue: 5 } from par:red / par:blue subkeys.
+  function parseOsmSubkeyNumbers(tags, prefix) {
+    const out = {};
+    if (!tags) return out;
+    for (const k of Object.keys(tags)) {
+      if (k.startsWith(prefix + ':')) {
+        const n = Number(tags[k]);
+        if (Number.isFinite(n) && n > 0) {
+          out[k.slice(prefix.length + 1).toLowerCase()] = n;
+        }
+      }
+    }
+    return out;
+  }
+
+  // Returns an array — one physical tee box can serve several sets (tee=gold;white).
+  function parseOsmTeeSetNames(tags) {
+    if (!tags) return [];
+    const raw =
+      tags.tee ||
+      tags['tee:colour'] ||
+      tags['tee:color'] ||
+      tags.colour ||
+      tags.color ||
+      '';
+    let names = String(raw)
+      .split(/[;,]/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (!names.length && tags.name) {
+      const stripped = String(tags.name)
+        .replace(/hole|tee|tees|\d+/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+      if (stripped && stripped.length <= 20) names = [stripped];
+    }
+    return names;
+  }
+
+  function inferParFromYards(yds) {
+    if (!Number.isFinite(yds)) return null;
+    return yds < 260 ? 3 : yds < 475 ? 4 : 5;
+  }
+
+  /* ============ buildAutoCourse: geometry-first assembly ============ */
+
+  function buildAutoCourse(candidate, elements) {
+    const holeWays = [];
+    const teeEls = [];
+    const greens = [];
+    const pins = [];
+    const hazardEls = [];
+
+    for (const el of elements) {
+      const t = el.tags || {};
+      if (t.golf === 'hole') {
+        const p = osmPathLatLng(el);
+        if (p) holeWays.push({ el, path: p });
+      } else if (t.golf === 'tee') {
+        teeEls.push(el);
+      } else if (t.golf === 'green') {
+        const ring = osmRing(el);
+        if (ring) greens.push({ ring, centroid: osmFeaturePoint(el) });
+      } else if (t.golf === 'pin') {
+        const p = osmFeaturePoint(el);
+        if (p) pins.push(p);
+      } else if (
+        t.golf === 'bunker' ||
+        t.golf === 'water_hazard' ||
+        t.golf === 'lateral_water_hazard' ||
+        t.natural === 'water'
+      ) {
+        const pt = osmFeaturePoint(el);
+        if (pt) hazardEls.push({ pt, kind: t.golf === 'bunker' ? 'bunker' : 'water' });
+      }
+    }
+
+    // ---- Pass 1: per-hole records: orientation, length, green, FCB ----
+    const teePts = teeEls.map(osmFeaturePoint).filter(Boolean);
+    const recs = [];
+
+    for (const { el, path } of holeWays) {
+      const tags = el.tags || {};
+
+      // Orient tee-side-first. Trust OSM node order unless a tee clearly disagrees.
+      if (teePts.length) {
+        const nearest = (pt) => Math.min(...teePts.map((t) => osmDistM(pt, t)));
+        if (nearest(path[0]) > nearest(path[path.length - 1]) + 20) path.reverse();
+      }
+
+      const lengthYds = Math.round(osmPathLengthYds(path));
+      const endPt = path[path.length - 1];
+
+      // Green association: end point inside the ring, else centroid within 90 yd.
+      const green =
+        greens.find((g) => osmPointInRing(endPt, g.ring)) ||
+        greens.find((g) => g.centroid && osmDistYds(g.centroid, endPt) <= 90) ||
+        null;
+
+      const pin = pins.reduce(
+        (best, p) =>
+          osmDistYds(p, endPt) <= 60 &&
+            (!best || osmDistYds(p, endPt) < osmDistYds(best, endPt))
+            ? p
+            : best,
+        null
+      );
+
+      let front = null;
+      let back = null;
+      let depthYds = null;
+      let greenCenter = pin || (green && green.centroid) || endPt;
+
+      if (green) {
+        // Approach bearing: walk BACK along the path ~45 yd. Handles doglegs;
+        // a straight tee->green line would flip front/back on a bent hole.
+        let backAlong = path[0];
+        let acc = 0;
+        for (let i = path.length - 1; i > 0 && acc < 45; i--) {
+          acc += osmDistYds(path[i], path[i - 1]);
+          backAlong = path[i - 1];
+        }
+
+        const c = green.centroid || endPt;
+        const refLat = c.lat;
+        const cXY = osmXY(c.lat, c.lng, refLat);
+        const aXY = osmXY(backAlong.lat, backAlong.lng, refLat);
+        const L = Math.hypot(cXY.x - aXY.x, cXY.y - aXY.y) || 1e-9;
+        const u = { x: (cXY.x - aXY.x) / L, y: (cXY.y - aXY.y) / L };
+
+        let sMin = Infinity;
+        let sMax = -Infinity;
+        let vMin = null;
+        let vMax = null;
+        for (const v of green.ring) {
+          const p = osmXY(v.lat, v.lng, refLat);
+          const s = (p.x - cXY.x) * u.x + (p.y - cXY.y) * u.y;
+          if (s < sMin) { sMin = s; vMin = v; }
+          if (s > sMax) { sMax = s; vMax = v; }
+        }
+        front = vMin;
+        back = vMax;
+        depthYds = Math.round((sMax - sMin) * OSM_YD_PER_M);
+        if (!pin) greenCenter = c;
+      }
+
+      const hcp = Number(tags.handicap);
+
+      recs.push({
+        num: parseOsmHoleNumber(tags),
+        path,
+        lengthYds,
+        endPt,
+        par: parseOsmPar(tags),
+        parBySet: parseOsmSubkeyNumbers(tags, 'par'),
+        strokeIndex: Number.isInteger(hcp) && hcp >= 1 && hcp <= 18 ? hcp : null,
+        greenCenter,
+        front,
+        back,
+        depthYds,
+        hasGreenPolygon: !!green,
+        hazards: [],
+      });
+    }
+
+    // Dedupe by hole number (27-hole facilities, double-mapped holes).
+    const byNum = new Map();
+    let dupes = 0;
+    for (const r of recs) {
+      if (r.num == null) continue;
+      const ex = byNum.get(r.num);
+      if (!ex) { byNum.set(r.num, r); continue; }
+      dupes++;
+      const better = (!ex.par && r.par) || (ex.par === r.par && r.lengthYds > ex.lengthYds);
+      if (better) byNum.set(r.num, r);
+    }
+
+    // ---- Pass 2: ALL tee sets ----
+    const teeSets = {}; // name -> { name, holes: { num: {lat,lng,yards} } }
+    for (const el of teeEls) {
+      const tags = el.tags || {};
+      const pt = osmFeaturePoint(el);
+      if (!pt) continue;
+
+      const num = parseOsmHoleNumber(tags);
+      let rec = num != null ? byNum.get(num) : null;
+      if (!rec) {
+        // No usable ref on the tee: associate by proximity to a path start.
+        rec = [...byNum.values()].reduce(
+          (best, r) =>
+            osmDistYds(pt, r.path[0]) <= 120 &&
+              (!best || osmDistYds(pt, r.path[0]) < osmDistYds(pt, best.path[0]))
+              ? r
+              : best,
+          null
+        );
+      }
+      if (!rec) continue;
+
+      // Yardage FROM this tee: snap to nearest path vertex, then walk the
+      // remaining path to the green end. Playing length, not a straight line.
+      let bi = 0;
+      let bd = Infinity;
+      rec.path.forEach((p, i) => {
+        const d = osmDistM(pt, p);
+        if (d < bd) { bd = d; bi = i; }
+      });
+      let m = 0;
+      for (let i = bi + 1; i < rec.path.length; i++) {
+        m += osmDistM(rec.path[i - 1], rec.path[i]);
+      }
+      const yards = Math.round(m * OSM_YD_PER_M);
+
+      const names = parseOsmTeeSetNames(tags);
+      for (const nm of names.length ? names : ['default']) {
+        if (!teeSets[nm]) teeSets[nm] = { name: nm, holes: {} };
+        teeSets[nm].holes[rec.num] = { lat: pt.lat, lng: pt.lng, yards };
+      }
+    }
+
+    const teeSetList = Object.values(teeSets).sort(
+      (a, b) =>
+        Object.keys(b.holes).length - Object.keys(a.holes).length ||
+        (a.name === 'default' ? 1 : b.name === 'default' ? -1 : 0)
+    );
+    const bestSet = teeSetList[0] || null;
+
+    // ---- Pass 3: hazards within 45 yd of a hole path ----
+    // This filter is load-bearing: natural=water inside a course area otherwise
+    // yields lakes/rivers that are nowhere near play.
+    for (const h of hazardEls) {
+      for (const r of byNum.values()) {
+        if (osmDistPointToPathM(h.pt, r.path) * OSM_YD_PER_M <= 45) {
+          r.hazards.push({ type: h.kind, lat: h.pt.lat, lng: h.pt.lng });
+        }
+      }
+    }
+
+    // ---- Pass 4: build the 18 holes. NEVER emit a key without a real value. ----
+    const report = {
+      holesMapped: 0,
+      parsImported: 0,
+      parsInferred: 0,
+      yardsImported: 0,
+      greensFound: 0,
+      fcbFound: 0,
+      duplicateHoleNumbers: dupes,
+      teeSets: teeSetList.map((t) => t.name),
+      activeTeeSet: bestSet ? bestSet.name : null,
+      cached: !!(elements.meta && elements.meta.cached),
+      endpoint: elements.meta ? elements.meta.endpoint : null,
+    };
+
+    const holes = [];
+    for (let i = 1; i <= 18; i++) {
+      const r = byNum.get(i);
+      const h = { number: i, source: r ? 'openstreetmap' : 'manual' };
+
+      if (r) {
+        report.holesMapped++;
+        const setEntry = bestSet && bestSet.holes[i];
+        const yards = (setEntry && setEntry.yards) || r.lengthYds;
+
+        if (r.par) {
+          h.par = r.par;
+          h.importedPar = r.par;
+          report.parsImported++;
+        } else {
+          const ip = inferParFromYards(yards);
+          if (ip) {
+            h.par = ip;
+            h.parInferred = true;
+            report.parsInferred++;
+          }
+        }
+
+        if (Number.isFinite(yards) && yards >= 40 && yards <= 900) {
+          h.yards = yards;
+          h.importedYards = yards;
+          h.yardageSource = setEntry ? 'tee:' + bestSet.name : 'geometry';
+          report.yardsImported++;
+        }
+
+        if (setEntry) h.teePoint = { lat: setEntry.lat, lng: setEntry.lng };
+        else h.teePoint = { lat: r.path[0].lat, lng: r.path[0].lng };
+
+        if (r.greenCenter) h.greenCenter = r.greenCenter;
+        if (r.front) h.front = r.front;
+        if (r.back) h.back = r.back;
+        if (r.front && r.back) report.fcbFound++;
+        if (r.depthYds) h.greenDepthYds = r.depthYds;
+        if (r.hasGreenPolygon) report.greensFound++;
+        if (r.strokeIndex) h.strokeIndex = r.strokeIndex;
+        if (Object.keys(r.parBySet).length) h.parByTee = r.parBySet;
+
+        const ty = {};
+        for (const ts of teeSetList) if (ts.holes[i]) ty[ts.name] = ts.holes[i].yards;
+        if (Object.keys(ty).length) h.teeYards = ty;
+
+        if (r.hazards.length) h.hazards = r.hazards.slice(0, 12);
+      }
+
+      holes.push(h);
+    }
+
+    const candPt = osmFeaturePoint(candidate);
+
+    return normalizeCourse({
+      id: `local:${cryptoId()}`,
+      name: candidate.name || (candidate.tags && candidate.tags.name) || 'Imported course',
+      teeName: bestSet ? bestSet.name : 'Default tees',
+      source: 'openstreetmap',
+      location: candPt
+        ? { lat: candPt.lat, lng: candPt.lng }
+        : Number.isFinite(candidate.lat)
+          ? { lat: Number(candidate.lat), lng: Number(candidate.lng) }
+          : null,
+      updatedAt: Date.now(),
+      osmType: candidate.osmType || candidate.type || null,
+      osmId: candidate.osmId != null ? candidate.osmId : null,
+      teeSets: teeSetList,
+      activeTeeSet: bestSet ? bestSet.name : null,
+      importReport: report,
+      holes,
+    });
+  }
+
+  /* ============ Scorecard fetch: area-scoped, radius fallback, cached ============ */
+
+  async function fetchAutoCourseScorecard(candidate) {
+    const cLat = Number(
+      candidate.lat != null ? candidate.lat : candidate.center && candidate.center.lat
+    );
+    const cLngRaw =
+      candidate.lng != null
+        ? candidate.lng
+        : candidate.lon != null
+          ? candidate.lon
+          : candidate.center && (candidate.center.lon ?? candidate.center.lng);
+    const cLng = Number(cLngRaw);
+
+    const osmType = candidate.osmType || candidate.type || null;
+    const osmId = Number(candidate.osmId != null ? candidate.osmId : candidate.numericId);
+
+    const cacheKey =
+      OSM_CACHE_PREFIX + 'scorecard:' + (osmType || 'pt') + ':' + (osmId || `${cLat},${cLng}`);
+
+    // Strategy 1: server-side scope to the course area.
+    // Area ids: way -> 2400000000 + id, relation -> 3600000000 + id.
+    if ((osmType === 'way' || osmType === 'relation') && Number.isFinite(osmId)) {
+      const areaId = (osmType === 'way' ? 2400000000 : 3600000000) + osmId;
+      const qArea = `[out:json][timeout:40];
+area(${areaId})->.a;
+(
+  nwr["golf"](area.a);
+  nwr["natural"="water"](area.a);
+);
+out geom;`;
+      try {
+        const els = await overpassFetch(qArea, { cacheKey, timeoutMs: 45000 });
+        // Fall through on EMPTY, not just on error: not every way/relation has an
+        // area counterpart, and Overpass area extraction lags the main DB.
+        if (els.some((e) => e.tags && e.tags.golf === 'hole')) return els;
+      } catch { /* fall through */ }
+    }
+
+    // Strategy 2: radius (node-tagged courses, or missing area).
+    if (!Number.isFinite(cLat) || !Number.isFinite(cLng)) {
+      throw new Error('Selected course has no usable coordinates.');
+    }
+    const qRadius = `[out:json][timeout:40];
+(
+  nwr["golf"](around:2800,${cLat},${cLng});
+  nwr["natural"="water"](around:2800,${cLat},${cLng});
+);
+out geom;`;
+    return overpassFetch(qRadius, { cacheKey, timeoutMs: 45000 });
+  }
+
+  /* ================= Import reporting ================= */
+
+  function describeImport(course) {
+    const r = course && course.importReport;
+    if (!r) return 'No mapped scorecard was found; add pars and yardages manually.';
+
+    const parts = [`${r.holesMapped}/18 holes mapped`];
+
+    if (r.parsImported || r.parsInferred) {
+      const bits = [];
+      if (r.parsImported) bits.push(`${r.parsImported} par${r.parsImported === 1 ? '' : 's'}`);
+      if (r.parsInferred) bits.push(`${r.parsInferred} estimated`);
+      parts.push(bits.join(' + '));
+    }
+    if (r.yardsImported) parts.push(`${r.yardsImported} yardages`);
+    if (r.greensFound) parts.push(`${r.greensFound} greens`);
+    if (r.fcbFound) parts.push(`${r.fcbFound} front/back`);
+    if (r.teeSets.length) parts.push(`tees: ${r.teeSets.join(', ')}`);
+    if (r.duplicateHoleNumbers) parts.push('multiple nines detected — using 1–18');
+    if (r.cached) parts.push('cached');
+
+    return parts.join(' · ');
+  }
+
+  // Apply a chosen tee set's yardages back onto the hole array.
+  function applyTeeSet(course, teeSetName) {
+    if (!course || !Array.isArray(course.teeSets)) return course;
+    const set = course.teeSets.find((t) => t.name === teeSetName);
+    if (!set) return course;
+
+    course.activeTeeSet = set.name;
+    course.teeName = set.name;
+
+    course.holes.forEach((h) => {
+      const entry = set.holes[h.number];
+      if (!entry) return;
+      if (Number.isFinite(entry.yards) && entry.yards >= 40 && entry.yards <= 900) {
+        h.yards = entry.yards;
+        h.importedYards = entry.yards;
+        h.yardageSource = 'tee:' + set.name;
+      }
+      h.teePoint = { lat: entry.lat, lng: entry.lng };
+      if (h.parByTee && h.parByTee[set.name]) {
+        h.par = clamp(Math.round(h.parByTee[set.name]), 3, 6);
+      }
+    });
+
+    return normalizeCourse(course);
   }
 
   async function selectNearbyCourse(candidate) {
     if (!candidate) return;
 
     state.selectedNearbyCourse = {
-      id: candidate.id,
+      id: candidate.id || '',
+      osmType: candidate.osmType || candidate.type || null,
+      osmId: candidate.osmId != null ? candidate.osmId : null,
       name: candidate.name,
       lat: Number(candidate.lat),
       lng: Number(candidate.lng),
       source: candidate.source || 'openstreetmap',
-      osmType: candidate.osmType,
-      osmId: candidate.osmId,
     };
 
     state.selectedCourseTemplate = null;
 
-    // Check saved profiles first
     const saved = getSavedCourseMatch(candidate.name);
+
     if (saved) {
       const course = normalizeCourse({
         ...saved,
-        location: saved.location || {
-          lat: state.selectedNearbyCourse.lat,
-          lng: state.selectedNearbyCourse.lng,
-        },
+
+        location:
+          saved.location || {
+            lat: state.selectedNearbyCourse.lat,
+            lng: state.selectedNearbyCourse.lng,
+          },
       });
+
       state.selectedCourseTemplate = course;
+
       els.roundSetupCourseSelect.value = course.id;
       els.roundSetupCourseName.value = course.name;
       els.roundSetupTeeName.value = course.teeName;
       els.roundSetupSaveCourse.checked = true;
+
       renderRoundSetupHoles(course.holes);
-      updateRefreshButton();
-      els.nearbyCourseStatus.textContent = `Selected ${course.name}. Saved scorecard loaded.`;
+
+      els.nearbyCourseStatus.textContent =
+        `Selected ${course.name}. Saved scorecard loaded.`;
+
       renderNearbyCourses();
       haptic(8);
       return;
     }
 
-    // Check OSM cache
-    if (candidate.osmType && candidate.osmId) {
-      const cached = getCachedOSMCourse(candidate.osmType, candidate.osmId);
-      if (cached) {
-        const course = normalizeCourse(cached);
-        state.selectedCourseTemplate = course;
-        els.roundSetupCourseSelect.value = '';
-        els.roundSetupCourseName.value = course.name;
-        els.roundSetupTeeName.value = course.teeName || 'Default tees';
-        els.roundSetupSaveCourse.checked = true;
-        renderRoundSetupHoles(course.holes);
-        updateRefreshButton();
-        els.nearbyCourseStatus.textContent = `Selected ${
-          course.name
-        }. ${describeOSMImport(course)}.`;
-        renderNearbyCourses();
-        haptic(8);
-        return;
-      }
-    }
-
-    // Fetch from OSM
     els.roundSetupCourseSelect.value = '';
     els.roundSetupCourseName.value = candidate.name;
     els.roundSetupTeeName.value = 'Default tees';
     els.roundSetupSaveCourse.checked = true;
 
     state.nearbyCourseLoadingScorecard = true;
-    state._osmAbortController = new AbortController();
     renderNearbyCourses();
 
-    const skipTimer = setTimeout(() => {
-      if (state.nearbyCourseLoadingScorecard) {
-        els.nearbyCourseStatus.innerHTML = `Loading OSM data for ${escapeHtml(
-          candidate.name
-        )}… <button class="ghost-btn" id="skipOsmBtn" style="margin-left:8px;font-size:11px;padding:4px 10px;">Skip &amp; enter manually</button>`;
-        const skipBtn = document.getElementById('skipOsmBtn');
-        if (skipBtn)
-          skipBtn.addEventListener('click', () => {
-            if (state._osmAbortController) state._osmAbortController.abort();
-          });
-      }
-    }, 4000);
-
     try {
-      const now = Date.now();
-      const wait = state._osmLastCall + OSM_OVERPASS_DEBOUNCE - now;
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      state._osmLastCall = Date.now();
+      const elements = await fetchAutoCourseScorecard(candidate);
+      const course = buildAutoCourse(candidate, elements);
 
-      const osmData = await fetchCourseOSM(
-        candidate,
-        state._osmAbortController
-      );
-      clearTimeout(skipTimer);
-      const course = buildCourseFromOSM(osmData, candidate);
-      cacheOSMCourse(course);
       state.selectedCourseTemplate = course;
+
       els.roundSetupCourseName.value = course.name;
       els.roundSetupTeeName.value = course.teeName;
+
       renderRoundSetupHoles(course.holes);
-      updateRefreshButton();
-      els.nearbyCourseStatus.textContent = `Selected ${
-        course.name
-      }. ${describeOSMImport(course)}. Review flagged holes before starting.`;
+      renderTeeSetPicker(course);
+
+      const r = course.importReport;
+      els.nearbyCourseStatus.textContent = r && r.holesMapped
+        ? `Selected ${course.name}. ${describeImport(course)}. Review flagged holes before starting.`
+        : `Selected ${course.name}. No mapped scorecard was found; add pars and yardages manually.`;
     } catch (error) {
-      clearTimeout(skipTimer);
-      if (error && error.name === 'AbortError') {
-        console.warn('OSM course lookup was cancelled by user.');
-      } else {
-        console.warn('OSM course lookup failed:', error);
-      }
+      console.warn('Auto scorecard lookup failed:', error);
+
       state.selectedCourseTemplate = normalizeCourse({
         id: `local:${cryptoId()}`,
         name: candidate.name,
@@ -4279,71 +3397,64 @@ out geom qt;`;
         location: { lat: candidate.lat, lng: candidate.lng },
         holes: defaultCourseHoles(),
       });
+
       renderRoundSetupHoles(state.selectedCourseTemplate.holes);
-      updateRefreshButton();
-      els.nearbyCourseStatus.textContent = `Selected ${candidate.name}. OSM data lookup was unavailable; add pars and yardages manually.`;
-    } finally {
-      state.nearbyCourseLoadingScorecard = false;
-      renderNearbyCourses();
-      haptic(8);
+
+      els.nearbyCourseStatus.textContent =
+        `Selected ${candidate.name}. Scorecard lookup was unavailable; add pars and yardages manually.`;
+      } finally {
+        state.nearbyCourseLoadingScorecard = false;
+        renderNearbyCourses();
+        haptic(8);
+      }
     }
-  }
-
-  async function findNearbyCourses() {
+  
+    async function findNearbyCourses() {
     state.nearbySearchRequested = true;
-    state.nearbyCourseError = null;
 
-    if (state.nearbyCourseLoading) return; // one search at a time
+    if (!state.loc || state.locStale) {
+      setNotice(
+        'Getting a fresh GPS fix before searching for nearby courses.',
+        'greenish'
+      );
 
-    if (!state.loc) {
-      requestCoarseFix();
-      if (!state.gpsRunning) startGPS(true);
+      if (!state.gpsRunning) {
+        startGPS();
+      }
 
       if (els.nearbyCourseStatus) {
-        els.nearbyCourseStatus.textContent = 'Waiting for a GPS location…';
+        els.nearbyCourseStatus.textContent =
+          'Waiting for a fresh GPS location…';
       }
 
       return;
     }
 
-    if (state.locStale && !state.gpsRunning) {
-      startGPS(true);
-    }
-
-    // Check cache. A fresh result returns immediately. A STALE result still
-    // populates the list so the user is never staring at an empty sheet
-    // while the mirrors are down, and we re-fetch in the background; if the
-    // refresh fails, the stale list stays visible with a note.
-    const cache = load(NEARBY_COURSES_OSM_KEY, null);
+    const cache = load(NEARBY_COURSES_CACHE_KEY, null);
     const now = Date.now();
+
     const cacheIsNearby =
       cache &&
       Number.isFinite(Number(cache.lat)) &&
       Number.isFinite(Number(cache.lng)) &&
-      fastDistM(state.loc, {
-        lat: Number(cache.lat),
-        lng: Number(cache.lng),
-      }) <= NEARBY_COURSE_RADIUS_M;
+      haversineMeters(
+        state.loc,
+        {
+          lat: Number(cache.lat),
+          lng: Number(cache.lng),
+        }
+      ) <= NEARBY_COURSE_RADIUS_M;
 
-    const cacheFresh =
+    if (
       cacheIsNearby &&
       Array.isArray(cache.courses) &&
       Number.isFinite(cache.ts) &&
-      now - cache.ts <
-        (cache.courses.length ? NEARBY_COURSES_TTL : NEARBY_EMPTY_TTL);
-
-    if (cacheFresh) {
+      now - cache.ts < NEARBY_COURSES_TTL
+    ) {
       state.nearbyCourses = cache.courses;
-      state.nearbyCourseError = null;
       state.nearbySearchRequested = false;
       renderNearbyCourses();
       return;
-    }
-
-    // Stale but useful: show it now, refresh behind it.
-    if (cacheIsNearby && Array.isArray(cache.courses) && cache.courses.length) {
-      state.nearbyCourses = cache.courses;
-      renderNearbyCourses();
     }
 
     state.nearbyCourseLoading = true;
@@ -4351,63 +3462,104 @@ out geom qt;`;
 
     const { lat, lng } = state.loc;
 
-    if (state._searchAbortController) state._searchAbortController.abort();
-    const searchController = new AbortController();
-    state._searchAbortController = searchController;
+    const query = `
+    [out:json][timeout:15];
+    (
+      nwr["leisure"="golf_course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+      nwr["golf"="course"](around:${NEARBY_COURSE_RADIUS_M},${lat},${lng});
+    );
+    out center tags;
+  `;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
-      const courses = await searchNearbyCoursesOSM(
+      const response = await fetch(
+        'https://overpass-api.de/api/interpreter',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=UTF-8',
+          },
+          body: query,
+          signal: controller.signal,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Overpass returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      const seen = new Set();
+
+      const courses = (data.elements || [])
+        .map((item) => {
+          const name = String(item.tags?.name || '').trim();
+          const point = item.center || item;
+
+          if (
+            !name ||
+            !Number.isFinite(Number(point.lat)) ||
+            !Number.isFinite(Number(point.lon))
+          ) {
+            return null;
+          }
+
+          return {
+            id: `osm:${item.type}:${item.id}`,
+            osmType: item.type,      // needed for area-scoped scorecard query
+            osmId: Number(item.id),  // needed for area-scoped scorecard query
+            name,
+            lat: Number(point.lat),
+            lng: Number(point.lon),
+            source: 'openstreetmap',
+          };
+        })
+        .filter(Boolean)
+        .filter((course) => {
+          const key = `${course.name.toLowerCase()}|${course.lat.toFixed(
+            4
+          )}|${course.lng.toFixed(4)}`;
+
+          if (seen.has(key)) return false;
+
+          seen.add(key);
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            haversineMeters(state.loc, a) -
+            haversineMeters(state.loc, b)
+        )
+        .slice(0, 8);
+
+      state.nearbyCourses = courses;
+
+      save(NEARBY_COURSES_CACHE_KEY, {
+        ts: now,
         lat,
         lng,
-        searchController.signal
-      );
-      state.nearbyCourses = courses;
-      state.nearbyCourseError = null;
-      save(NEARBY_COURSES_OSM_KEY, { ts: now, lat, lng, courses });
+        courses,
+      });
     } catch (error) {
-      console.warn('Nearby course search via OSM failed:', error);
-      // Never wipe a list that is already on screen: a failed refresh shows
-      // a note above the last-known courses instead of an empty sheet.
-      const keepStaleList = state.nearbyCourses.length > 0;
-      if (!keepStaleList) state.nearbyCourses = [];
-      const rateLimited = /rate limited|429|non-JSON/i.test(
-        String(error && error.message)
-      );
-      // closeRoundSetup() aborts us and clears _searchAbortController before
-      // this rejection lands — that is a cancel, not a failure.
-      const wasCancelled = state._searchAbortController !== searchController;
-      state.nearbyCourseError = keepStaleList
-        ? 'Could not refresh nearby courses — showing last-known results.'
-        : wasCancelled
-        ? null
-        : error && error.name === 'AbortError'
-        ? 'Nearby course search timed out. Try again.'
-        : rateLimited
-        ? 'Course search is temporarily rate-limited. Wait a moment and try again, or enter the course manually.'
-        : 'Could not reach the public course database. Check your connection, wait a moment, then tap Find nearby again. You can also enter the course manually and save it on this device.';
-      if (els.nearbyCourseStatus && state.nearbyCourseError) {
-        els.nearbyCourseStatus.textContent = state.nearbyCourseError;
-      }
-      // Never dead-end the user: pre-fill a manual course so they can proceed.
-      if (els.roundSetupCourseName && els.roundSetupPars) {
-        state.selectedCourseTemplate = normalizeCourse({
-          id: `local:${cryptoId()}`,
-          name: els.roundSetupCourseName.value.trim() || 'Casual Round',
-          teeName: 'Default tees',
-          source: 'manual',
-          location: state.loc
-            ? { lat: state.loc.lat, lng: state.loc.lng }
-            : null,
-          holes: defaultCourseHoles(),
-        });
-        renderRoundSetupHoles(state.selectedCourseTemplate.holes);
+      console.warn('Nearby course recognition failed:', error);
+
+      state.nearbyCourses = [];
+
+      if (els.nearbyCourseStatus) {
+        els.nearbyCourseStatus.textContent =
+          error.name === 'AbortError'
+            ? 'Nearby course search timed out. Try again.'
+            : 'Nearby course search is unavailable right now. Enter the course manually.';
       }
     } finally {
-      if (state._searchAbortController === searchController) {
-        state._searchAbortController = null;
-      }
+      clearTimeout(timeoutId);
+
       state.nearbyCourseLoading = false;
       state.nearbySearchRequested = false;
+
       renderNearbyCourses();
     }
   }
@@ -4437,10 +3589,6 @@ out geom qt;`;
 
     if (els.findNearbyCoursesBtn) {
       els.findNearbyCoursesBtn.addEventListener('click', findNearbyCourses);
-    }
-
-    if (els.refreshOsmBtn) {
-      els.refreshOsmBtn.addEventListener('click', refreshSelectedOSMCourse);
     }
 
     els.roundSetupCourseSelect.addEventListener('change', () => {
@@ -4476,7 +3624,8 @@ out geom qt;`;
       renderRoundSetupHoles(course.holes);
 
       if (course.location) {
-        els.nearbyCourseStatus.textContent = `Selected saved course: ${course.name}.`;
+        els.nearbyCourseStatus.textContent =
+          `Selected saved course: ${course.name}.`;
       }
 
       renderNearbyCourses();
@@ -4490,20 +3639,17 @@ out geom qt;`;
         18
       );
 
-      // Only par/yards are ever read back out of this key; storing the full
-      // imported geometry here as well was a third copy of every polygon.
       save(LAST_ROUND_SETUP_KEY, {
         courseName: course.name,
         teeName: course.teeName,
         startHole,
-        holes: course.holes.map((hole) => ({
-          number: hole.number,
-          par: hole.par,
-          yards: hole.yards,
-        })),
+        holes: course.holes,
       });
 
-      if (els.roundSetupSaveCourse.checked && course.name !== 'Casual Round') {
+      if (
+        els.roundSetupSaveCourse.checked &&
+        course.name !== 'Casual Round'
+      ) {
         saveCourseProfile(course);
       }
 
@@ -4603,18 +3749,17 @@ out geom qt;`;
       });
     }
 
-    // The sheet can't even open while a shot is pending, so the only thing
-    // that used to disable Save & Next was hole 18 — where it should still
-    // save, just not advance. The old code disabled it on 18, leaving no
-    // way to save the final hole from the prominent button.
-    const onLastHole = getCurrentHoleNumber() >= 18;
+    const canAdvance =
+      getCurrentHoleNumber() < 18 &&
+      roundStatus() !== 'pending';
 
     if (els.roundScoreSaveNextBtn) {
-      els.roundScoreSaveNextBtn.disabled = false;
-      els.roundScoreSaveNextBtn.style.opacity = '1';
-      els.roundScoreSaveNextBtn.textContent = onLastHole
-        ? 'Save Hole 18'
-        : 'Save & Next';
+      els.roundScoreSaveNextBtn.disabled = !canAdvance;
+      els.roundScoreSaveNextBtn.style.opacity = canAdvance ? '1' : '0.5';
+      els.roundScoreSaveNextBtn.textContent =
+        getCurrentHoleNumber() >= 18
+          ? 'Save Hole 18'
+          : 'Save & Next';
     }
   }
 
@@ -4670,14 +3815,19 @@ out geom qt;`;
       hole: draft.hole,
       score: String(Math.max(1, Math.round(draft.score))),
       putts:
-        draft.putts === '' ? '' : String(Math.max(0, Math.round(draft.putts))),
+        draft.putts === ''
+          ? ''
+          : String(Math.max(0, Math.round(draft.putts))),
       fir: draft.fir || '',
       gir: draft.gir || '',
     };
 
     syncRoundScorecard();
 
-    const shouldAdvance = andNext && rs.hole < 18 && rs.status !== 'pending';
+    const shouldAdvance =
+      andNext &&
+      rs.hole < 18 &&
+      rs.status !== 'pending';
 
     if (shouldAdvance) {
       rs.hole += 1;
@@ -4752,7 +3902,8 @@ out geom qt;`;
 
           const value = Number(button.dataset.putts);
 
-          state.roundScoreDraft.putts = value === 4 ? 4 : value;
+          state.roundScoreDraft.putts =
+            value === 4 ? 4 : value;
 
           renderRoundScoreSheet();
           haptic(4);
@@ -4809,17 +3960,6 @@ out geom qt;`;
 
     if (els.roundMapNextBtn) {
       els.roundMapNextBtn.addEventListener('click', nextHole);
-    }
-
-    // Tap the hole label in the map HUD to re-frame the current hole —
-    // the same affordance as clicking a hole on FOUND.js's scorecard.
-    if (els.roundMapHole) {
-      els.roundMapHole.addEventListener('click', () => {
-        if (state.roundSession) {
-          focusOnHole();
-          haptic(5);
-        }
-      });
     }
     if (els.roundActionBtn) {
       els.roundActionBtn.addEventListener('click', () => {
@@ -4890,13 +4030,8 @@ out geom qt;`;
       save('caddy:history', state.history);
       if (confirm('Round saved to history. Start a fresh scorecard?')) {
         state.round = emptyRound();
-        if (state.roundSession) {
-          state.roundSession.scorecard = state.round;
-          saveRoundSession();
-        }
         save('caddy:round', state.round);
         renderRound();
-        renderRoundShotUI();
       }
       renderStats();
     });
@@ -4921,8 +4056,6 @@ out geom qt;`;
       moveThumb(btn);
       initMap();
       setMapLayer(btn.dataset.layer);
-      // Overlay colours are chosen per base map, so redraw on switch.
-      if (state.roundSession) renderHoleOverlay();
       haptic(6);
     }
     opts.forEach((o) => o.addEventListener('click', () => select(o)));
@@ -4947,9 +4080,8 @@ out geom qt;`;
       if (!els.shotDataDesc) return;
       const { total, clubs } = shotDataSummary();
       els.shotDataDesc.textContent = total
-        ? `${total} shot${total === 1 ? '' : 's'} logged across ${clubs} club${
-            clubs === 1 ? '' : 's'
-          }. Resets dispersion to the formula default.`
+        ? `${total} shot${total === 1 ? '' : 's'} logged across ${clubs} club${clubs === 1 ? '' : 's'
+        }. Resets dispersion to the formula default.`
         : 'No shots logged yet. Track shots in Round mode to teach Caddy your distances.';
     };
     const open = () => {
@@ -4982,7 +4114,7 @@ out geom qt;`;
         close();
         try {
           localStorage.removeItem(ONBOARD_KEY);
-        } catch {}
+        } catch { }
         showOnboard();
       });
     }
@@ -4995,8 +4127,7 @@ out geom qt;`;
         }
         if (
           !confirm(
-            `Delete all ${total} logged shot distance${
-              total === 1 ? '' : 's'
+            `Delete all ${total} logged shot distance${total === 1 ? '' : 's'
             }? Recommendations will fall back to the formula. This can't be undone.`
           )
         )
@@ -5215,7 +4346,7 @@ out geom qt;`;
       setReveal(curY);
       try {
         drag.setPointerCapture(e.pointerId);
-      } catch {}
+      } catch { }
     });
     drag.addEventListener('pointermove', (e) => {
       if (!dragging) return;
@@ -5236,12 +4367,12 @@ out geom qt;`;
       dragging = false;
       try {
         drag.releasePointerCapture(e.pointerId);
-      } catch {}
+      } catch { }
       if (moved < 5) {
         document.body.removeAttribute('data-dragging');
         sheet.style.removeProperty('--fcb-reveal');
         sheet.style.removeProperty('--detail-reveal');
-        wrap.style.removeProperty('--detail-reveal'); // ← ADD
+        wrap.style.removeProperty('--detail-reveal');  // ← ADD
         cycleUp();
         return;
       }
@@ -5320,77 +4451,6 @@ out geom qt;`;
     const shifted = L.point(pt.x, pt.y + dy);
     state.map.setView(state.map.unproject(shifted, z), z, { animate });
   }
-
-  // Frame the current hole on screen the way FOUND.js frames a loaded hole:
-  // a padded fitBounds over everything we know about the hole (green ring,
-  // tee, hazards, F/C/B). FOUND.js additionally rotates the map to the
-  // hole's playing bearing — Leaflet core cannot rotate tiles, so we frame
-  // axis-aligned instead. Returns false when nothing could be framed so
-  // callers can fall back.
-  function focusOnHole() {
-    if (!state.mapReady || !state.map) return false;
-
-    // The map can exist with a 0x0 container when a round was started from
-    // the Round tab (the Range screen is hidden). fitBounds against no size
-    // is garbage — the caller defers via _pendingHoleFocus instead.
-    const size = state.map.getSize();
-    if (!size.x || !size.y) return false;
-
-    const hole = getCurrentHoleData();
-
-    const pts = [];
-    const push = (p) => {
-      if (validLatLng(p)) pts.push([Number(p.lat), Number(p.lng)]);
-    };
-
-    if (hole) {
-      if (Array.isArray(hole.greenOutline)) hole.greenOutline.forEach(push);
-      if (Array.isArray(hole.fairwayOutline)) hole.fairwayOutline.forEach(push);
-      if (Array.isArray(hole.hazards)) {
-        hole.hazards.forEach((h) => {
-          if (Array.isArray(h.outline)) h.outline.forEach(push);
-          else push(h);
-        });
-      }
-      push(hole.greenCenter);
-      push(hole.front);
-      push(hole.back);
-      push(hole.teePoint);
-    }
-
-    // Live F/C/B may already have been re-solved from the player's position.
-    push(state.greenCenter);
-    push(state.frontPt);
-    push(state.backPt);
-
-    if (pts.length) {
-      const bounds = L.latLngBounds(pts);
-      if (bounds.isValid()) {
-        const pad = bottomObstructionPx();
-        state.map.fitBounds(bounds, {
-          paddingTopLeft: [44, 100],
-          paddingBottomRight: [44, pad + 24],
-          maxZoom: 17,
-          animate: !reduceMotion,
-        });
-        // A framed hole must not be instantly re-centered on the next GPS fix.
-        state.pannedOnce = true;
-        return true;
-      }
-    }
-
-    // Nothing to frame (casual/manual hole): bring the player on screen,
-    // falling back to the aim point. Don't touch pannedOnce so the first
-    // GPS fix can still take over.
-    const p = state.loc || state.target || state.greenCenter;
-    if (!p) return false;
-    centerMapOn(
-      { lat: Number(p.lat), lng: Number(p.lng) },
-      Math.max(state.map.getZoom(), 16),
-      !reduceMotion
-    );
-    return true;
-  }
   function attachPressGesture(
     el,
     { onTap, onLongPress, delay = 550, moveTol = 10 }
@@ -5417,7 +4477,7 @@ out geom qt;`;
       longFired = false;
       try {
         el.setPointerCapture(id);
-      } catch {}
+      } catch { }
       timer = setTimeout(() => {
         if (moved) return;
         longFired = true;
@@ -5438,7 +4498,7 @@ out geom qt;`;
       clear();
       try {
         el.releasePointerCapture(id);
-      } catch {}
+      } catch { }
       if (fireTap && !longFired && !moved) {
         suppressUntil = Date.now() + 400;
         onTap && onTap();
@@ -5494,7 +4554,7 @@ out geom qt;`;
       haptic(5);
       return;
     }
-    // One-shot center AND zoom: bring the view to at least zoom 16
+    // One-shot center AND zoom: bring the view to at least zoom 17
     // so you can see the hole detail. Never zooms *out* on you —
     // if you're already at 19 looking at a green it stays there.
     const targetZoom = Math.max(state.map.getZoom(), 16);
@@ -5564,13 +4624,6 @@ out geom qt;`;
       state.backPt = null;
       state.greenCenter = null;
 
-      // Without this the live solver would immediately re-derive everything
-      // from the imported ring and the Clear button would appear to do nothing.
-      state.greenOutline = null;
-      state.fcbAuto = false;
-      state._fcbSolvedAt = null;
-      state._fcbSolveHole = null;
-
       disarmPlaceMode();
       clearFbMarkers();
       renderFcb();
@@ -5583,21 +4636,13 @@ out geom qt;`;
       }
 
       haptic(6);
-      setNotice(
-        'Green cleared. Recommendations now use your selected target only.',
-        'greenish'
-      );
+      setNotice('Green cleared. Recommendations now use your selected target only.', 'greenish');
     });
     // Practice reset button (in sheet)
     const prb = document.getElementById('practiceResetBtn');
     if (prb) {
       prb.addEventListener('click', () => {
-        if (
-          !confirm(
-            'Reset all practice shot data? This clears your dispersion model.'
-          )
-        )
-          return;
+        if (!confirm('Reset all practice shot data? This clears your dispersion model.')) return;
         clearShotData();
         renderPracticeSection();
         if (state.target && state.loc) calculateRange();
@@ -5616,7 +4661,6 @@ out geom qt;`;
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        if (state.roundSession) saveRoundSession();
         stopGPS();
         return;
       }
@@ -5645,6 +4689,9 @@ out geom qt;`;
       persistSession();
       stopGPS();
     });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) persistSession();
+    });
   }
 
   function migrateRoundSession() {
@@ -5654,7 +4701,9 @@ out geom qt;`;
       state.roundSession.course = makeCasualCourse();
     }
 
-    state.roundSession.course = normalizeCourse(state.roundSession.course);
+    state.roundSession.course = normalizeCourse(
+      state.roundSession.course
+    );
 
     if (!Array.isArray(state.roundSession.scorecard)) {
       state.roundSession.scorecard = Array.isArray(state.round)
@@ -5664,7 +4713,11 @@ out geom qt;`;
 
     state.roundSession.hole = clamp(
       Math.round(
-        num(state.roundSession.hole || state.roundSession.currentHole, 1)
+        num(
+          state.roundSession.hole ||
+          state.roundSession.currentHole,
+          1
+        )
       ),
       1,
       18
@@ -5757,50 +4810,36 @@ out geom qt;`;
   //  BLOCK 0 — PRESERVED CONSTANTS (survived Cut 2)
   // ============================================================
 
-  const SHOTLOG_KEY = 'caddy:shotLog:v1'; // localStorage key for the tracked-shot log — MUST NOT CHANGE (user data)
+  const SHOTLOG_KEY = 'caddy:shotLog:v1';   // localStorage key for the tracked-shot log — MUST NOT CHANGE (user data)
   const COMPASS_16 = [
-    'N',
-    'NNE',
-    'NE',
-    'ENE',
-    'E',
-    'ESE',
-    'SE',
-    'SSE',
-    'S',
-    'SSW',
-    'SW',
-    'WSW',
-    'W',
-    'WNW',
-    'NW',
-    'NNW',
-  ]; // 16-point compass, 22.5° bins — Bowditch, American Practical Navigator
+    'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW',
+  ];                                        // 16-point compass, 22.5° bins — Bowditch, American Practical Navigator
 
   // ============================================================
   //  BLOCK 1 — EXACT CONSTANTS + NUMERICAL / STATISTICAL CORE
   // ============================================================
 
   // --- Reference ellipsoid & Earth model ---
-  const WGS84_A = 6378137.0; // WGS-84 semi-major axis, m — NIMA TR8350.2 3rd ed. (2000)
-  const WGS84_F = 1 / 298.257223563; // WGS-84 flattening — NIMA TR8350.2 3rd ed. (2000)
-  const WGS84_B = WGS84_A * (1 - WGS84_F); // derived semi-minor axis, m
-  const WGS84_E2 = WGS84_F * (2 - WGS84_F); // first eccentricity squared, derived
-  const OMEGA_EARTH = 7.292115e-5; // Earth angular rate, rad/s — WGS-84 / IERS Conventions 2010
-  const GRAV_EQ = 9.7803253359; // Somigliana normal gravity at equator, m/s² — NIMA TR8350.2
-  const GRAV_K = 0.00193185265241; // Somigliana coefficient k — NIMA TR8350.2
-  const GRAV_M = 0.00344978650684; // Somigliana m = ω²a²b/GM — NIMA TR8350.2
-  const R = 6371008.7714; // IUGG mean Earth radius, m — legacy fallback paths only
+  const WGS84_A = 6378137.0;                    // WGS-84 semi-major axis, m — NIMA TR8350.2 3rd ed. (2000)
+  const WGS84_F = 1 / 298.257223563;            // WGS-84 flattening — NIMA TR8350.2 3rd ed. (2000)
+  const WGS84_B = WGS84_A * (1 - WGS84_F);      // derived semi-minor axis, m
+  const WGS84_E2 = WGS84_F * (2 - WGS84_F);     // first eccentricity squared, derived
+  const OMEGA_EARTH = 7.292115e-5;              // Earth angular rate, rad/s — WGS-84 / IERS Conventions 2010
+  const GRAV_EQ = 9.7803253359;                 // Somigliana normal gravity at equator, m/s² — NIMA TR8350.2
+  const GRAV_K = 0.00193185265241;              // Somigliana coefficient k — NIMA TR8350.2
+  const GRAV_M = 0.00344978650684;              // Somigliana m = ω²a²b/GM — NIMA TR8350.2
+  const R = 6371008.7714;                       // IUGG mean Earth radius, m — legacy fallback paths only
 
   // --- Exact conversions (defined, not measured) ---
-  const YD_TO_M = 0.9144; // international yard, exact — 1959 Intl. Yard & Pound Agreement / NIST SP 811
-  const FT_TO_M = 0.3048; // international foot, exact — NIST SP 811
-  const MPH_TO_MPS = 0.44704; // statute mph, exact — NIST SP 811
-  const M_TO_YD = 1 / YD_TO_M; // 1.0936132983377078 (removes the 3e-8 error in the old literal)
-  const M_TO_FT = 1 / FT_TO_M; // 3.2808398950131235
+  const YD_TO_M = 0.9144;                       // international yard, exact — 1959 Intl. Yard & Pound Agreement / NIST SP 811
+  const FT_TO_M = 0.3048;                       // international foot, exact — NIST SP 811
+  const MPH_TO_MPS = 0.44704;                   // statute mph, exact — NIST SP 811
+  const M_TO_YD = 1 / YD_TO_M;                  // 1.0936132983377078 (removes the 3e-8 error in the old literal)
+  const M_TO_FT = 1 / FT_TO_M;                  // 3.2808398950131235
   const MPS_TO_MPH = 1 / MPH_TO_MPS;
-  const RPM_TO_RADS = Math.PI / 30; // exact: 2π/60
-  const KELVIN_0C = 273.15; // ice point, exact by definition of °C — BIPM SI Brochure 9th ed.
+  const RPM_TO_RADS = Math.PI / 30;             // exact: 2π/60
+  const KELVIN_0C = 273.15;                     // ice point, exact by definition of °C — BIPM SI Brochure 9th ed.
   const EPS = 1e-12;
 
   const smoothstep = (a, b, x) => {
@@ -5811,53 +4850,39 @@ out geom qt;`;
   const hypot2 = (a, b) => Math.sqrt(a * a + b * b);
 
   // ---------- Special functions ----------
-  const LANCZOS_G = 7; // Lanczos g parameter, n=9 — Press et al., Numerical Recipes 3rd ed. §6.1
+  const LANCZOS_G = 7;                          // Lanczos g parameter, n=9 — Press et al., Numerical Recipes 3rd ed. §6.1
   const LANCZOS_C = [
     0.99999999999980993, 676.5203681218851, -1259.1392167224028,
     771.32342877765313, -176.61502916214059, 12.507343278686905,
     -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
   ];
   function logGamma(z) {
-    if (z < 0.5)
-      return Math.log(Math.PI / Math.sin(Math.PI * z)) - logGamma(1 - z);
+    if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - logGamma(1 - z);
     z -= 1;
     let x = LANCZOS_C[0];
     for (let i = 1; i < LANCZOS_G + 2; i++) x += LANCZOS_C[i] / (z + i);
     const t = z + LANCZOS_G + 0.5;
-    return (
-      0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x)
-    );
+    return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
   }
-  function gammaP(a, x) {
-    // regularized P(a,x) — Numerical Recipes 3rd ed. §6.2
+  function gammaP(a, x) {                        // regularized P(a,x) — Numerical Recipes 3rd ed. §6.2
     if (x <= 0 || a <= 0) return 0;
     if (x < a + 1) {
-      let ap = a,
-        sum = 1 / a,
-        del = sum;
+      let ap = a, sum = 1 / a, del = sum;
       for (let n = 1; n < 400; n++) {
-        ap += 1;
-        del *= x / ap;
-        sum += del;
+        ap += 1; del *= x / ap; sum += del;
         if (Math.abs(del) < Math.abs(sum) * 1e-16) break;
       }
       return sum * Math.exp(-x + a * Math.log(x) - logGamma(a));
     }
     const FPMIN = 1e-300;
-    let b = x + 1 - a,
-      c = 1 / FPMIN,
-      d = 1 / b,
-      h = d;
+    let b = x + 1 - a, c = 1 / FPMIN, d = 1 / b, h = d;
     for (let i = 1; i < 400; i++) {
       const an = -i * (i - a);
       b += 2;
-      d = an * d + b;
-      if (Math.abs(d) < FPMIN) d = FPMIN;
-      c = b + an / c;
-      if (Math.abs(c) < FPMIN) c = FPMIN;
+      d = an * d + b; if (Math.abs(d) < FPMIN) d = FPMIN;
+      c = b + an / c; if (Math.abs(c) < FPMIN) c = FPMIN;
       d = 1 / d;
-      const del = d * c;
-      h *= del;
+      const del = d * c; h *= del;
       if (Math.abs(del - 1) < 1e-16) break;
     }
     return 1 - Math.exp(-x + a * Math.log(x) - logGamma(a)) * h;
@@ -5867,91 +4892,51 @@ out geom qt;`;
   const normCdf = (z) => 0.5 * erfc(-z / Math.SQRT2);
   const normPdf = (z) => Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI);
 
-  const AK_A = [
-    -3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
-    1.38357751867269e2, -3.066479806614716e1, 2.506628277459239,
-  ]; // Acklam inverse-normal a[] — P. J. Acklam (2003)
-  const AK_B = [
-    -5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
-    6.680131188771972e1, -1.328068155288572e1,
-  ]; // Acklam b[] — P. J. Acklam (2003)
-  const AK_C = [
-    -7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838,
-    -2.549732539343734, 4.374664141464968, 2.938163982698783,
-  ]; // Acklam c[] (tails) — P. J. Acklam (2003)
-  const AK_D = [
-    7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996,
-    3.754408661907416,
-  ]; // Acklam d[] (tails) — P. J. Acklam (2003)
+  const AK_A = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+    1.383577518672690e2, -3.066479806614716e1, 2.506628277459239]; // Acklam inverse-normal a[] — P. J. Acklam (2003)
+  const AK_B = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+    6.680131188771972e1, -1.328068155288572e1];                     // Acklam b[] — P. J. Acklam (2003)
+  const AK_C = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838,
+  -2.549732539343734, 4.374664141464968, 2.938163982698783];      // Acklam c[] (tails) — P. J. Acklam (2003)
+  const AK_D = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996,
+    3.754408661907416];                                             // Acklam d[] (tails) — P. J. Acklam (2003)
   function invNorm(p) {
     if (!(p > 0) || !(p < 1)) return p <= 0 ? -Infinity : Infinity;
-    const pLow = 0.02425,
-      pHigh = 1 - pLow;
+    const pLow = 0.02425, pHigh = 1 - pLow;
     let x;
     if (p < pLow) {
       const q = Math.sqrt(-2 * Math.log(p));
-      x =
-        (((((AK_C[0] * q + AK_C[1]) * q + AK_C[2]) * q + AK_C[3]) * q +
-          AK_C[4]) *
-          q +
-          AK_C[5]) /
+      x = (((((AK_C[0] * q + AK_C[1]) * q + AK_C[2]) * q + AK_C[3]) * q + AK_C[4]) * q + AK_C[5]) /
         ((((AK_D[0] * q + AK_D[1]) * q + AK_D[2]) * q + AK_D[3]) * q + 1);
     } else if (p <= pHigh) {
-      const q = p - 0.5,
-        r = q * q;
-      x =
-        ((((((AK_A[0] * r + AK_A[1]) * r + AK_A[2]) * r + AK_A[3]) * r +
-          AK_A[4]) *
-          r +
-          AK_A[5]) *
-          q) /
-        (((((AK_B[0] * r + AK_B[1]) * r + AK_B[2]) * r + AK_B[3]) * r +
-          AK_B[4]) *
-          r +
-          1);
+      const q = p - 0.5, r = q * q;
+      x = (((((AK_A[0] * r + AK_A[1]) * r + AK_A[2]) * r + AK_A[3]) * r + AK_A[4]) * r + AK_A[5]) * q /
+        (((((AK_B[0] * r + AK_B[1]) * r + AK_B[2]) * r + AK_B[3]) * r + AK_B[4]) * r + 1);
     } else {
       const q = Math.sqrt(-2 * Math.log(1 - p));
-      x =
-        -(
-          ((((AK_C[0] * q + AK_C[1]) * q + AK_C[2]) * q + AK_C[3]) * q +
-            AK_C[4]) *
-            q +
-          AK_C[5]
-        ) /
+      x = -(((((AK_C[0] * q + AK_C[1]) * q + AK_C[2]) * q + AK_C[3]) * q + AK_C[4]) * q + AK_C[5]) /
         ((((AK_D[0] * q + AK_D[1]) * q + AK_D[2]) * q + AK_D[3]) * q + 1);
     }
-    const e = normCdf(x) - p,
-      u = e / normPdf(x); // one Halley refinement — Numerical Recipes 3rd ed. §9.4
+    const e = normCdf(x) - p, u = e / normPdf(x);  // one Halley refinement — Numerical Recipes 3rd ed. §9.4
     return x - u / (1 + (x * u) / 2);
   }
-  function betacf(a, b, x) {
-    // incomplete-beta continued fraction — NR 3rd ed. §6.4
-    const FPMIN = 1e-300,
-      qab = a + b,
-      qap = a + 1,
-      qam = a - 1;
-    let c = 1,
-      d = 1 - (qab * x) / qap;
+  function betacf(a, b, x) {                      // incomplete-beta continued fraction — NR 3rd ed. §6.4
+    const FPMIN = 1e-300, qab = a + b, qap = a + 1, qam = a - 1;
+    let c = 1, d = 1 - (qab * x) / qap;
     if (Math.abs(d) < FPMIN) d = FPMIN;
     d = 1 / d;
     let h = d;
     for (let m = 1; m <= 400; m++) {
       const m2 = 2 * m;
       let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
-      d = 1 + aa * d;
-      if (Math.abs(d) < FPMIN) d = FPMIN;
-      c = 1 + aa / c;
-      if (Math.abs(c) < FPMIN) c = FPMIN;
-      d = 1 / d;
-      h *= d * c;
+      d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN;
+      c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+      d = 1 / d; h *= d * c;
       aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
-      d = 1 + aa * d;
-      if (Math.abs(d) < FPMIN) d = FPMIN;
-      c = 1 + aa / c;
-      if (Math.abs(c) < FPMIN) c = FPMIN;
+      d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN;
+      c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN;
       d = 1 / d;
-      const del = d * c;
-      h *= del;
+      const del = d * c; h *= del;
       if (Math.abs(del - 1) < 1e-15) break;
     }
     return h;
@@ -5959,18 +4944,13 @@ out geom qt;`;
   function ibeta(a, b, x) {
     if (x <= 0) return 0;
     if (x >= 1) return 1;
-    const lb =
-      logGamma(a + b) -
-      logGamma(a) -
-      logGamma(b) +
-      a * Math.log(x) +
-      b * Math.log(1 - x);
+    const lb = logGamma(a + b) - logGamma(a) - logGamma(b) +
+      a * Math.log(x) + b * Math.log(1 - x);
     return x < (a + 1) / (a + b + 2)
       ? (Math.exp(lb) * betacf(a, b, x)) / a
       : 1 - (Math.exp(lb) * betacf(b, a, 1 - x)) / b;
   }
-  function tCdf(t, nu) {
-    // Student-t CDF via incomplete beta — Abramowitz & Stegun 26.5.27
+  function tCdf(t, nu) {                          // Student-t CDF via incomplete beta — Abramowitz & Stegun 26.5.27
     if (!Number.isFinite(t)) return t > 0 ? 1 : 0;
     if (nu > 1e7) return normCdf(t);
     const p = 0.5 * ibeta(nu / 2, 0.5, nu / (nu + t * t));
@@ -5978,82 +4958,63 @@ out geom qt;`;
   }
   function tQuantile(p, nu) {
     if (!(nu > 0) || nu > 1e7) return invNorm(p);
-    let lo = -80,
-      hi = 80;
+    let lo = -80, hi = 80;
     const seed = invNorm(p);
-    if (tCdf(seed, nu) > p) hi = seed;
-    else lo = seed;
+    if (tCdf(seed, nu) > p) hi = seed; else lo = seed;
     for (let i = 0; i < 90; i++) {
       const mid = 0.5 * (lo + hi);
-      if (tCdf(mid, nu) < p) lo = mid;
-      else hi = mid;
+      if (tCdf(mid, nu) < p) lo = mid; else hi = mid;
       if (hi - lo < 1e-11) break;
     }
     return 0.5 * (lo + hi);
   }
   function chi2Inv(p, df) {
-    if (df === 2) return -2 * Math.log(1 - p); // exact: χ²₂ CDF = 1 - exp(-x/2)
-    let lo = 0,
-      hi = Math.max(30, 4 * df + 60);
+    if (df === 2) return -2 * Math.log(1 - p);    // exact: χ²₂ CDF = 1 - exp(-x/2)
+    let lo = 0, hi = Math.max(30, 4 * df + 60);
     for (let i = 0; i < 220; i++) {
       const mid = 0.5 * (lo + hi);
-      if (gammaP(df / 2, mid / 2) < p) lo = mid;
-      else hi = mid;
+      if (gammaP(df / 2, mid / 2) < p) lo = mid; else hi = mid;
     }
     return 0.5 * (lo + hi);
   }
 
   // ---------- Robust & descriptive statistics ----------
-  const MAD_TO_SIGMA = 1.4826; // MAD→σ consistency factor for a normal — Rousseeuw & Croux, JASA 88 (1993) 1273
-  const RAYLEIGH_95 = 2.4477468306; // 95th percentile of the Rayleigh dist = sqrt(-2 ln 0.05) — standard CEP↔R95 conversion
+  const MAD_TO_SIGMA = 1.4826;                    // MAD→σ consistency factor for a normal — Rousseeuw & Croux, JASA 88 (1993) 1273
+  const RAYLEIGH_95 = 2.4477468306;               // 95th percentile of the Rayleigh dist = sqrt(-2 ln 0.05) — standard CEP↔R95 conversion
   function quantileSorted(sorted, p) {
     const n = sorted.length;
     if (!n) return NaN;
     if (n === 1) return sorted[0];
     const h = (n - 1) * clamp(p, 0, 1);
-    const lo = Math.floor(h),
-      hi = Math.ceil(h);
+    const lo = Math.floor(h), hi = Math.ceil(h);
     return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo]); // type-7 quantile — Hyndman & Fan, Am. Stat. 50 (1996) 361
   }
-  const median = (arr) =>
-    quantileSorted(
-      [...arr].sort((a, b) => a - b),
-      0.5
-    );
+  const median = (arr) => quantileSorted([...arr].sort((a, b) => a - b), 0.5);
   function madSigma(arr) {
     if (arr.length < 2) return NaN;
     const m = median(arr);
     return MAD_TO_SIGMA * median(arr.map((x) => Math.abs(x - m)));
   }
-  function c4(n) {
-    // unbiasing factor for the sample SD of a normal — Kenney & Keeping, Math. of Statistics Pt.1 3rd ed.
+  function c4(n) {                                // unbiasing factor for the sample SD of a normal — Kenney & Keeping, Math. of Statistics Pt.1 3rd ed.
     if (n < 2) return NaN;
     if (n > 400) return 1 - 0.75 / n;
-    return (
-      Math.sqrt(2 / (n - 1)) * Math.exp(logGamma(n / 2) - logGamma((n - 1) / 2))
-    );
+    return Math.sqrt(2 / (n - 1)) * Math.exp(logGamma(n / 2) - logGamma((n - 1) / 2));
   }
-  function weightedMoments(values, weights) {
-    // weighted Welford — Welford, Technometrics 4 (1962) 419; West, CACM 22 (1979) 532
-    let W = 0,
-      W2 = 0,
-      mean = 0,
-      S = 0;
+  function weightedMoments(values, weights) {      // weighted Welford — Welford, Technometrics 4 (1962) 419; West, CACM 22 (1979) 532
+    let W = 0, W2 = 0, mean = 0, S = 0;
     for (let i = 0; i < values.length; i++) {
       const w = weights[i];
       if (!(w > 0)) continue;
-      W += w;
-      W2 += w * w;
+      W += w; W2 += w * w;
       const d = values[i] - mean;
       mean += (w / W) * d;
       S += w * d * (values[i] - mean);
     }
-    const nEff = W2 > 0 ? (W * W) / W2 : 0; // Kish effective sample size — Kish, Survey Sampling (1965) §8.2
+    const nEff = W2 > 0 ? (W * W) / W2 : 0;        // Kish effective sample size — Kish, Survey Sampling (1965) §8.2
     const variance = W > 0 && nEff > 1 ? (S / W) * (nEff / (nEff - 1)) : NaN;
     return { W, mean, variance, nEff };
   }
-  function theilSen(xs, ys) {
-    // median-of-slopes regression — Theil (1950); Sen, JASA 63 (1968) 1379
+  function theilSen(xs, ys) {                      // median-of-slopes regression — Theil (1950); Sen, JASA 63 (1968) 1379
     const n = Math.min(xs.length, ys.length);
     if (n < 3) return null;
     const slopes = [];
@@ -6066,74 +5027,47 @@ out geom qt;`;
     const slope = median(slopes);
     return { slope, intercept: median(ys.map((y, i) => y - slope * xs[i])), n };
   }
-  function wilsonInterval(k, n, conf = 0.95) {
-    // score interval for a proportion — Wilson, JASA 22 (1927) 209
+  function wilsonInterval(k, n, conf = 0.95) {     // score interval for a proportion — Wilson, JASA 22 (1927) 209
     if (!n) return { p: NaN, lo: NaN, hi: NaN, n: 0 };
-    const z = invNorm(1 - (1 - conf) / 2),
-      p = k / n,
-      z2 = z * z,
-      d = 1 + z2 / n;
+    const z = invNorm(1 - (1 - conf) / 2), p = k / n, z2 = z * z, d = 1 + z2 / n;
     const c = p + z2 / (2 * n);
     const h = (z / d) * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n));
     return { p, lo: clamp(c / d - h, 0, 1), hi: clamp(c / d + h, 0, 1), n };
   }
 
   // ---------- Shape-preserving interpolation ----------
-  function pchip(xs, ys) {
-    // monotone cubic — Fritsch & Carlson, SIAM J. Numer. Anal. 17 (1980) 238
+  function pchip(xs, ys) {                         // monotone cubic — Fritsch & Carlson, SIAM J. Numer. Anal. 17 (1980) 238
     const n = xs.length;
-    const h = new Array(n - 1),
-      delta = new Array(n - 1),
-      m = new Array(n).fill(0);
+    const h = new Array(n - 1), delta = new Array(n - 1), m = new Array(n).fill(0);
     for (let i = 0; i < n - 1; i++) {
       h[i] = xs[i + 1] - xs[i];
       delta[i] = (ys[i + 1] - ys[i]) / h[i];
     }
-    m[0] = delta[0];
-    m[n - 1] = delta[n - 2];
+    m[0] = delta[0]; m[n - 1] = delta[n - 2];
     for (let i = 1; i < n - 1; i++) {
-      if (delta[i - 1] * delta[i] <= 0) {
-        m[i] = 0;
-        continue;
-      }
-      const w1 = 2 * h[i] + h[i - 1],
-        w2 = h[i] + 2 * h[i - 1];
+      if (delta[i - 1] * delta[i] <= 0) { m[i] = 0; continue; }
+      const w1 = 2 * h[i] + h[i - 1], w2 = h[i] + 2 * h[i - 1];
       m[i] = (w1 + w2) / (w1 / delta[i - 1] + w2 / delta[i]);
     }
     return function evalAt(x) {
       if (x <= xs[0]) return ys[0] + m[0] * (x - xs[0]);
       if (x >= xs[n - 1]) return ys[n - 1] + m[n - 1] * (x - xs[n - 1]);
-      let lo = 0,
-        hi = n - 1;
-      while (hi - lo > 1) {
-        const mid = (lo + hi) >> 1;
-        if (xs[mid] > x) hi = mid;
-        else lo = mid;
-      }
-      const t = (x - xs[lo]) / h[lo],
-        t2 = t * t,
-        t3 = t2 * t;
-      return (
-        (2 * t3 - 3 * t2 + 1) * ys[lo] +
-        (t3 - 2 * t2 + t) * h[lo] * m[lo] +
-        (-2 * t3 + 3 * t2) * ys[lo + 1] +
-        (t3 - t2) * h[lo] * m[lo + 1]
-      );
+      let lo = 0, hi = n - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xs[mid] > x) hi = mid; else lo = mid; }
+      const t = (x - xs[lo]) / h[lo], t2 = t * t, t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * ys[lo] + (t3 - 2 * t2 + t) * h[lo] * m[lo] +
+        (-2 * t3 + 3 * t2) * ys[lo + 1] + (t3 - t2) * h[lo] * m[lo + 1];
     };
   }
 
   // ---------- Quadrature over a normal factor (9-node truncated Gauss–Legendre) ----------
-  const GL9_X = [
-    -0.9681602395076261, -0.8360311073266358, -0.6133714327005904,
-    -0.3242534234038089, 0, 0.3242534234038089, 0.6133714327005904,
-    0.8360311073266358, 0.9681602395076261,
-  ]; // 9-pt Gauss–Legendre abscissae — Abramowitz & Stegun Table 25.4
-  const GL9_W = [
-    0.0812743883615744, 0.1806481606948574, 0.2606106964029354,
+  const GL9_X = [-0.9681602395076261, -0.8360311073266358, -0.6133714327005904,
+  -0.3242534234038089, 0, 0.3242534234038089, 0.6133714327005904,
+    0.8360311073266358, 0.9681602395076261];   // 9-pt Gauss–Legendre abscissae — Abramowitz & Stegun Table 25.4
+  const GL9_W = [0.0812743883615744, 0.1806481606948574, 0.2606106964029354,
     0.3123470770400029, 0.3302393550012598, 0.3123470770400029,
-    0.2606106964029354, 0.1806481606948574, 0.0812743883615744,
-  ]; // matching weights — A&S Table 25.4
-  const NORMAL_TRUNC_SIGMA = 3.5; // ±3.5σ captures 99.954% of a normal; tails are club-choice-irrelevant
+    0.2606106964029354, 0.1806481606948574, 0.0812743883615744]; // matching weights — A&S Table 25.4
+  const NORMAL_TRUNC_SIGMA = 3.5;                  // ±3.5σ captures 99.954% of a normal; tails are club-choice-irrelevant
   function normalNodes(nSigma = NORMAL_TRUNC_SIGMA) {
     const zs = GL9_X.map((x) => x * nSigma);
     const raw = zs.map((z, i) => GL9_W[i] * normPdf(z) * nSigma);
@@ -6145,21 +5079,9 @@ out geom qt;`;
   function makeLRU(limit) {
     const map = new Map();
     return {
-      get(k) {
-        if (!map.has(k)) return undefined;
-        const v = map.get(k);
-        map.delete(k);
-        map.set(k, v);
-        return v;
-      },
-      set(k, v) {
-        if (map.has(k)) map.delete(k);
-        map.set(k, v);
-        if (map.size > limit) map.delete(map.keys().next().value);
-      },
-      clear() {
-        map.clear();
-      },
+      get(k) { if (!map.has(k)) return undefined; const v = map.get(k); map.delete(k); map.set(k, v); return v; },
+      set(k, v) { if (map.has(k)) map.delete(k); map.set(k, v); if (map.size > limit) map.delete(map.keys().next().value); },
+      clear() { map.clear(); },
     };
   }
   // ============================================================
@@ -6173,33 +5095,20 @@ out geom qt;`;
     return d;
   }
 
-  const VINCENTY_TOL = 1e-13; // ~0.06 mm in λ at Earth scale — T. Vincenty, Survey Review XXIII/176 (1975) 88
-  const VINCENTY_MAXIT = 60; // converges in 3–5 iterations for s < 10 km
+  const VINCENTY_TOL = 1e-13;      // ~0.06 mm in λ at Earth scale — T. Vincenty, Survey Review XXIII/176 (1975) 88
+  const VINCENTY_MAXIT = 60;       // converges in 3–5 iterations for s < 10 km
 
   function geodesicInverse(p1, p2) {
-    const a = WGS84_A,
-      b = WGS84_B,
-      f = WGS84_F;
+    const a = WGS84_A, b = WGS84_B, f = WGS84_F;
     const L = d2r(p2.lng - p1.lng);
     const U1 = Math.atan((1 - f) * Math.tan(d2r(p1.lat)));
     const U2 = Math.atan((1 - f) * Math.tan(d2r(p2.lat)));
-    const sU1 = Math.sin(U1),
-      cU1 = Math.cos(U1);
-    const sU2 = Math.sin(U2),
-      cU2 = Math.cos(U2);
-    let lam = L,
-      lamPrev,
-      it = 0;
-    let sLam = 0,
-      cLam = 1,
-      sSig = 0,
-      cSig = 1,
-      sig = 0,
-      c2Alpha = 1,
-      cos2SigM = 1;
+    const sU1 = Math.sin(U1), cU1 = Math.cos(U1);
+    const sU2 = Math.sin(U2), cU2 = Math.cos(U2);
+    let lam = L, lamPrev, it = 0;
+    let sLam = 0, cLam = 1, sSig = 0, cSig = 1, sig = 0, c2Alpha = 1, cos2SigM = 1;
     do {
-      sLam = Math.sin(lam);
-      cLam = Math.cos(lam);
+      sLam = Math.sin(lam); cLam = Math.cos(lam);
       sSig = hypot2(cU2 * sLam, cU1 * sU2 - sU1 * cU2 * cLam);
       if (sSig < EPS) return { s: 0, az1: 0, az2: 0, converged: true };
       cSig = sU1 * sU2 + cU1 * cU2 * cLam;
@@ -6209,43 +5118,27 @@ out geom qt;`;
       cos2SigM = c2Alpha < EPS ? 0 : cSig - (2 * sU1 * sU2) / c2Alpha;
       const C = (f / 16) * c2Alpha * (4 + f * (4 - 3 * c2Alpha));
       lamPrev = lam;
-      lam =
-        L +
-        (1 - C) *
-          f *
-          sAlpha *
-          (sig +
-            C * sSig * (cos2SigM + C * cSig * (-1 + 2 * cos2SigM * cos2SigM)));
+      lam = L + (1 - C) * f * sAlpha *
+        (sig + C * sSig * (cos2SigM + C * cSig * (-1 + 2 * cos2SigM * cos2SigM)));
     } while (Math.abs(lam - lamPrev) > VINCENTY_TOL && ++it < VINCENTY_MAXIT);
 
     if (it >= VINCENTY_MAXIT) {
-      const dp = d2r(p2.lat - p1.lat),
-        dl = d2r(p2.lng - p1.lng);
-      const hs =
-        Math.sin(dp / 2) ** 2 +
+      const dp = d2r(p2.lat - p1.lat), dl = d2r(p2.lng - p1.lng);
+      const hs = Math.sin(dp / 2) ** 2 +
         Math.cos(d2r(p1.lat)) * Math.cos(d2r(p2.lat)) * Math.sin(dl / 2) ** 2;
       const s = 2 * R * Math.atan2(Math.sqrt(hs), Math.sqrt(1 - hs));
       const y = Math.sin(dl) * Math.cos(d2r(p2.lat));
-      const x =
-        Math.cos(d2r(p1.lat)) * Math.sin(d2r(p2.lat)) -
+      const x = Math.cos(d2r(p1.lat)) * Math.sin(d2r(p2.lat)) -
         Math.sin(d2r(p1.lat)) * Math.cos(d2r(p2.lat)) * Math.cos(dl);
       const az = norm(r2d(Math.atan2(y, x)));
       return { s, az1: az, az2: az, converged: false };
     }
     const uSq = (c2Alpha * (a * a - b * b)) / (b * b);
-    const A =
-      1 + (uSq / 16384) * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
+    const A = 1 + (uSq / 16384) * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
     const B = (uSq / 1024) * (256 + uSq * (-128 + uSq * (74 - 47 * uSq)));
-    const dSig =
-      B *
-      sSig *
-      (cos2SigM +
-        (B / 4) *
-          (cSig * (-1 + 2 * cos2SigM * cos2SigM) -
-            (B / 6) *
-              cos2SigM *
-              (-3 + 4 * sSig * sSig) *
-              (-3 + 4 * cos2SigM * cos2SigM)));
+    const dSig = B * sSig * (cos2SigM + (B / 4) * (
+      cSig * (-1 + 2 * cos2SigM * cos2SigM) -
+      (B / 6) * cos2SigM * (-3 + 4 * sSig * sSig) * (-3 + 4 * cos2SigM * cos2SigM)));
     return {
       s: b * A * (sig - dSig),
       az1: norm(r2d(Math.atan2(cU2 * sLam, cU1 * sU2 - sU1 * cU2 * cLam))),
@@ -6255,62 +5148,33 @@ out geom qt;`;
   }
 
   function geodesicDirect(p, azDeg, sMeters) {
-    const a = WGS84_A,
-      b = WGS84_B,
-      f = WGS84_F;
+    const a = WGS84_A, b = WGS84_B, f = WGS84_F;
     const alpha1 = d2r(norm(azDeg));
-    const sA1 = Math.sin(alpha1),
-      cA1 = Math.cos(alpha1);
+    const sA1 = Math.sin(alpha1), cA1 = Math.cos(alpha1);
     const tanU1 = (1 - f) * Math.tan(d2r(p.lat));
-    const cU1 = 1 / Math.sqrt(1 + tanU1 * tanU1),
-      sU1 = tanU1 * cU1;
+    const cU1 = 1 / Math.sqrt(1 + tanU1 * tanU1), sU1 = tanU1 * cU1;
     const sigma1 = Math.atan2(tanU1, cA1);
-    const sAlpha = cU1 * sA1,
-      c2Alpha = 1 - sAlpha * sAlpha;
+    const sAlpha = cU1 * sA1, c2Alpha = 1 - sAlpha * sAlpha;
     const uSq = (c2Alpha * (a * a - b * b)) / (b * b);
-    const A =
-      1 + (uSq / 16384) * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
+    const A = 1 + (uSq / 16384) * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
     const B = (uSq / 1024) * (256 + uSq * (-128 + uSq * (74 - 47 * uSq)));
-    let sigma = sMeters / (b * A),
-      sigmaPrev,
-      it = 0,
-      sSig = 0,
-      cSig = 1,
-      cos2SigM = 1;
+    let sigma = sMeters / (b * A), sigmaPrev, it = 0, sSig = 0, cSig = 1, cos2SigM = 1;
     do {
       cos2SigM = Math.cos(2 * sigma1 + sigma);
-      sSig = Math.sin(sigma);
-      cSig = Math.cos(sigma);
-      const dSig =
-        B *
-        sSig *
-        (cos2SigM +
-          (B / 4) *
-            (cSig * (-1 + 2 * cos2SigM * cos2SigM) -
-              (B / 6) *
-                cos2SigM *
-                (-3 + 4 * sSig * sSig) *
-                (-3 + 4 * cos2SigM * cos2SigM)));
+      sSig = Math.sin(sigma); cSig = Math.cos(sigma);
+      const dSig = B * sSig * (cos2SigM + (B / 4) * (
+        cSig * (-1 + 2 * cos2SigM * cos2SigM) -
+        (B / 6) * cos2SigM * (-3 + 4 * sSig * sSig) * (-3 + 4 * cos2SigM * cos2SigM)));
       sigmaPrev = sigma;
       sigma = sMeters / (b * A) + dSig;
-    } while (
-      Math.abs(sigma - sigmaPrev) > VINCENTY_TOL &&
-      ++it < VINCENTY_MAXIT
-    );
+    } while (Math.abs(sigma - sigmaPrev) > VINCENTY_TOL && ++it < VINCENTY_MAXIT);
     const tmp = sU1 * sSig - cU1 * cSig * cA1;
-    const lat2 = Math.atan2(
-      sU1 * cSig + cU1 * sSig * cA1,
-      (1 - f) * Math.sqrt(sAlpha * sAlpha + tmp * tmp)
-    );
+    const lat2 = Math.atan2(sU1 * cSig + cU1 * sSig * cA1,
+      (1 - f) * Math.sqrt(sAlpha * sAlpha + tmp * tmp));
     const lambda = Math.atan2(sSig * sA1, cU1 * cSig - sU1 * sSig * cA1);
     const C = (f / 16) * c2Alpha * (4 + f * (4 - 3 * c2Alpha));
-    const Lo =
-      lambda -
-      (1 - C) *
-        f *
-        sAlpha *
-        (sigma +
-          C * sSig * (cos2SigM + C * cSig * (-1 + 2 * cos2SigM * cos2SigM)));
+    const Lo = lambda - (1 - C) * f * sAlpha *
+      (sigma + C * sSig * (cos2SigM + C * cSig * (-1 + 2 * cos2SigM * cos2SigM)));
     return { lat: r2d(lat2), lng: p.lng + r2d(Lo) };
   }
 
@@ -6321,10 +5185,9 @@ out geom qt;`;
     const g = geodesicInverse(a, b);
     if (!Number.isFinite(meanHeightM) || meanHeightM === 0) return g.s;
     const phi = d2r((a.lat + b.lat) / 2);
-    const s = Math.sin(phi),
-      W2 = 1 - WGS84_E2 * s * s;
-    const N = WGS84_A / Math.sqrt(W2); // prime-vertical radius of curvature
-    const M = (WGS84_A * (1 - WGS84_E2)) / (W2 * Math.sqrt(W2)); // meridional radius of curvature
+    const s = Math.sin(phi), W2 = 1 - WGS84_E2 * s * s;
+    const N = WGS84_A / Math.sqrt(W2);                              // prime-vertical radius of curvature
+    const M = (WGS84_A * (1 - WGS84_E2)) / (W2 * Math.sqrt(W2));    // meridional radius of curvature
     const az = d2r(g.az1);
     const Ralpha = 1 / (Math.cos(az) ** 2 / M + Math.sin(az) ** 2 / N); // Euler's radius in azimuth
     return g.s * (1 + meanHeightM / Ralpha);
@@ -6338,13 +5201,11 @@ out geom qt;`;
   // Local ENU tangent frame; error < 1 cm inside 2 km.
   function enuFrame(origin) {
     const phi = d2r(origin.lat);
-    const s = Math.sin(phi),
-      W2 = 1 - WGS84_E2 * s * s;
+    const s = Math.sin(phi), W2 = 1 - WGS84_E2 * s * s;
     const N = WGS84_A / Math.sqrt(W2);
     const M = (WGS84_A * (1 - WGS84_E2)) / (W2 * Math.sqrt(W2));
     return {
-      lat0: origin.lat,
-      lng0: origin.lng,
+      lat0: origin.lat, lng0: origin.lng,
       mPerDegLat: (M * Math.PI) / 180,
       mPerDegLng: (N * Math.cos(phi) * Math.PI) / 180,
     };
@@ -6357,19 +5218,14 @@ out geom qt;`;
     lat: fr.lat0 + n / fr.mPerDegLat,
     lng: fr.lng0 + e / fr.mPerDegLng,
   });
-  function crossTrackYd(A, B, p) {
-    // signed perpendicular offset; + = right of A→B
-    const fr = enuFrame(A),
-      b = toENU(fr, B),
-      q = toENU(fr, p);
+  function crossTrackYd(A, B, p) {                 // signed perpendicular offset; + = right of A→B
+    const fr = enuFrame(A), b = toENU(fr, B), q = toENU(fr, p);
     const len = hypot2(b.e, b.n);
     if (len < EPS) return 0;
-    return (q.e * (b.n / len) - q.n * (b.e / len)) * M_TO_YD;
+    return ((q.e * (b.n / len) - q.n * (b.e / len)) * M_TO_YD);
   }
   function alongTrackYd(A, B, p) {
-    const fr = enuFrame(A),
-      b = toENU(fr, B),
-      q = toENU(fr, p);
+    const fr = enuFrame(A), b = toENU(fr, B), q = toENU(fr, p);
     const len = hypot2(b.e, b.n);
     if (len < EPS) return 0;
     return ((q.e * b.e + q.n * b.n) / len) * M_TO_YD;
@@ -6378,42 +5234,37 @@ out geom qt;`;
     const g = geodesicInverse(A, B);
     return geodesicDirect(A, g.az1, g.s / 2);
   };
-  function gravityAt(latDeg, heightM) {
-    // Somigliana + 2nd-order free-air — NIMA TR8350.2 §4; Heiskanen & Moritz (1967) eq. 2-124
+  function gravityAt(latDeg, heightM) {             // Somigliana + 2nd-order free-air — NIMA TR8350.2 §4; Heiskanen & Moritz (1967) eq. 2-124
     const s2 = Math.sin(d2r(num(latDeg, 40))) ** 2;
     const g0 = (GRAV_EQ * (1 + GRAV_K * s2)) / Math.sqrt(1 - WGS84_E2 * s2);
     const h = num(heightM, 0);
-    return (
-      g0 *
-      (1 -
-        (2 / WGS84_A) * (1 + WGS84_F + GRAV_M - 2 * WGS84_F * s2) * h +
-        (3 / (WGS84_A * WGS84_A)) * h * h)
-    );
+    return g0 * (1 - (2 / WGS84_A) * (1 + WGS84_F + GRAV_M - 2 * WGS84_F * s2) * h +
+      (3 / (WGS84_A * WGS84_A)) * h * h);
   }
   // ============================================================
   //  BLOCK 3 — ATMOSPHERE
   // ============================================================
 
   // CIPM-2007 moist-air density — Picard, Davis, Gläser & Fujii, Metrologia 45 (2008) 149. Rel. unc. 2.2e-5.
-  const CIPM_MA = 28.96546e-3; // molar mass of dry air, kg/mol — CIPM-2007 Table 1
-  const CIPM_MV = 18.01528e-3; // molar mass of water vapour, kg/mol — CIPM-2007 Table 1
-  const CIPM_R = 8.314472; // molar gas constant adopted by CIPM-2007, J/(mol·K)
-  const SVP_A = 1.2378847e-5; // saturation vapour pressure coeff. A, K⁻² — CIPM-2007 eq. A1.1
-  const SVP_B = -1.9121316e-2; // saturation vapour pressure coeff. B, K⁻¹ — CIPM-2007 eq. A1.1
-  const SVP_C = 33.93711047; // saturation vapour pressure coeff. C — CIPM-2007 eq. A1.1
-  const SVP_D = -6.3431645e3; // saturation vapour pressure coeff. D, K — CIPM-2007 eq. A1.1
-  const ENH_A = 1.00062; // enhancement factor α — CIPM-2007 eq. A1.2
-  const ENH_B = 3.14e-8; // enhancement factor β, Pa⁻¹ — CIPM-2007 eq. A1.2
-  const ENH_G = 5.6e-7; // enhancement factor γ, °C⁻² — CIPM-2007 eq. A1.2
-  const Z_A0 = 1.58123e-6; // compressibility a₀, K/Pa — CIPM-2007 eq. A1.3
-  const Z_A1 = -2.9331e-8; // compressibility a₁, Pa⁻¹ — CIPM-2007 eq. A1.3
-  const Z_A2 = 1.1043e-10; // compressibility a₂, (K·Pa)⁻¹ — CIPM-2007 eq. A1.3
-  const Z_B0 = 5.707e-6; // compressibility b₀, K/Pa — CIPM-2007 eq. A1.3
-  const Z_B1 = -2.051e-8; // compressibility b₁, Pa⁻¹ — CIPM-2007 eq. A1.3
-  const Z_C0 = 1.9898e-4; // compressibility c₀, K/Pa — CIPM-2007 eq. A1.3
-  const Z_C1 = -2.376e-6; // compressibility c₁, Pa⁻¹ — CIPM-2007 eq. A1.3
-  const Z_D = 1.83e-11; // compressibility d, K²/Pa² — CIPM-2007 eq. A1.3
-  const Z_E = -0.765e-8; // compressibility e, K²/Pa² — CIPM-2007 eq. A1.3
+  const CIPM_MA = 28.96546e-3;   // molar mass of dry air, kg/mol — CIPM-2007 Table 1
+  const CIPM_MV = 18.01528e-3;   // molar mass of water vapour, kg/mol — CIPM-2007 Table 1
+  const CIPM_R = 8.314472;      // molar gas constant adopted by CIPM-2007, J/(mol·K)
+  const SVP_A = 1.2378847e-5;   // saturation vapour pressure coeff. A, K⁻² — CIPM-2007 eq. A1.1
+  const SVP_B = -1.9121316e-2;   // saturation vapour pressure coeff. B, K⁻¹ — CIPM-2007 eq. A1.1
+  const SVP_C = 33.93711047;    // saturation vapour pressure coeff. C — CIPM-2007 eq. A1.1
+  const SVP_D = -6.3431645e3;    // saturation vapour pressure coeff. D, K — CIPM-2007 eq. A1.1
+  const ENH_A = 1.00062;         // enhancement factor α — CIPM-2007 eq. A1.2
+  const ENH_B = 3.14e-8;         // enhancement factor β, Pa⁻¹ — CIPM-2007 eq. A1.2
+  const ENH_G = 5.6e-7;          // enhancement factor γ, °C⁻² — CIPM-2007 eq. A1.2
+  const Z_A0 = 1.58123e-6;       // compressibility a₀, K/Pa — CIPM-2007 eq. A1.3
+  const Z_A1 = -2.9331e-8;       // compressibility a₁, Pa⁻¹ — CIPM-2007 eq. A1.3
+  const Z_A2 = 1.1043e-10;       // compressibility a₂, (K·Pa)⁻¹ — CIPM-2007 eq. A1.3
+  const Z_B0 = 5.707e-6;         // compressibility b₀, K/Pa — CIPM-2007 eq. A1.3
+  const Z_B1 = -2.051e-8;        // compressibility b₁, Pa⁻¹ — CIPM-2007 eq. A1.3
+  const Z_C0 = 1.9898e-4;        // compressibility c₀, K/Pa — CIPM-2007 eq. A1.3
+  const Z_C1 = -2.376e-6;        // compressibility c₁, Pa⁻¹ — CIPM-2007 eq. A1.3
+  const Z_D = 1.83e-11;         // compressibility d, K²/Pa² — CIPM-2007 eq. A1.3
+  const Z_E = -0.765e-8;        // compressibility e, K²/Pa² — CIPM-2007 eq. A1.3
 
   function saturationVaporPressure(tempC) {
     const T = tempC + KELVIN_0C;
@@ -6425,113 +5276,77 @@ out geom qt;`;
     const h = clamp(num(rhPercent, 50), 0, 100) / 100;
     const f = ENH_A + ENH_B * p + ENH_G * tempC * tempC;
     const xv = (h * f * saturationVaporPressure(tempC)) / p;
-    const Z =
-      1 -
-      (p / T) *
-        (Z_A0 +
-          Z_A1 * tempC +
-          Z_A2 * tempC * tempC +
-          (Z_B0 + Z_B1 * tempC) * xv +
-          (Z_C0 + Z_C1 * tempC) * xv * xv) +
+    const Z = 1 -
+      (p / T) * (Z_A0 + Z_A1 * tempC + Z_A2 * tempC * tempC +
+        (Z_B0 + Z_B1 * tempC) * xv + (Z_C0 + Z_C1 * tempC) * xv * xv) +
       ((p * p) / (T * T)) * (Z_D + Z_E * xv * xv);
-    return (
-      ((p * CIPM_MA) / (Z * CIPM_R * T)) * (1 - xv * (1 - CIPM_MV / CIPM_MA))
-    );
+    return ((p * CIPM_MA) / (Z * CIPM_R * T)) * (1 - xv * (1 - CIPM_MV / CIPM_MA));
   }
 
-  const ISA_P0 = 101325; // sea-level standard pressure, Pa — U.S. Standard Atmosphere 1976 (NOAA-S/T 76-1562)
-  const ISA_T0 = 288.15; // sea-level standard temperature, K — USSA 1976
-  const ISA_L = 0.0065; // tropospheric lapse rate, K/m — USSA 1976
-  const ISA_EXP = 5.2558797; // g₀M/(R*L) for the troposphere — USSA 1976 eq. 33a
-  const DRY_AIR_R = 287.052874; // specific gas constant of dry air, J/(kg·K) — ISO 2533 / CODATA 2018
+  const ISA_P0 = 101325;         // sea-level standard pressure, Pa — U.S. Standard Atmosphere 1976 (NOAA-S/T 76-1562)
+  const ISA_T0 = 288.15;         // sea-level standard temperature, K — USSA 1976
+  const ISA_L = 0.0065;         // tropospheric lapse rate, K/m — USSA 1976
+  const ISA_EXP = 5.2558797;     // g₀M/(R*L) for the troposphere — USSA 1976 eq. 33a
+  const DRY_AIR_R = 287.052874;  // specific gas constant of dry air, J/(kg·K) — ISO 2533 / CODATA 2018
   const pressureFromISA = (altitudeM) =>
-    ISA_P0 *
-    Math.pow(
-      1 - (ISA_L * clamp(num(altitudeM, 0), -500, 11000)) / ISA_T0,
-      ISA_EXP
-    );
-  function stationPressureFromMSL(pMslPa, altitudeM, tempC) {
-    // hypsometric reduction — WMO-No. 8 Part I Ch. 3
+    ISA_P0 * Math.pow(1 - (ISA_L * clamp(num(altitudeM, 0), -500, 11000)) / ISA_T0, ISA_EXP);
+  function stationPressureFromMSL(pMslPa, altitudeM, tempC) {  // hypsometric reduction — WMO-No. 8 Part I Ch. 3
     const Tv = tempC + KELVIN_0C + 0.5 * ISA_L * Math.max(0, altitudeM);
-    return (
-      pMslPa * Math.exp((-gravityAt(40, 0) * altitudeM) / (DRY_AIR_R * Tv))
-    );
+    return pMslPa * Math.exp((-gravityAt(40, 0) * altitudeM) / (DRY_AIR_R * Tv));
   }
 
-  const STD_TEMP_F = 70; // industry reference temperature for quoted carry numbers — TrackMan/USGA test conditions
-  const STD_RH = 50; // industry reference relative humidity, % — TrackMan/USGA test conditions
-  const STD_ALT_FT = 0; // sea level reference — quoted carry numbers assume it
-  const STD_LAT = 40; // reference latitude for normal gravity, deg — mid-latitude US courses
+  const STD_TEMP_F = 70;         // industry reference temperature for quoted carry numbers — TrackMan/USGA test conditions
+  const STD_RH = 50;            // industry reference relative humidity, % — TrackMan/USGA test conditions
+  const STD_ALT_FT = 0;         // sea level reference — quoted carry numbers assume it
+  const STD_LAT = 40;           // reference latitude for normal gravity, deg — mid-latitude US courses
 
   function airDensity({ tempF, rh, altitudeFt, pressureHpa } = {}) {
     const tempC = (num(tempF, STD_TEMP_F) - 32) / 1.8;
     const altM = num(altitudeFt, 0) * FT_TO_M;
-    const p =
-      Number.isFinite(pressureHpa) && pressureHpa > 500
-        ? pressureHpa * 100 // Open-Meteo surface_pressure is already station level
-        : pressureFromISA(altM);
+    const p = Number.isFinite(pressureHpa) && pressureHpa > 500
+      ? pressureHpa * 100                        // Open-Meteo surface_pressure is already station level
+      : pressureFromISA(altM);
     return airDensityCIPM(tempC, p, num(rh, STD_RH));
   }
-  const RHO_STD = airDensity({
-    tempF: STD_TEMP_F,
-    rh: STD_RH,
-    altitudeFt: STD_ALT_FT,
-  }); // ≈1.1943 kg/m³
+  const RHO_STD = airDensity({ tempF: STD_TEMP_F, rh: STD_RH, altitudeFt: STD_ALT_FT }); // ≈1.1943 kg/m³
 
-  const SUTH_MU0 = 1.716e-5; // dynamic viscosity of air at 273.15 K, Pa·s — White, Viscous Fluid Flow 3rd ed. Table 1-2
-  const SUTH_S = 110.4; // Sutherland constant for air, K — White (2006) Table 1-2
+  const SUTH_MU0 = 1.716e-5;     // dynamic viscosity of air at 273.15 K, Pa·s — White, Viscous Fluid Flow 3rd ed. Table 1-2
+  const SUTH_S = 110.4;          // Sutherland constant for air, K — White (2006) Table 1-2
   function kinematicViscosity(tempC, rho) {
     const T = tempC + KELVIN_0C;
-    const mu =
-      SUTH_MU0 *
-      Math.pow(T / KELVIN_0C, 1.5) *
-      ((KELVIN_0C + SUTH_S) / (T + SUTH_S));
+    const mu = SUTH_MU0 * Math.pow(T / KELVIN_0C, 1.5) * ((KELVIN_0C + SUTH_S) / (T + SUTH_S));
     return mu / Math.max(0.4, rho);
   }
 
   // --- Surface-layer wind profile ---
   // The single largest wind-modelling error in consumer golf apps is using the 10 m model wind
   // as if it were the wind the ball flies through. At 1 m it is ~60% of that; at 30 m, ~119%.
-  const WIND_Z0_FAIRWAY = 0.03; // roughness length for short grass / open terrain, m — Wieringa, Bound.-Layer Meteorol. 63 (1993) 323 (Davenport class 3)
-  const WIND_Z_REF = 10; // WMO standard anemometer height, m — WMO-No. 8 Part I Ch. 5
-  const WIND_Z_MIN = 0.35; // lower clamp ≈ ball radius + turf roughness sublayer, m
+  const WIND_Z0_FAIRWAY = 0.03;      // roughness length for short grass / open terrain, m — Wieringa, Bound.-Layer Meteorol. 63 (1993) 323 (Davenport class 3)
+  const WIND_Z_REF = 10;             // WMO standard anemometer height, m — WMO-No. 8 Part I Ch. 5
+  const WIND_Z_MIN = 0.35;           // lower clamp ≈ ball radius + turf roughness sublayer, m
   const WIND_SHEAR_ALPHA_DEF = 0.143; // 1/7 power-law exponent, neutral open terrain — Justus et al., J. Appl. Meteorol. 17 (1978) 350
-  const WIND_ALPHA_MIN = 0.02; // lower bound on a fitted shear exponent (near-neutral, very smooth)
-  const WIND_ALPHA_MAX = 0.45; // upper bound on a fitted shear exponent (strongly stable nocturnal)
+  const WIND_ALPHA_MIN = 0.02;       // lower bound on a fitted shear exponent (near-neutral, very smooth)
+  const WIND_ALPHA_MAX = 0.45;       // upper bound on a fitted shear exponent (strongly stable nocturnal)
   const WIND_VEER_DEG_PER_M = 0.035; // Ekman veer in the lower surface layer, deg/m — Peña et al., Bound.-Layer Meteorol. 136 (2010) 383
-  const WIND_VEER_MAX_DEG = 6; // veer saturates below trajectory apex heights
+  const WIND_VEER_MAX_DEG = 6;       // veer saturates below trajectory apex heights
 
   function windProfileFactor(zMeters, z0 = WIND_Z0_FAIRWAY) {
     const z = Math.max(WIND_Z_MIN, zMeters);
     return Math.log(z / z0) / Math.log(WIND_Z_REF / z0);
   }
   function windPowerFactor(zMeters, alpha) {
-    const a = clamp(
-      num(alpha, WIND_SHEAR_ALPHA_DEF),
-      WIND_ALPHA_MIN,
-      WIND_ALPHA_MAX
-    );
+    const a = clamp(num(alpha, WIND_SHEAR_ALPHA_DEF), WIND_ALPHA_MIN, WIND_ALPHA_MAX);
     return Math.pow(Math.max(WIND_Z_MIN, zMeters) / WIND_Z_REF, a);
   }
   // Fit the local shear exponent from two model levels when both are available.
   function fitShearAlpha(u10, u80) {
     if (!(u10 > 0.5) || !(u80 > 0.5)) return null;
-    return clamp(
-      Math.log(u80 / u10) / Math.log(80 / 10),
-      WIND_ALPHA_MIN,
-      WIND_ALPHA_MAX
-    );
+    return clamp(Math.log(u80 / u10) / Math.log(80 / 10), WIND_ALPHA_MIN, WIND_ALPHA_MAX);
   }
   function windVeerDeg(zMeters, latDeg) {
-    const sgn = num(latDeg, 40) >= 0 ? 1 : -1; // veers clockwise with height in the NH, counter-clockwise in the SH
-    return (
-      sgn *
-      clamp(
-        (Math.max(0, zMeters) - WIND_Z_REF) * WIND_VEER_DEG_PER_M,
-        -WIND_VEER_MAX_DEG,
-        WIND_VEER_MAX_DEG
-      )
-    );
+    const sgn = num(latDeg, 40) >= 0 ? 1 : -1;   // veers clockwise with height in the NH, counter-clockwise in the SH
+    return sgn * clamp((Math.max(0, zMeters) - WIND_Z_REF) * WIND_VEER_DEG_PER_M,
+      -WIND_VEER_MAX_DEG, WIND_VEER_MAX_DEG);
   }
   // ============================================================
   //  BLOCK 4 — 3-DOF BALL FLIGHT
@@ -6539,30 +5354,30 @@ out geom qt;`;
   // ============================================================
 
   const BALL = Object.freeze({
-    massKg: 0.04593, // USGA/R&A maximum ball mass 1.620 oz — Rules of Golf, Equipment Rules Pt.3 §1a
-    radiusM: 0.021335, // USGA/R&A minimum diameter 1.680 in, halved — Equipment Rules Pt.3 §1b
+    massKg: 0.04593,      // USGA/R&A maximum ball mass 1.620 oz — Rules of Golf, Equipment Rules Pt.3 §1a
+    radiusM: 0.021335,    // USGA/R&A minimum diameter 1.680 in, halved — Equipment Rules Pt.3 §1b
     areaM2: Math.PI * 0.021335 * 0.021335,
-    spinDecayTauS: 25, // measured exponential spin decay ω=ω₀e^(−t/τ) — Smits & Smith, Science and Golf II (1994)
+    spinDecayTauS: 25,    // measured exponential spin decay ω=ω₀e^(−t/τ) — Smits & Smith, Science and Golf II (1994)
   });
 
   // Smits–Smith spin-ratio fits, as reproduced in A. R. Penner, "The physics of golf",
   // Rep. Prog. Phys. 66 (2003) 131, eqs. (12)–(13). Valid for 0.02 ≤ S ≤ 0.6.
-  const AERO_S_MIN = 0.02; // lower validity bound of the Smits–Smith fit — Penner (2003) §3.2
-  const AERO_S_MAX = 0.6; // upper validity bound of the Smits–Smith fit — Penner (2003) §3.2
-  const CL_C0 = -0.05; // lift-fit offset — Smits & Smith (1994)
-  const CL_C1 = 0.0025; // lift-fit radicand constant — Smits & Smith (1994)
-  const CL_C2 = 0.36; // lift-fit radicand slope in S — Smits & Smith (1994)
-  const CD_C0 = 0.24; // zero-spin drag of a dimpled ball in the supercritical regime — Bearman & Harvey, Aeronaut. Q. 27 (1976) 112
-  const CD_C1 = 0.18; // drag rise per unit spin ratio — Smits & Smith (1994)
+  const AERO_S_MIN = 0.02;   // lower validity bound of the Smits–Smith fit — Penner (2003) §3.2
+  const AERO_S_MAX = 0.60;   // upper validity bound of the Smits–Smith fit — Penner (2003) §3.2
+  const CL_C0 = -0.05;       // lift-fit offset — Smits & Smith (1994)
+  const CL_C1 = 0.0025;      // lift-fit radicand constant — Smits & Smith (1994)
+  const CL_C2 = 0.36;        // lift-fit radicand slope in S — Smits & Smith (1994)
+  const CD_C0 = 0.24;        // zero-spin drag of a dimpled ball in the supercritical regime — Bearman & Harvey, Aeronaut. Q. 27 (1976) 112
+  const CD_C1 = 0.18;        // drag rise per unit spin ratio — Smits & Smith (1994)
   function aeroCoefficients(spinRatio) {
     const S = clamp(spinRatio, AERO_S_MIN, AERO_S_MAX);
     return { cl: CL_C0 + Math.sqrt(CL_C1 + CL_C2 * S), cd: CD_C0 + CD_C1 * S };
   }
 
-  const TRAJ_DT = 0.01; // RK4 step, s. Global error is O(dt⁴) ⇒ ≈1 cm over a 7 s flight — five orders of magnitude below GPS resolution.
-  const TRAJ_MAX_FLIGHT_S = 20; // hard flight-time cap, s; the longest real golf shot flies ≈8 s
+  const TRAJ_DT = 0.01;                 // RK4 step, s. Global error is O(dt⁴) ⇒ ≈1 cm over a 7 s flight — five orders of magnitude below GPS resolution.
+  const TRAJ_MAX_FLIGHT_S = 20;         // hard flight-time cap, s; the longest real golf shot flies ≈8 s
   const TRAJ_MAX_STEPS = Math.ceil(TRAJ_MAX_FLIGHT_S / TRAJ_DT); // DERIVED — the cap lives in TIME, so changing dt can never silently truncate a trajectory again
-  const TRAJ_REFINE = 14; // bisection halvings on the terminal step ⇒ ~1e-6 s landing resolution
+  const TRAJ_REFINE = 14;     // bisection halvings on the terminal step ⇒ ~1e-6 s landing resolution
 
   /**
    * launch : { speedMps, launchDeg, spinRadS, aimOffsetDeg }
@@ -6570,36 +5385,25 @@ out geom qt;`;
    * Returns the state at the moment the ball first descends through targetDropM.
    */
   function integrateTrajectory(launch, env) {
-    const m = BALL.massKg,
-      A = BALL.areaM2,
-      r = BALL.radiusM;
+    const m = BALL.massKg, A = BALL.areaM2, r = BALL.radiusM;
     const halfRhoA = 0.5 * env.rho * A;
     const g = env.gravity;
     const drop = num(env.targetDropM, 0);
     const w = env.coriolis || { ox: 0, oy: 0, oz: 0 };
-    const th = d2r(launch.launchDeg),
-      az = d2r(num(launch.aimOffsetDeg, 0));
-    let S = [
-      0,
-      0,
-      0,
+    const th = d2r(launch.launchDeg), az = d2r(num(launch.aimOffsetDeg, 0));
+    let S = [0, 0, 0,
       launch.speedMps * Math.cos(th) * Math.cos(az),
       launch.speedMps * Math.sin(th),
-      launch.speedMps * Math.cos(th) * Math.sin(az),
-    ];
+      launch.speedMps * Math.cos(th) * Math.sin(az)];
     // Spin axis fixed in the inertial frame (standard 3-DOF closure). This is what produces
     // genuine weathercocking in a crosswind rather than naive pure advection.
     const axis = { x: -Math.sin(az), y: 0, z: Math.cos(az) };
     const spin0 = launch.spinRadS;
-    let apex = 0,
-      t = 0,
-      steps = 0;
+    let apex = 0, t = 0, steps = 0;
 
     const deriv = (s, tt) => {
       const wind = env.windAt(Math.max(0, s[1]));
-      const vrx = s[3] - wind.wx,
-        vry = s[4],
-        vrz = s[5] - wind.wz;
+      const vrx = s[3] - wind.wx, vry = s[4], vrz = s[5] - wind.wz;
       const v = Math.sqrt(vrx * vrx + vry * vry + vrz * vrz) || EPS;
       const spin = spin0 * Math.exp(-tt / BALL.spinDecayTauS);
       const { cl, cd } = aeroCoefficients((spin * r) / v);
@@ -6608,21 +5412,15 @@ out geom qt;`;
       let ly = axis.z * vrx - axis.x * vrz;
       let lz = axis.x * vry - axis.y * vrx;
       const ln = Math.sqrt(lx * lx + ly * ly + lz * lz) || EPS;
-      lx /= ln;
-      ly /= ln;
-      lz /= ln;
+      lx /= ln; ly /= ln; lz /= ln;
       const L = q * cl * v;
-      const cx = -2 * (w.oy * s[5] - w.oz * s[4]); // Coriolis a = −2Ω×v; ≈5 in of drift on a driver
+      const cx = -2 * (w.oy * s[5] - w.oz * s[4]);   // Coriolis a = −2Ω×v; ≈5 in of drift on a driver
       const cy = -2 * (w.oz * s[3] - w.ox * s[5]);
       const cz = -2 * (w.ox * s[4] - w.oy * s[3]);
-      return [
-        s[3],
-        s[4],
-        s[5],
-        -q * cd * vrx + L * lx + cx,
-        -q * cd * vry + L * ly - g + cy,
-        -q * cd * vrz + L * lz + cz,
-      ];
+      return [s[3], s[4], s[5],
+      -q * cd * vrx + L * lx + cx,
+      -q * cd * vry + L * ly - g + cy,
+      -q * cd * vrz + L * lz + cz];
     };
     const step = (s, tt, h) => {
       const k1 = deriv(s, tt);
@@ -6632,9 +5430,7 @@ out geom qt;`;
       const k3 = deriv(s3, tt + h / 2);
       const s4 = s.map((v, i) => v + h * k3[i]);
       const k4 = deriv(s4, tt + h);
-      return s.map(
-        (v, i) => v + (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i])
-      );
+      return s.map((v, i) => v + (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
     };
 
     while (steps++ < TRAJ_MAX_STEPS) {
@@ -6643,20 +5439,16 @@ out geom qt;`;
       const descending = next[4] < 0;
       if (descending && next[1] <= drop && S[1] > drop) {
         // Refine the landing instant by bisection on the sub-step.
-        let lo = 0,
-          hi = TRAJ_DT;
+        let lo = 0, hi = TRAJ_DT;
         for (let i = 0; i < TRAJ_REFINE; i++) {
           const mid = 0.5 * (lo + hi);
           const sm = step(S, t, mid);
-          if (sm[1] > drop) lo = mid;
-          else hi = mid;
+          if (sm[1] > drop) lo = mid; else hi = mid;
         }
         const land = step(S, t, 0.5 * (lo + hi));
         const vh = hypot2(land[3], land[5]);
         return {
-          carryM: land[0],
-          lateralM: land[2],
-          apexM: apex,
+          carryM: land[0], lateralM: land[2], apexM: apex,
           timeS: t + 0.5 * (lo + hi),
           landSpeedMps: Math.sqrt(land[3] ** 2 + land[4] ** 2 + land[5] ** 2),
           descentDeg: r2d(Math.atan2(-land[4], Math.max(EPS, vh))),
@@ -6665,15 +5457,12 @@ out geom qt;`;
       }
       S = next;
       t += TRAJ_DT;
-      if (S[1] < drop - 200) break; // ran off a cliff far below the target; bail
+      if (S[1] < drop - 200) break;    // ran off a cliff far below the target; bail
     }
     // Never reached the target plane (target above the apex, or step budget exhausted).
     const vh = hypot2(S[3], S[5]);
     return {
-      carryM: S[0],
-      lateralM: S[2],
-      apexM: apex,
-      timeS: t,
+      carryM: S[0], lateralM: S[2], apexM: apex, timeS: t,
       landSpeedMps: Math.sqrt(S[3] ** 2 + S[4] ** 2 + S[5] ** 2),
       descentDeg: r2d(Math.atan2(-S[4], Math.max(EPS, vh))),
       reached: false,
@@ -6684,25 +5473,15 @@ out geom qt;`;
   // fraction of horizontal speed, then the ball decelerates against an effective turf
   // friction. Structure per Penner (2003) §5; μ and eₕ calibrated so the model reproduces
   // published TrackMan carry-vs-total gaps (driver ≈ +18 yd, 7-iron ≈ +4 yd on medium turf).
-  const ROLL_MU = Object.freeze({ firm: 0.4, medium: 0.55, soft: 0.8 }); // effective turf deceleration coefficient — calibrated per above
-  const ROLL_EH_A = 0.8; // horizontal restitution at 0° descent — calibrated to TrackMan carry/total gaps
-  const ROLL_EH_B = 0.0065; // loss of horizontal restitution per degree of descent — calibrated as above
-  const ROLL_EH_MIN = 0.28; // floor on horizontal restitution for steep wedge landings
-  function rolloutYd(
-    landSpeedMps,
-    descentDeg,
-    firmness = 'medium',
-    gravity = 9.80665
-  ) {
+  const ROLL_MU = Object.freeze({ firm: 0.40, medium: 0.55, soft: 0.80 }); // effective turf deceleration coefficient — calibrated per above
+  const ROLL_EH_A = 0.80;      // horizontal restitution at 0° descent — calibrated to TrackMan carry/total gaps
+  const ROLL_EH_B = 0.0065;    // loss of horizontal restitution per degree of descent — calibrated as above
+  const ROLL_EH_MIN = 0.28;    // floor on horizontal restitution for steep wedge landings
+  function rolloutYd(landSpeedMps, descentDeg, firmness = 'medium', gravity = 9.80665) {
     if (!(landSpeedMps > 0)) return 0;
     const mu = ROLL_MU[firmness] || ROLL_MU.medium;
-    const eh = clamp(
-      ROLL_EH_A - ROLL_EH_B * Math.abs(descentDeg),
-      ROLL_EH_MIN,
-      ROLL_EH_A
-    );
-    const vh =
-      eh * landSpeedMps * Math.cos(d2r(clamp(Math.abs(descentDeg), 0, 89)));
+    const eh = clamp(ROLL_EH_A - ROLL_EH_B * Math.abs(descentDeg), ROLL_EH_MIN, ROLL_EH_A);
+    const vh = eh * landSpeedMps * Math.cos(d2r(clamp(Math.abs(descentDeg), 0, 89)));
     return ((vh * vh) / (2 * mu * gravity)) * M_TO_YD;
   }
 
@@ -6710,20 +5489,20 @@ out geom qt;`;
   // standard carry so any constant bias in the aero model cancels in the inverse mapping.
   // Source: TrackMan Golf, "PGA Tour averages" launch-monitor dataset (ball speed / launch angle / spin rate).
   const LAUNCH_TABLE = Object.freeze([
-    { ballMph: 167, launchDeg: 10.9, spinRpm: 2686 }, // Driver — TrackMan PGA Tour averages
-    { ballMph: 158, launchDeg: 9.2, spinRpm: 3655 }, // 3-wood — TrackMan PGA Tour averages
-    { ballMph: 152, launchDeg: 9.4, spinRpm: 4350 }, // 5-wood — TrackMan PGA Tour averages
-    { ballMph: 146, launchDeg: 10.2, spinRpm: 4437 }, // Hybrid — TrackMan PGA Tour averages
-    { ballMph: 142, launchDeg: 10.4, spinRpm: 4630 }, // 3-iron — TrackMan PGA Tour averages
-    { ballMph: 137, launchDeg: 11.0, spinRpm: 4836 }, // 4-iron — TrackMan PGA Tour averages
-    { ballMph: 132, launchDeg: 12.1, spinRpm: 5361 }, // 5-iron — TrackMan PGA Tour averages
-    { ballMph: 127, launchDeg: 14.1, spinRpm: 6231 }, // 6-iron — TrackMan PGA Tour averages
-    { ballMph: 120, launchDeg: 16.3, spinRpm: 7097 }, // 7-iron — TrackMan PGA Tour averages
-    { ballMph: 115, launchDeg: 18.1, spinRpm: 7998 }, // 8-iron — TrackMan PGA Tour averages
-    { ballMph: 109, launchDeg: 20.4, spinRpm: 8647 }, // 9-iron — TrackMan PGA Tour averages
-    { ballMph: 102, launchDeg: 24.2, spinRpm: 9304 }, // PW — TrackMan PGA Tour averages
-    { ballMph: 88, launchDeg: 26.5, spinRpm: 9600 }, // partial-wedge extension, extrapolated on the table's own trend
-    { ballMph: 72, launchDeg: 28.0, spinRpm: 9200 }, // short-wedge extension, extrapolated on the table's own trend
+    { ballMph: 167, launchDeg: 10.9, spinRpm: 2686 },  // Driver — TrackMan PGA Tour averages
+    { ballMph: 158, launchDeg: 9.2, spinRpm: 3655 },  // 3-wood — TrackMan PGA Tour averages
+    { ballMph: 152, launchDeg: 9.4, spinRpm: 4350 },  // 5-wood — TrackMan PGA Tour averages
+    { ballMph: 146, launchDeg: 10.2, spinRpm: 4437 },  // Hybrid — TrackMan PGA Tour averages
+    { ballMph: 142, launchDeg: 10.4, spinRpm: 4630 },  // 3-iron — TrackMan PGA Tour averages
+    { ballMph: 137, launchDeg: 11.0, spinRpm: 4836 },  // 4-iron — TrackMan PGA Tour averages
+    { ballMph: 132, launchDeg: 12.1, spinRpm: 5361 },  // 5-iron — TrackMan PGA Tour averages
+    { ballMph: 127, launchDeg: 14.1, spinRpm: 6231 },  // 6-iron — TrackMan PGA Tour averages
+    { ballMph: 120, launchDeg: 16.3, spinRpm: 7097 },  // 7-iron — TrackMan PGA Tour averages
+    { ballMph: 115, launchDeg: 18.1, spinRpm: 7998 },  // 8-iron — TrackMan PGA Tour averages
+    { ballMph: 109, launchDeg: 20.4, spinRpm: 8647 },  // 9-iron — TrackMan PGA Tour averages
+    { ballMph: 102, launchDeg: 24.2, spinRpm: 9304 },  // PW — TrackMan PGA Tour averages
+    { ballMph: 88, launchDeg: 26.5, spinRpm: 9600 },  // partial-wedge extension, extrapolated on the table's own trend
+    { ballMph: 72, launchDeg: 28.0, spinRpm: 9200 },  // short-wedge extension, extrapolated on the table's own trend
   ]);
 
   const STILL_AIR_ENV = Object.freeze({
@@ -6751,28 +5530,14 @@ out geom qt;`;
     }).sort((a, b) => a.carryYd - b.carryYd);
     // Enforce strict monotonicity so the interpolators are invertible.
     for (let i = 1; i < rows.length; i++)
-      if (rows[i].carryYd <= rows[i - 1].carryYd)
-        rows[i].carryYd = rows[i - 1].carryYd + 0.5;
+      if (rows[i].carryYd <= rows[i - 1].carryYd) rows[i].carryYd = rows[i - 1].carryYd + 0.5;
     const cs = rows.map((r) => r.carryYd);
     _launchFamily = {
-      minCarry: cs[0],
-      maxCarry: cs[cs.length - 1],
-      speed: pchip(
-        cs,
-        rows.map((r) => r.speedMps)
-      ),
-      launch: pchip(
-        cs,
-        rows.map((r) => r.launchDeg)
-      ),
-      spin: pchip(
-        cs,
-        rows.map((r) => r.spinRadS)
-      ),
-      apex: pchip(
-        cs,
-        rows.map((r) => r.apexM)
-      ),
+      minCarry: cs[0], maxCarry: cs[cs.length - 1],
+      speed: pchip(cs, rows.map((r) => r.speedMps)),
+      launch: pchip(cs, rows.map((r) => r.launchDeg)),
+      spin: pchip(cs, rows.map((r) => r.spinRadS)),
+      apex: pchip(cs, rows.map((r) => r.apexM)),
       rows,
     };
     return _launchFamily;
@@ -6802,42 +5567,34 @@ out geom qt;`;
   function windComponents({ windMph, windFromDeg, bearingDeg } = {}) {
     const speed = Math.max(0, num(windMph, 0));
     const theta = d2r(norm(num(windFromDeg, 0)) - norm(num(bearingDeg, 0)));
-    return {
-      headwindMph: speed * Math.cos(theta),
-      crosswindMph: speed * Math.sin(theta),
-    };
+    return { headwindMph: speed * Math.cos(theta), crosswindMph: speed * Math.sin(theta) };
   }
 
   const PHYSICS = Object.freeze({
     // Baselines defining "standard conditions" — the reference the plays-like number is quoted against.
-    TEMP_BASELINE_F: STD_TEMP_F, // reference temperature for quoted carry, °F — TrackMan/USGA test conditions
-    HUMIDITY_BASELINE_RH: STD_RH, // reference relative humidity, % — TrackMan/USGA test conditions
-    ALTITUDE_BASELINE_FT: STD_ALT_FT, // reference altitude, ft — quoted carry numbers assume sea level
-    MIN_CROSSWIND_MPH: 1.0, // below this the aim correction is inside GPS/aim noise; report "minimal"
-    SOLVER_TOL_YD: 0.05, // inverse-solve tolerance, yd — far below GPS resolution
-    SOLVER_MAX_ITER: 14, // Newton + bisection safeguard iteration cap
+    TEMP_BASELINE_F: STD_TEMP_F,          // reference temperature for quoted carry, °F — TrackMan/USGA test conditions
+    HUMIDITY_BASELINE_RH: STD_RH,         // reference relative humidity, % — TrackMan/USGA test conditions
+    ALTITUDE_BASELINE_FT: STD_ALT_FT,     // reference altitude, ft — quoted carry numbers assume sea level
+    MIN_CROSSWIND_MPH: 1.0,               // below this the aim correction is inside GPS/aim noise; report "minimal"
+    SOLVER_TOL_YD: 0.05,                  // inverse-solve tolerance, yd — far below GPS resolution
+    SOLVER_MAX_ITER: 14,                  // Newton + bisection safeguard iteration cap
     // Legacy linear coefficients, retained ONLY so any external reader of PHYSICS.* keeps working.
     // The solver no longer uses them; they are superseded by the trajectory model.
-    FT_PER_ELEV_YARD: 3, // legacy rule of thumb, superseded — 1 yd per 3 ft of elevation
-    HEADWIND_PCT_PER_MPH: 0.01, // legacy rule of thumb, superseded — 1%/mph into the wind
-    TAILWIND_PCT_PER_MPH: 0.005, // legacy rule of thumb, superseded — 0.5%/mph downwind
-    TEMP_PCT_PER_10F: 0.0075, // legacy rule of thumb, superseded — 0.75% per 10°F
-    ALTITUDE_PCT_PER_1000FT: 0.0116, // legacy rule of thumb, superseded — 1.16% per 1000 ft
-    HUMIDITY_PCT_PER_RH_POINT: -0.0002, // legacy rule of thumb, superseded
-    HUMIDITY_MAX_ABS_PCT: 0.01, // legacy clamp, superseded
-    CROSSWIND_AIM_PCT_PER_MPH: 0.01, // legacy rule of thumb, superseded by integrated lateral deflection
+    FT_PER_ELEV_YARD: 3,                  // legacy rule of thumb, superseded — 1 yd per 3 ft of elevation
+    HEADWIND_PCT_PER_MPH: 0.01,           // legacy rule of thumb, superseded — 1%/mph into the wind
+    TAILWIND_PCT_PER_MPH: 0.005,          // legacy rule of thumb, superseded — 0.5%/mph downwind
+    TEMP_PCT_PER_10F: 0.0075,             // legacy rule of thumb, superseded — 0.75% per 10°F
+    ALTITUDE_PCT_PER_1000FT: 0.0116,      // legacy rule of thumb, superseded — 1.16% per 1000 ft
+    HUMIDITY_PCT_PER_RH_POINT: -0.0002,   // legacy rule of thumb, superseded
+    HUMIDITY_MAX_ABS_PCT: 0.01,           // legacy clamp, superseded
+    CROSSWIND_AIM_PCT_PER_MPH: 0.01,      // legacy rule of thumb, superseded by integrated lateral deflection
   });
 
   // Build the integration environment for a set of on-course conditions.
   function buildEnv(cond) {
     const tempF = num(cond.tempF, STD_TEMP_F);
     const altFt = num(cond.courseAltitudeFt, 0);
-    const rho = airDensity({
-      tempF,
-      rh: cond.rh,
-      altitudeFt: altFt,
-      pressureHpa: cond.pressureHpa,
-    });
+    const rho = airDensity({ tempF, rh: cond.rh, altitudeFt: altFt, pressureHpa: cond.pressureHpa });
     const bearing = norm(num(cond.bearingDeg, 0));
     const lat = num(cond.latDeg, STD_LAT);
     const alpha = Number.isFinite(cond.shearAlpha) ? cond.shearAlpha : null;
@@ -6856,8 +5613,7 @@ out geom qt;`;
       },
       windAt(z) {
         if (speed10 <= 0) return { wx: 0, wz: 0 };
-        const f =
-          alpha != null ? windPowerFactor(z, alpha) : windProfileFactor(z);
+        const f = alpha != null ? windPowerFactor(z, alpha) : windProfileFactor(z);
         const spd = speed10 * f;
         const dir = fromDeg + windVeerDeg(z, lat);
         const rel = d2r(dir - bearing);
@@ -6869,19 +5625,11 @@ out geom qt;`;
 
   const _plCache = makeLRU(400);
   const _plKey = (D, c) =>
-    [
-      Math.round(D * 2),
-      Math.round(num(c.elevDiffFt, 0)),
-      Math.round(num(c.courseAltitudeFt, 0) / 25),
-      Math.round(num(c.tempF, 70)),
-      Math.round(num(c.rh, 50) / 5),
-      Math.round(num(c.windMph, 0) * 2),
-      Math.round(norm(num(c.windFromDeg, 0)) / 3),
-      Math.round(norm(num(c.bearingDeg, 0)) / 3),
-      Math.round(num(c.pressureHpa, 0)),
-      Math.round(num(c.shearAlpha, 0.143) * 100),
-      Math.round(num(c.latDeg, 40)),
-    ].join('|');
+    [Math.round(D * 2), Math.round(num(c.elevDiffFt, 0)), Math.round(num(c.courseAltitudeFt, 0) / 25),
+    Math.round(num(c.tempF, 70)), Math.round(num(c.rh, 50) / 5), Math.round(num(c.windMph, 0) * 2),
+    Math.round(norm(num(c.windFromDeg, 0)) / 3), Math.round(norm(num(c.bearingDeg, 0)) / 3),
+    Math.round(num(c.pressureHpa, 0)), Math.round(num(c.shearAlpha, 0.143) * 100),
+    Math.round(num(c.latDeg, 40))].join('|');
 
   // Carry actually achieved, in yards, by a player whose standard carry is P, under `env`.
   function carryUnder(P, env) {
@@ -6897,27 +5645,18 @@ out geom qt;`;
    */
   function solvePlaysLikeYd(targetYd, cond) {
     const D = Math.max(0, num(targetYd, 0));
-    if (D < 1)
-      return {
-        playsLikeYd: D,
-        launch: null,
-        traj: null,
-        dCarrydP: 1,
-        env: null,
-      };
+    if (D < 1) return { playsLikeYd: D, launch: null, traj: null, dCarrydP: 1, env: null };
     const key = _plKey(D, cond);
     const hit = _plCache.get(key);
     if (hit) return hit;
 
     const env = buildEnv(cond);
-    let lo = 5,
-      hi = 420;
-    let P = clamp(D - num(cond.elevDiffFt, 0) / 3, 8, 400); // legacy linear rule used ONLY as the Newton seed
+    let lo = 5, hi = 420;
+    let P = clamp(D - num(cond.elevDiffFt, 0) / 3, 8, 400);   // legacy linear rule used ONLY as the Newton seed
     let f = carryUnder(P, env) - D;
     for (let i = 0; i < PHYSICS.SOLVER_MAX_ITER; i++) {
       if (Math.abs(f) < PHYSICS.SOLVER_TOL_YD) break;
-      if (f > 0) hi = Math.min(hi, P);
-      else lo = Math.max(lo, P);
+      if (f > 0) hi = Math.min(hi, P); else lo = Math.max(lo, P);
       const h = Math.max(1, 0.02 * P);
       const fp = (carryUnder(P + h, env) - carryUnder(P - h, env)) / (2 * h);
       let next = fp > 1e-3 ? P - f / fp : 0.5 * (lo + hi);
@@ -6928,10 +5667,7 @@ out geom qt;`;
     const L = launchForStandardCarry(P);
     const traj = integrateTrajectory(L, env);
     const h = Math.max(1, 0.02 * P);
-    const dCarrydP = Math.max(
-      0.2,
-      (carryUnder(P + h, env) - carryUnder(P - h, env)) / (2 * h)
-    );
+    const dCarrydP = Math.max(0.2, (carryUnder(P + h, env) - carryUnder(P - h, env)) / (2 * h));
     const out = { playsLikeYd: P, launch: L, traj, dCarrydP, env };
     _plCache.set(key, out);
     return out;
@@ -6959,23 +5695,11 @@ out geom qt;`;
     const gustMph = num(input.gustMph, NaN);
     const firmness = input.firmness || 'medium';
 
-    const { headwindMph, crosswindMph } = windComponents({
-      windMph,
-      windFromDeg,
-      bearingDeg,
-    });
+    const { headwindMph, crosswindMph } = windComponents({ windMph, windFromDeg, bearingDeg });
 
     const cond = {
-      bearingDeg,
-      elevDiffFt,
-      courseAltitudeFt,
-      tempF,
-      rh,
-      windMph,
-      windFromDeg,
-      pressureHpa,
-      shearAlpha,
-      latDeg,
+      bearingDeg, elevDiffFt, courseAltitudeFt, tempF, rh, windMph, windFromDeg,
+      pressureHpa, shearAlpha, latDeg
     };
     const sol = solvePlaysLikeYd(horizontalYd, cond);
     const P = sol.playsLikeYd;
@@ -6992,22 +5716,14 @@ out geom qt;`;
     };
     let elevAdjYd = elevDiffFt !== 0 ? attribution({ elevDiffFt: 0 }) : 0;
     let windAdjYd = windMph > 0 ? attribution({ windMph: 0 }) : 0;
-    let tempAdjYd =
-      tempF !== STD_TEMP_F ? attribution({ tempF: STD_TEMP_F }) : 0;
-    let altitudeAdjYd =
-      courseAltitudeFt !== 0 ? attribution({ courseAltitudeFt: 0 }) : 0;
+    let tempAdjYd = tempF !== STD_TEMP_F ? attribution({ tempF: STD_TEMP_F }) : 0;
+    let altitudeAdjYd = courseAltitudeFt !== 0 ? attribution({ courseAltitudeFt: 0 }) : 0;
     let humidityAdjYd = rh !== STD_RH ? attribution({ rh: STD_RH }) : 0;
 
     // Renormalize so Σ parts == P − D exactly.
-    const parts = [
-      elevAdjYd,
-      windAdjYd,
-      tempAdjYd,
-      altitudeAdjYd,
-      humidityAdjYd,
-    ];
+    const parts = [elevAdjYd, windAdjYd, tempAdjYd, altitudeAdjYd, humidityAdjYd];
     const sumParts = parts.reduce((a, b) => a + b, 0);
-    const residual = P - horizontalYd - sumParts;
+    const residual = (P - horizontalYd) - sumParts;
     const absTot = parts.reduce((a, b) => a + Math.abs(b), 0);
     if (absTot > 1e-6) {
       const k = residual / absTot;
@@ -7021,15 +5737,9 @@ out geom qt;`;
     const playsLikeYd = Math.max(0, Math.round(P + lieYd));
 
     // Crosswind aim from the integrated lateral deflection — not a percent-per-mph rule.
-    let crossFrom,
-      aimYd,
-      aimDeg = 0,
-      lateralDriftYd = 0;
+    let crossFrom, aimYd, aimDeg = 0, lateralDriftYd = 0;
     if (sol.traj) lateralDriftYd = sol.traj.lateralM * M_TO_YD;
-    if (
-      Math.abs(crosswindMph) < PHYSICS.MIN_CROSSWIND_MPH ||
-      horizontalYd < 15
-    ) {
+    if (Math.abs(crosswindMph) < PHYSICS.MIN_CROSSWIND_MPH || horizontalYd < 15) {
       crossFrom = 'minimal';
       aimYd = 0;
     } else {
@@ -7044,11 +5754,10 @@ out geom qt;`;
       const z1 = trial(probe);
       const slope = (z1 - z0) / probe;
       aimDeg = Math.abs(slope) > 1e-6 ? clamp(-z0 / slope, -25, 25) : 0;
-      aimYd = Math.round(-z0); // signed: + = aim right, matching crosswind > 0
-      crossFrom =
-        crosswindMph > 0
-          ? 'wind pushes left — aim right'
-          : 'wind pushes right — aim left';
+      aimYd = Math.round(-z0);   // signed: + = aim right, matching crosswind > 0
+      crossFrom = crosswindMph > 0
+        ? 'wind pushes left — aim right'
+        : 'wind pushes right — aim left';
     }
 
     // Gust exposure: half the head/cross gust delta, expressed in yards of uncertainty.
@@ -7060,43 +5769,22 @@ out geom qt;`;
 
     const rho = sol.env ? sol.env.rho : RHO_STD;
     const roll = sol.traj
-      ? rolloutYd(
-          sol.traj.landSpeedMps,
-          sol.traj.descentDeg,
-          firmness,
-          sol.env ? sol.env.gravity : 9.80665
-        )
+      ? rolloutYd(sol.traj.landSpeedMps, sol.traj.descentDeg, firmness,
+        sol.env ? sol.env.gravity : 9.80665)
       : 0;
 
     return {
       // --- original keys, unchanged names/meanings ---
-      horizontalYd,
-      playsLikeYd,
-      windAdjYd,
-      tempAdjYd,
-      altitudeAdjYd,
-      humidityAdjYd,
-      elevAdjYd,
-      lieYd,
-      headwindMph,
-      crosswindMph,
-      crossFrom,
-      aimYd,
-      bearingDeg,
-      elevDiffFt,
-      courseAltitudeFt,
-      tempF,
-      rh,
-      windMph,
-      windFromDeg,
+      horizontalYd, playsLikeYd,
+      windAdjYd, tempAdjYd, altitudeAdjYd, humidityAdjYd, elevAdjYd, lieYd,
+      headwindMph, crosswindMph, crossFrom, aimYd,
+      bearingDeg, elevDiffFt, courseAltitudeFt, tempF, rh, windMph, windFromDeg,
       windPct: horizontalYd > 0 ? windAdjYd / horizontalYd : 0,
       tempPct: horizontalYd > 0 ? tempAdjYd / horizontalYd : 0,
       altitudePct: horizontalYd > 0 ? altitudeAdjYd / horizontalYd : 0,
       humidityPct: horizontalYd > 0 ? humidityAdjYd / horizontalYd : 0,
       // --- new, additive ---
-      aimDeg,
-      lateralDriftYd,
-      gustYd,
+      aimDeg, lateralDriftYd, gustYd,
       rhoKgM3: rho,
       densityRatio: rho / RHO_STD,
       apexFt: sol.traj ? sol.traj.apexM * M_TO_FT : null,
@@ -7111,24 +5799,18 @@ out geom qt;`;
 
   // PUBLIC SIGNATURE PRESERVED. Light path — plays-like number only, no attributions.
   function playsLikeFor(rawYd, bearing) {
-    const w = getWeatherOrNeutral(),
-      e = getElevationOrNeutral();
+    const w = getWeatherOrNeutral(), e = getElevationOrNeutral();
     const d = Math.max(0, num(rawYd, 0));
     if (d < 1) return Math.round(d);
-    return Math.round(
-      solvePlaysLikeYd(d, {
-        bearingDeg: bearing,
-        elevDiffFt: e.targetFt - e.userFt,
-        courseAltitudeFt: (e.targetFt + e.userFt) / 2,
-        tempF: w.tempF,
-        rh: w.rh,
-        windMph: w.windMph,
-        windFromDeg: w.windFromDeg,
-        pressureHpa: w.pressureHpa,
-        shearAlpha: w.shearAlpha,
-        latDeg: state.loc ? state.loc.lat : STD_LAT,
-      }).playsLikeYd
-    );
+    return Math.round(solvePlaysLikeYd(d, {
+      bearingDeg: bearing,
+      elevDiffFt: e.targetFt - e.userFt,
+      courseAltitudeFt: (e.targetFt + e.userFt) / 2,
+      tempF: w.tempF, rh: w.rh,
+      windMph: w.windMph, windFromDeg: w.windFromDeg,
+      pressureHpa: w.pressureHpa, shearAlpha: w.shearAlpha,
+      latDeg: state.loc ? state.loc.lat : STD_LAT,
+    }).playsLikeYd);
   }
   // ============================================================
   //  PATCH B — ZERO-ALLOCATION 3-DOF INTEGRATOR
@@ -7141,12 +5823,7 @@ out geom qt;`;
   function buildEnv(cond) {
     const tempF = num(cond.tempF, STD_TEMP_F);
     const altFt = num(cond.courseAltitudeFt, 0);
-    const rho = airDensity({
-      tempF,
-      rh: cond.rh,
-      altitudeFt: altFt,
-      pressureHpa: cond.pressureHpa,
-    });
+    const rho = airDensity({ tempF, rh: cond.rh, altitudeFt: altFt, pressureHpa: cond.pressureHpa });
     const bearing = norm(num(cond.bearingDeg, 0));
     const lat = num(cond.latDeg, STD_LAT);
     const alpha = Number.isFinite(cond.shearAlpha) ? cond.shearAlpha : null;
@@ -7166,13 +5843,8 @@ out geom qt;`;
         oz: -OMEGA_EARTH * Math.cos(phi) * Math.sin(d2r(bearing)),
       },
       windAt(z) {
-        if (speed10 <= 0) {
-          windOut.wx = 0;
-          windOut.wz = 0;
-          return windOut;
-        }
-        const f =
-          alpha != null ? windPowerFactor(z, alpha) : windProfileFactor(z);
+        if (speed10 <= 0) { windOut.wx = 0; windOut.wz = 0; return windOut; }
+        const f = alpha != null ? windPowerFactor(z, alpha) : windProfileFactor(z);
         const spd = speed10 * f;
         const rel = d2r(fromDeg + windVeerDeg(z, lat) - bearing);
         windOut.wx = -spd * Math.cos(rel);
@@ -7189,45 +5861,29 @@ out geom qt;`;
     const grav = env.gravity;
     const drop = num(env.targetDropM, 0);
     const co = env.coriolis || { ox: 0, oy: 0, oz: 0 };
-    const c2x = 2 * co.ox,
-      c2y = 2 * co.oy,
-      c2z = 2 * co.oz;
+    const c2x = 2 * co.ox, c2y = 2 * co.oy, c2z = 2 * co.oz;
     const windAt = env.windAt;
-    const th = d2r(launch.launchDeg),
-      az = d2r(num(launch.aimOffsetDeg, 0));
-    const axX = -Math.sin(az),
-      axZ = Math.cos(az); // spin axis; axY = 0
+    const th = d2r(launch.launchDeg), az = d2r(num(launch.aimOffsetDeg, 0));
+    const axX = -Math.sin(az), axZ = Math.cos(az);   // spin axis; axY = 0
     const spin0 = launch.spinRadS;
     const invTau = 1 / BALL.spinDecayTauS;
     const dt = TRAJ_DT;
 
-    let aX = 0,
-      aY = 0,
-      aZ = 0; // accel scratch
-    let sX = 0,
-      sY = 0,
-      sZ = 0,
-      sVX = 0,
-      sVY = 0,
-      sVZ = 0; // step scratch
+    let aX = 0, aY = 0, aZ = 0;          // accel scratch
+    let sX = 0, sY = 0, sZ = 0, sVX = 0, sVY = 0, sVZ = 0;   // step scratch
 
     function accel(py, pvx, pvy, pvz, tt) {
       const wind = windAt(py > 0 ? py : 0);
-      const vrx = pvx - wind.wx,
-        vry = pvy,
-        vrz = pvz - wind.wz;
+      const vrx = pvx - wind.wx, vry = pvy, vrz = pvz - wind.wz;
       let v = Math.sqrt(vrx * vrx + vry * vry + vrz * vrz);
       if (!(v > EPS)) v = EPS;
       let S = (spin0 * Math.exp(-tt * invTau) * r) / v;
-      if (S < AERO_S_MIN) S = AERO_S_MIN;
-      else if (S > AERO_S_MAX) S = AERO_S_MAX;
+      if (S < AERO_S_MIN) S = AERO_S_MIN; else if (S > AERO_S_MAX) S = AERO_S_MAX;
       const cl = CL_C0 + Math.sqrt(CL_C1 + CL_C2 * S);
       const cd = CD_C0 + CD_C1 * S;
       const q = halfRhoA * v * invM;
       // lift direction = normalize(axis × vRel), axis = (axX, 0, axZ)
-      const lx = -axZ * vry,
-        ly = axZ * vrx - axX * vrz,
-        lz = axX * vry;
+      const lx = -axZ * vry, ly = axZ * vrx - axX * vrz, lz = axX * vry;
       let ln = Math.sqrt(lx * lx + ly * ly + lz * lz);
       if (!(ln > EPS)) ln = EPS;
       const Lq = (q * cl * v) / ln;
@@ -7237,38 +5893,16 @@ out geom qt;`;
     }
 
     function stepTo(x0, y0, z0, vx0, vy0, vz0, t0, h) {
-      const h2 = 0.5 * h,
-        h6 = h / 6;
+      const h2 = 0.5 * h, h6 = h / 6;
       accel(y0, vx0, vy0, vz0, t0);
-      const k1px = vx0,
-        k1py = vy0,
-        k1pz = vz0,
-        k1vx = aX,
-        k1vy = aY,
-        k1vz = aZ;
-      let vX = vx0 + h2 * k1vx,
-        vY = vy0 + h2 * k1vy,
-        vZ = vz0 + h2 * k1vz;
+      const k1px = vx0, k1py = vy0, k1pz = vz0, k1vx = aX, k1vy = aY, k1vz = aZ;
+      let vX = vx0 + h2 * k1vx, vY = vy0 + h2 * k1vy, vZ = vz0 + h2 * k1vz;
       accel(y0 + h2 * k1py, vX, vY, vZ, t0 + h2);
-      const k2px = vX,
-        k2py = vY,
-        k2pz = vZ,
-        k2vx = aX,
-        k2vy = aY,
-        k2vz = aZ;
-      vX = vx0 + h2 * k2vx;
-      vY = vy0 + h2 * k2vy;
-      vZ = vz0 + h2 * k2vz;
+      const k2px = vX, k2py = vY, k2pz = vZ, k2vx = aX, k2vy = aY, k2vz = aZ;
+      vX = vx0 + h2 * k2vx; vY = vy0 + h2 * k2vy; vZ = vz0 + h2 * k2vz;
       accel(y0 + h2 * k2py, vX, vY, vZ, t0 + h2);
-      const k3px = vX,
-        k3py = vY,
-        k3pz = vZ,
-        k3vx = aX,
-        k3vy = aY,
-        k3vz = aZ;
-      vX = vx0 + h * k3vx;
-      vY = vy0 + h * k3vy;
-      vZ = vz0 + h * k3vz;
+      const k3px = vX, k3py = vY, k3pz = vZ, k3vx = aX, k3vy = aY, k3vz = aZ;
+      vX = vx0 + h * k3vx; vY = vy0 + h * k3vy; vZ = vz0 + h * k3vz;
       accel(y0 + h * k3py, vX, vY, vZ, t0 + h);
       sX = x0 + h6 * (k1px + 2 * k2px + 2 * k3px + vX);
       sY = y0 + h6 * (k1py + 2 * k2py + 2 * k3py + vY);
@@ -7278,57 +5912,40 @@ out geom qt;`;
       sVZ = vz0 + h6 * (k1vz + 2 * k2vz + 2 * k3vz + aZ);
     }
 
-    let x = 0,
-      y = 0,
-      z = 0;
+    let x = 0, y = 0, z = 0;
     const cth = Math.cos(th);
     let vx = launch.speedMps * cth * Math.cos(az);
     let vy = launch.speedMps * Math.sin(th);
     let vz = launch.speedMps * cth * Math.sin(az);
-    let apex = 0,
-      t = 0,
-      steps = 0;
+    let apex = 0, t = 0, steps = 0;
 
     while (steps++ < TRAJ_MAX_STEPS) {
       stepTo(x, y, z, vx, vy, vz, t, dt);
       if (sY > apex) apex = sY;
       if (sVY < 0 && sY <= drop && y > drop) {
-        let lo = 0,
-          hi = dt;
+        let lo = 0, hi = dt;
         for (let i = 0; i < TRAJ_REFINE; i++) {
           const mid = 0.5 * (lo + hi);
           stepTo(x, y, z, vx, vy, vz, t, mid);
-          if (sY > drop) lo = mid;
-          else hi = mid;
+          if (sY > drop) lo = mid; else hi = mid;
         }
         const hFin = 0.5 * (lo + hi);
         stepTo(x, y, z, vx, vy, vz, t, hFin);
         const vh = hypot2(sVX, sVZ);
         return {
-          carryM: sX,
-          lateralM: sZ,
-          apexM: apex,
-          timeS: t + hFin,
+          carryM: sX, lateralM: sZ, apexM: apex, timeS: t + hFin,
           landSpeedMps: Math.sqrt(sVX * sVX + sVY * sVY + sVZ * sVZ),
           descentDeg: r2d(Math.atan2(-sVY, Math.max(EPS, vh))),
           reached: true,
         };
       }
-      x = sX;
-      y = sY;
-      z = sZ;
-      vx = sVX;
-      vy = sVY;
-      vz = sVZ;
+      x = sX; y = sY; z = sZ; vx = sVX; vy = sVY; vz = sVZ;
       t += dt;
       if (y < drop - 200) break;
     }
     const vh = hypot2(vx, vz);
     return {
-      carryM: x,
-      lateralM: z,
-      apexM: apex,
-      timeS: t,
+      carryM: x, lateralM: z, apexM: apex, timeS: t,
       landSpeedMps: Math.sqrt(vx * vx + vy * vy + vz * vz),
       descentDeg: r2d(Math.atan2(-vy, Math.max(EPS, vh))),
       reached: false,
@@ -7343,23 +5960,23 @@ out geom qt;`;
   // so the per-axis 1σ is R95 / (Rayleigh 95th percentile), NOT R95 itself.
   // Ref: W3C Geolocation API Level 2, GeolocationCoordinates.accuracy.
   const GPS_ACC_TO_SIGMA = 1 / RAYLEIGH_95;
-  const KF_SIGMA_A = 0.45; // pedestrian acceleration spectral density, m/s² — CWNA model, Bar-Shalom et al., Estimation with Applications to Tracking and Navigation (2001) §6.2
-  const KF_SIGMA_A_MIN = 0.1; // lower bound when adaptation says the target is nearly static
-  const KF_SIGMA_A_MAX = 2.5; // upper bound; above this the filter is effectively pass-through
-  const KF_GATE_P = 0.995; // χ²₂ innovation gate probability — standard 2-D track gating, Bar-Shalom §2.3
-  const KF_NIS_WINDOW = 12; // sliding window for normalized-innovation-squared adaptation — Mehra, IEEE TAC 17 (1972) 693
-  const KF_NIS_TARGET = 2; // E[NIS] equals the measurement dimension when the model is consistent
-  const KF_ZUPT_SPEED_MPS = 0.35; // below this the player is standing over the ball — zero-velocity update threshold
-  const KF_ZUPT_R = 0.01; // pseudo-measurement variance for the ZUPT, (m/s)² — tight by design
+  const KF_SIGMA_A = 0.45;          // pedestrian acceleration spectral density, m/s² — CWNA model, Bar-Shalom et al., Estimation with Applications to Tracking and Navigation (2001) §6.2
+  const KF_SIGMA_A_MIN = 0.10;      // lower bound when adaptation says the target is nearly static
+  const KF_SIGMA_A_MAX = 2.50;      // upper bound; above this the filter is effectively pass-through
+  const KF_GATE_P = 0.995;          // χ²₂ innovation gate probability — standard 2-D track gating, Bar-Shalom §2.3
+  const KF_NIS_WINDOW = 12;         // sliding window for normalized-innovation-squared adaptation — Mehra, IEEE TAC 17 (1972) 693
+  const KF_NIS_TARGET = 2;          // E[NIS] equals the measurement dimension when the model is consistent
+  const KF_ZUPT_SPEED_MPS = 0.35;   // below this the player is standing over the ball — zero-velocity update threshold
+  const KF_ZUPT_R = 0.01;           // pseudo-measurement variance for the ZUPT, (m/s)² — tight by design
   const GPS_CORRELATED_FRAC = 0.45; // fraction of the reported error that is bias-like (multipath/iono) and cannot be averaged away — Misra & Enge, Global Positioning System 2nd ed. §5
-  const GPS_MAX_FUSE_N = 6; // cap on effective sample count in the fuser, reflecting the above correlation
-  const KF_MAX_DT_S = 12; // beyond this gap the velocity estimate is worthless — reset velocity
-  const KF_REBASE_M = 3000; // re-origin the ENU frame past this distance to keep the tangent-plane error negligible
+  const GPS_MAX_FUSE_N = 6;         // cap on effective sample count in the fuser, reflecting the above correlation
+  const KF_MAX_DT_S = 12;           // beyond this gap the velocity estimate is worthless — reset velocity
+  const KF_REBASE_M = 3000;         // re-origin the ENU frame past this distance to keep the tangent-plane error negligible
 
   const kalman = (() => {
-    let fr = null; // ENU frame
-    let x = null; // [e, n, ve, vn]
-    let P = null; // 4x4 covariance
+    let fr = null;                          // ENU frame
+    let x = null;                           // [e, n, ve, vn]
+    let P = null;                           // 4x4 covariance
     let lastT = 0;
     let sigmaA = KF_SIGMA_A;
     let nisBuf = [];
@@ -7367,58 +5984,32 @@ out geom qt;`;
     let speedBuf = [];
     const GATE = chi2Inv(KF_GATE_P, 2);
 
-    const mat4 = () => [
-      [0, 0, 0, 0],
-      [0, 0, 0, 0],
-      [0, 0, 0, 0],
-      [0, 0, 0, 0],
-    ];
+    const mat4 = () => [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
     function predict(dt) {
       // x = F x
-      x[0] += x[2] * dt;
-      x[1] += x[3] * dt;
+      x[0] += x[2] * dt; x[1] += x[3] * dt;
       // P = F P Fᵀ + Q, with the exact continuous-white-noise-acceleration Q.
       const q = sigmaA * sigmaA;
-      const q11 = (q * dt * dt * dt) / 3,
-        q12 = (q * dt * dt) / 2,
-        q22 = q * dt;
-      const F = [
-        [1, 0, dt, 0],
-        [0, 1, 0, dt],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1],
-      ];
+      const q11 = (q * dt * dt * dt) / 3, q12 = (q * dt * dt) / 2, q22 = q * dt;
+      const F = [[1, 0, dt, 0], [0, 1, 0, dt], [0, 0, 1, 0], [0, 0, 0, 1]];
       const FP = mat4();
-      for (let i = 0; i < 4; i++)
-        for (let j = 0; j < 4; j++) {
-          let s = 0;
-          for (let k = 0; k < 4; k++) s += F[i][k] * P[k][j];
-          FP[i][j] = s;
-        }
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+        let s = 0; for (let k = 0; k < 4; k++) s += F[i][k] * P[k][j];
+        FP[i][j] = s;
+      }
       const NP = mat4();
-      for (let i = 0; i < 4; i++)
-        for (let j = 0; j < 4; j++) {
-          let s = 0;
-          for (let k = 0; k < 4; k++) s += FP[i][k] * F[j][k];
-          NP[i][j] = s;
-        }
-      NP[0][0] += q11;
-      NP[1][1] += q11;
-      NP[2][2] += q22;
-      NP[3][3] += q22;
-      NP[0][2] += q12;
-      NP[2][0] += q12;
-      NP[1][3] += q12;
-      NP[3][1] += q12;
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+        let s = 0; for (let k = 0; k < 4; k++) s += FP[i][k] * F[j][k];
+        NP[i][j] = s;
+      }
+      NP[0][0] += q11; NP[1][1] += q11; NP[2][2] += q22; NP[3][3] += q22;
+      NP[0][2] += q12; NP[2][0] += q12; NP[1][3] += q12; NP[3][1] += q12;
       P = NP;
     }
     function symmetrize() {
-      for (let i = 0; i < 4; i++)
-        for (let j = i + 1; j < 4; j++) {
-          const m = 0.5 * (P[i][j] + P[j][i]);
-          P[i][j] = m;
-          P[j][i] = m;
-        }
+      for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
+        const m = 0.5 * (P[i][j] + P[j][i]); P[i][j] = m; P[j][i] = m;
+      }
     }
     function zupt() {
       // Pseudo-measurement v = 0 on both velocity components.
@@ -7429,8 +6020,7 @@ out geom qt;`;
         const nu = -x[idx];
         for (let i = 0; i < 4; i++) x[i] += K[i] * nu;
         const row = [P[idx][0], P[idx][1], P[idx][2], P[idx][3]];
-        for (let i = 0; i < 4; i++)
-          for (let j = 0; j < 4; j++) P[i][j] -= K[i] * row[j];
+        for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) P[i][j] -= K[i] * row[j];
         symmetrize();
       }
     }
@@ -7442,74 +6032,35 @@ out geom qt;`;
         if (!fr || !x) {
           fr = enuFrame({ lat: newLat, lng: newLng });
           x = [0, 0, 0, 0];
-          P = [
-            [Rm, 0, 0, 0],
-            [0, Rm, 0, 0],
-            [0, 0, 25, 0],
-            [0, 0, 0, 25],
-          ]; // initial velocity σ = 5 m/s (unknown gait)
-          lastT = tsMs;
-          nisBuf = [];
-          speedBuf = [];
-          rejects = 0;
-          return {
-            lat: newLat,
-            lng: newLng,
-            accuracy95: accuracyM,
-            speedMps: 0,
-            gated: false,
-          };
+          P = [[Rm, 0, 0, 0], [0, Rm, 0, 0], [0, 0, 25, 0], [0, 0, 0, 25]];  // initial velocity σ = 5 m/s (unknown gait)
+          lastT = tsMs; nisBuf = []; speedBuf = []; rejects = 0;
+          return { lat: newLat, lng: newLng, accuracy95: accuracyM, speedMps: 0, gated: false };
         }
         let dt = (tsMs - lastT) / 1000;
         if (!(dt > 0)) dt = 0.05;
-        if (dt > KF_MAX_DT_S) {
-          x[2] = 0;
-          x[3] = 0;
-          P[2][2] = 25;
-          P[3][3] = 25;
-        }
+        if (dt > KF_MAX_DT_S) { x[2] = 0; x[3] = 0; P[2][2] = 25; P[3][3] = 25; }
         lastT = tsMs;
         predict(Math.min(dt, KF_MAX_DT_S));
 
         const z = toENU(fr, { lat: newLat, lng: newLng });
         const nu = [z.e - x[0], z.n - x[1]];
-        const S11 = P[0][0] + Rm,
-          S22 = P[1][1] + Rm,
-          S12 = P[0][1];
+        const S11 = P[0][0] + Rm, S22 = P[1][1] + Rm, S12 = P[0][1];
         const det = S11 * S22 - S12 * S12;
-        let d2 = 0,
-          gated = false;
+        let d2 = 0, gated = false;
         if (det > 0) {
-          d2 =
-            (nu[0] * (S22 * nu[0] - S12 * nu[1]) +
-              nu[1] * (S11 * nu[1] - S12 * nu[0])) /
-            det;
+          d2 = (nu[0] * (S22 * nu[0] - S12 * nu[1]) + nu[1] * (S11 * nu[1] - S12 * nu[0])) / det;
         }
         if (d2 > GATE) {
           rejects++;
           if (rejects < MAX_CONSECUTIVE_REJECTS) {
-            gated = true; // reject the outlier, keep the prediction
+            gated = true;                     // reject the outlier, keep the prediction
           } else {
             // Persistent disagreement means the filter, not the fix, is wrong: re-initialize.
             fr = enuFrame({ lat: newLat, lng: newLng });
             x = [0, 0, 0, 0];
-            P = [
-              [Rm, 0, 0, 0],
-              [0, Rm, 0, 0],
-              [0, 0, 25, 0],
-              [0, 0, 0, 25],
-            ];
-            rejects = 0;
-            nisBuf = [];
-            speedBuf = [];
-            return {
-              lat: newLat,
-              lng: newLng,
-              accuracy95: accuracyM,
-              speedMps: 0,
-              gated: false,
-              reinit: true,
-            };
+            P = [[Rm, 0, 0, 0], [0, Rm, 0, 0], [0, 0, 25, 0], [0, 0, 0, 25]];
+            rejects = 0; nisBuf = []; speedBuf = [];
+            return { lat: newLat, lng: newLng, accuracy95: accuracyM, speedMps: 0, gated: false, reinit: true };
           }
         } else {
           rejects = 0;
@@ -7519,28 +6070,18 @@ out geom qt;`;
           nisBuf.push(d2);
           if (nisBuf.length > KF_NIS_WINDOW) nisBuf.shift();
           // K = P Hᵀ S⁻¹ with H = [I 0]
-          const iS = [
-            [S22 / det, -S12 / det],
-            [-S12 / det, S11 / det],
-          ];
-          const K = [
-            [0, 0],
-            [0, 0],
-            [0, 0],
-            [0, 0],
-          ];
+          const iS = [[S22 / det, -S12 / det], [-S12 / det, S11 / det]];
+          const K = [[0, 0], [0, 0], [0, 0], [0, 0]];
           for (let i = 0; i < 4; i++) {
-            const p0 = P[i][0],
-              p1 = P[i][1];
+            const p0 = P[i][0], p1 = P[i][1];
             K[i][0] = p0 * iS[0][0] + p1 * iS[1][0];
             K[i][1] = p0 * iS[0][1] + p1 * iS[1][1];
           }
           for (let i = 0; i < 4; i++) x[i] += K[i][0] * nu[0] + K[i][1] * nu[1];
           const H0 = [P[0][0], P[0][1], P[0][2], P[0][3]];
           const H1 = [P[1][0], P[1][1], P[1][2], P[1][3]];
-          for (let i = 0; i < 4; i++)
-            for (let j = 0; j < 4; j++)
-              P[i][j] -= K[i][0] * H0[j] + K[i][1] * H1[j];
+          for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++)
+            P[i][j] -= K[i][0] * H0[j] + K[i][1] * H1[j];
           symmetrize();
 
           // Mehra-style adaptation: drive mean NIS toward the measurement dimension.
@@ -7559,14 +6100,11 @@ out geom qt;`;
         // Re-origin the tangent frame if we have wandered a long way.
         if (Math.abs(x[0]) > KF_REBASE_M || Math.abs(x[1]) > KF_REBASE_M) {
           const here = fromENU(fr, x[0], x[1]);
-          fr = enuFrame(here);
-          x[0] = 0;
-          x[1] = 0;
+          fr = enuFrame(here); x[0] = 0; x[1] = 0;
         }
         const ll = fromENU(fr, x[0], x[1]);
         return {
-          lat: ll.lat,
-          lng: ll.lng,
+          lat: ll.lat, lng: ll.lng,
           accuracy95: this.accuracy95(accuracyM),
           speedMps: hypot2(x[2], x[3]),
           gated,
@@ -7581,27 +6119,10 @@ out geom qt;`;
         const floor = GPS_CORRELATED_FRAC * num(rawAccM, 30);
         return Math.max(filt, floor);
       },
-      speedMps() {
-        return x ? hypot2(x[2], x[3]) : 0;
-      },
-      headingDeg() {
-        return x && hypot2(x[2], x[3]) > 0.3
-          ? norm(r2d(Math.atan2(x[2], x[3])))
-          : null;
-      },
-      sigmaA() {
-        return sigmaA;
-      },
-      reset() {
-        fr = null;
-        x = null;
-        P = null;
-        lastT = 0;
-        sigmaA = KF_SIGMA_A;
-        nisBuf = [];
-        speedBuf = [];
-        rejects = 0;
-      },
+      speedMps() { return x ? hypot2(x[2], x[3]) : 0; },
+      headingDeg() { return x && hypot2(x[2], x[3]) > 0.3 ? norm(r2d(Math.atan2(x[2], x[3]))) : null; },
+      sigmaA() { return sigmaA; },
+      reset() { fr = null; x = null; P = null; lastT = 0; sigmaA = KF_SIGMA_A; nisBuf = []; speedBuf = []; rejects = 0; },
     };
   })();
 
@@ -7611,57 +6132,38 @@ out geom qt;`;
    * CORRECT fused accuracy. The old version returned min(accuracy), which claimed the
    * precision of the single best fix for an average of ten — badly overconfident.
    */
-  const HUBER_K = 1.345; // Huber tuning constant giving 95% Gaussian efficiency — Huber, Ann. Math. Stat. 35 (1964) 73
+  const HUBER_K = 1.345;   // Huber tuning constant giving 95% Gaussian efficiency — Huber, Ann. Math. Stat. 35 (1964) 73
   function weightedAverage(fixes) {
-    const list = (fixes || []).filter(
-      (f) => f && Number.isFinite(f.lat) && Number.isFinite(f.lng)
-    );
+    const list = (fixes || []).filter((f) => f && Number.isFinite(f.lat) && Number.isFinite(f.lng));
     if (!list.length) return { lat: 0, lng: 0, accuracy: 9999 };
     const last = list[list.length - 1];
-    if (list.length === 1)
-      return { lat: last.lat, lng: last.lng, accuracy: num(last.accuracy, 30) };
+    if (list.length === 1) return { lat: last.lat, lng: last.lng, accuracy: num(last.accuracy, 30) };
 
     const fr = enuFrame(last);
-    const pts = list.map((f) => ({
-      ...toENU(fr, f),
-      sig: Math.max(0.8, num(f.accuracy, 30) * GPS_ACC_TO_SIGMA),
-    }));
+    const pts = list.map((f) => ({ ...toENU(fr, f), sig: Math.max(0.8, num(f.accuracy, 30) * GPS_ACC_TO_SIGMA) }));
     // Robust centre: start at the coordinate-wise median, then 3 Huber IRLS passes.
-    let ce = median(pts.map((p) => p.e)),
-      cn = median(pts.map((p) => p.n));
-    const scale = Math.max(
-      1,
-      madSigma(pts.map((p) => hypot2(p.e - ce, p.n - cn))) || 1
-    );
+    let ce = median(pts.map((p) => p.e)), cn = median(pts.map((p) => p.n));
+    const scale = Math.max(1, madSigma(pts.map((p) => hypot2(p.e - ce, p.n - cn))) || 1);
     let sw = 0;
     for (let it = 0; it < 3; it++) {
-      let se = 0,
-        sn = 0;
-      sw = 0;
+      let se = 0, sn = 0; sw = 0;
       for (const p of pts) {
         const r = hypot2(p.e - ce, p.n - cn) / scale;
         const hub = r <= HUBER_K ? 1 : HUBER_K / Math.max(EPS, r);
         const w = hub / (p.sig * p.sig);
-        se += p.e * w;
-        sn += p.n * w;
-        sw += w;
+        se += p.e * w; sn += p.n * w; sw += w;
       }
       if (sw <= 0) break;
-      ce = se / sw;
-      cn = sn / sw;
+      ce = se / sw; cn = sn / sw;
     }
     // Fused σ, then inflate for temporally correlated GPS error: averaging n correlated
     // fixes buys at most GPS_MAX_FUSE_N-fold variance reduction, and never beats the
     // bias-like floor of the best single fix.
-    const sigIdeal =
-      sw > 0 ? Math.sqrt(1 / sw) : num(last.accuracy, 30) * GPS_ACC_TO_SIGMA;
+    const sigIdeal = sw > 0 ? Math.sqrt(1 / sw) : num(last.accuracy, 30) * GPS_ACC_TO_SIGMA;
     const nEff = Math.min(list.length, GPS_MAX_FUSE_N);
     const sigCorr = sigIdeal * Math.sqrt(Math.max(1, list.length / nEff));
     const bestRaw = Math.min(...list.map((f) => num(f.accuracy, 30)));
-    const acc95 = Math.max(
-      sigCorr * RAYLEIGH_95,
-      GPS_CORRELATED_FRAC * bestRaw
-    );
+    const acc95 = Math.max(sigCorr * RAYLEIGH_95, GPS_CORRELATED_FRAC * bestRaw);
     const ll = fromENU(fr, ce, cn);
     return { lat: ll.lat, lng: ll.lng, accuracy: acc95 };
   }
@@ -7671,18 +6173,16 @@ out geom qt;`;
    * Statistical test instead of a fixed slack constant: reject only when the implied
    * displacement is inconsistent with a walking player at the stated uncertainties.
    */
-  const WALK_SPEED_SIGMA_MPS = 0.9; // between-fix speed spread for a walking/riding golfer, m/s — pedestrian gait variability
-  const SPEED_REJECT_Z = 4.0; // 4σ one-sided ⇒ ~3e-5 false-reject rate per fix
+  const WALK_SPEED_SIGMA_MPS = 0.9;   // between-fix speed spread for a walking/riding golfer, m/s — pedestrian gait variability
+  const SPEED_REJECT_Z = 4.0;         // 4σ one-sided ⇒ ~3e-5 false-reject rate per fix
   function impliedSpeedReject(prev, next) {
     if (!prev || !next) return false;
     const dt = Math.max(0.25, (next.ts - prev.ts) / 1000);
     const dist = haversineMeters(prev, next);
     const sp = num(prev.accuracy, 30) * GPS_ACC_TO_SIGMA;
     const sn = num(next.accuracy, 30) * GPS_ACC_TO_SIGMA;
-    const sigDist = Math.sqrt(sp * sp + sn * sn); // σ of the measured separation
-    const sigTot = Math.sqrt(
-      sigDist * sigDist + (WALK_SPEED_SIGMA_MPS * dt) ** 2
-    );
+    const sigDist = Math.sqrt(sp * sp + sn * sn);                       // σ of the measured separation
+    const sigTot = Math.sqrt(sigDist * sigDist + (WALK_SPEED_SIGMA_MPS * dt) ** 2);
     const expected = MAX_GPS_SPEED_MPS * dt;
     return dist - SPEED_REJECT_Z * sigTot > expected;
   }
@@ -7691,29 +6191,18 @@ out geom qt;`;
   function onPosition(pos) {
     const c = pos.coords;
     const raw = {
-      lat: c.latitude,
-      lng: c.longitude,
-      accuracy: c.accuracy,
+      lat: c.latitude, lng: c.longitude, accuracy: c.accuracy,
       altitude: Number.isFinite(c.altitude) ? c.altitude : null,
-      altitudeAccuracy: Number.isFinite(c.altitudeAccuracy)
-        ? c.altitudeAccuracy
-        : null,
+      altitudeAccuracy: Number.isFinite(c.altitudeAccuracy) ? c.altitudeAccuracy : null,
       ts: pos.timestamp || Date.now(),
     };
     state.lastRawFix = raw;
 
-    if (
-      raw.accuracy > APPROX_ACC_M &&
-      !state.preciseHintShown &&
-      Date.now() - state.gpsStartedAt > 9000
-    ) {
+    if (raw.accuracy > APPROX_ACC_M && !state.preciseHintShown &&
+      Date.now() - state.gpsStartedAt > 9000) {
       state.preciseHintShown = true;
-      setNotice(
-        'Location looks approximate (±' +
-          Math.round(raw.accuracy) +
-          ' m). For real yardages, turn on Precise Location for Safari/this app in iPhone Settings — tap the gear for the path.',
-        'danger'
-      );
+      setNotice('Location looks approximate (±' + Math.round(raw.accuracy) +
+        ' m). For real yardages, turn on Precise Location for Safari/this app in iPhone Settings — tap the gear for the path.', 'danger');
     }
 
     const anchor = state.lastAcceptedFix;
@@ -7732,19 +6221,12 @@ out geom qt;`;
     const sm = kalman.process(wAvg.lat, wAvg.lng, wAvg.accuracy, raw.ts);
     state.smoothed = sm;
     // Report the filter's own 95% radius, never better than the correlated-error floor.
-    const acc = Math.min(
-      num(wAvg.accuracy, raw.accuracy),
-      Number.isFinite(sm.accuracy95)
-        ? sm.accuracy95
-        : num(wAvg.accuracy, raw.accuracy)
-    );
+    const acc = Math.min(num(wAvg.accuracy, raw.accuracy),
+      Number.isFinite(sm.accuracy95) ? sm.accuracy95 : num(wAvg.accuracy, raw.accuracy));
     state.currentAccuracy = acc;
     state.loc = {
-      lat: sm.lat,
-      lng: sm.lng,
-      accuracy: acc,
-      altitude: raw.altitude,
-      ts: raw.ts,
+      lat: sm.lat, lng: sm.lng, accuracy: acc,
+      altitude: raw.altitude, ts: raw.ts,
     };
     state.locStale = false;
     state.gpsDenied = false;
@@ -7752,51 +6234,29 @@ out geom qt;`;
     updateGpsUI();
     updateUserMarker();
     if (state.map && !state.pannedOnce) {
-      state.map.setView([state.loc.lat, state.loc.lng], 17, {
-        animate: !reduceMotion,
-      });
+      state.map.setView([state.loc.lat, state.loc.lng], 17, { animate: !reduceMotion });
       state.pannedOnce = true;
     } else if (state.map && state.followMode === FollowMode.LOCKED) {
       holdLockedView({ lat: state.loc.lat, lng: state.loc.lng }, !reduceMotion);
     }
-    // calculateRange() is an RK4 trajectory solve plus a 4-effort x full-bag
-    // x 81-node quadrature search. Running it on every fix — including while
-    // a modal sheet covers the map — is what makes the whole app feel clunky
-    // during round setup.
-    const roundSetupIsOpen = !!els.roundSetupSheet?.classList.contains('open');
-    const modalOpen =
-      roundSetupIsOpen ||
-      !!els.roundScoreSheet?.classList.contains('open') ||
-      !!els.settingsSheet?.classList.contains('open');
-    const mapIsLive = state.prefs.activeTab === 'range' && !modalOpen;
-
-    if (state.target && mapIsLive) {
-      const nowMs = Date.now();
-      if (nowMs - (state._lastRangeCalc || 0) >= RANGE_RECALC_MIN_MS) {
-        state._lastRangeCalc = nowMs;
-        calculateRange();
-      }
-    }
+    if (state.target) calculateRange();
 
     if (roundStatus() !== 'idle') {
-      if (modalOpen) {
-        // Only the cheap live-distance readout needs to keep ticking.
-        renderRoundFab();
-      } else {
-        renderRoundShotUI();
-      }
+      renderRoundShotUI();
     }
+
+    const roundSetupIsOpen =
+      els.roundSetupSheet?.classList.contains('open');
 
     if (
       roundSetupIsOpen &&
       state.nearbySearchRequested &&
-      !state.nearbyCourseLoading &&
-      !state.nearbyCourseLoadingScorecard
+      !state.nearbyCourseLoading
     ) {
       findNearbyCourses();
     }
 
-    if (mapIsLive) scheduleContextUpdate();
+    scheduleContextUpdate();
   }
 
   // SIGNATURE PRESERVED. Now also surfaces convergence progress and motion state.
@@ -7804,20 +6264,18 @@ out geom qt;`;
     const dot = els.gpsDot;
     dot.className = 'gps-dot';
     if (!state.gpsRunning && !state.loc) {
-      if (state.gpsDenied) {
-        dot.classList.add('bad');
-        els.gpsText.textContent = 'GPS denied';
-      } else els.gpsText.textContent = 'Enable GPS';
+      if (state.gpsDenied) { dot.classList.add('bad'); els.gpsText.textContent = 'GPS denied'; }
+      else els.gpsText.textContent = 'Enable GPS';
       return;
     }
-    if (!state.loc) {
+    if ((forceState === 'searching' && !state.loc) || !state.loc) {
       dot.classList.add('searching');
       els.gpsText.textContent = 'Locating…';
       return;
     }
     const accYd = (state.loc.accuracy || 0) * M_TO_YD;
     const moving = kalman.speedMps() > KF_ZUPT_SPEED_MPS;
-    const suffix = moving ? '' : ' ·'; // a trailing dot marks a settled, averaging fix
+    const suffix = moving ? '' : ' ·';   // a trailing dot marks a settled, averaging fix
     if (state.locStale || !state.gpsRunning) {
       dot.classList.add('warn');
       els.gpsText.textContent = `Last GPS · ±${fmt(accYd)} yd`;
@@ -7837,35 +6295,33 @@ out geom qt;`;
   //          OR { d: totalYd, c: carryYd, l: lateralYd|null, t: ms, a: gpsAccM }.
   // ============================================================
 
-  const SHOT_FULL_TRUST_N = 5; // legacy name kept; the posterior now blends continuously, this only gates UI copy
-  const SHOT_MIN_TRUST_N = 2; // legacy name kept; minimum n before tracked data influences the posterior mean
-  const SHOT_MAX_PER_CLUB = 200; // ring-buffer cap; recency weighting makes a longer history harmless
-  const DISPERSION_SIGMAS = 1.5; // legacy name kept; superseded by DISPERSION_COVERAGE below
+  const SHOT_FULL_TRUST_N = 5;      // legacy name kept; the posterior now blends continuously, this only gates UI copy
+  const SHOT_MIN_TRUST_N = 2;       // legacy name kept; minimum n before tracked data influences the posterior mean
+  const SHOT_MAX_PER_CLUB = 200;    // ring-buffer cap; recency weighting makes a longer history harmless
+  const DISPERSION_SIGMAS = 1.5;    // legacy name kept; superseded by DISPERSION_COVERAGE below
 
   // Prior on relative distance dispersion. Tour distance-control σ is ≈4% of carry for
   // short irons rising to ≈6% for the driver; amateurs run ~1.5–2× that.
   // Ref: Broadie, Every Shot Counts (2014) ch.4 & Interfaces 42 (2012) 146 (shot-pattern analysis);
   //      TrackMan/Arccos aggregate dispersion studies for the amateur multiplier.
-  const DISP_REL_SHORT = 0.045; // prior relative σ at short-iron distances — Broadie (2012/2014) shot patterns
-  const DISP_REL_LONG = 0.062; // prior relative σ at driver distances — Broadie (2012/2014) shot patterns
-  const DISP_REL_KNEE_LO = 110; // carry, yd, at which the short-iron relative σ applies
-  const DISP_REL_KNEE_HI = 270; // carry, yd, at which the driver relative σ applies
-  const DISP_AMATEUR_MULT = 1.55; // prior inflation for a non-tour player — Arccos/Shot Scope amateur dispersion aggregates
-  const DISP_FLOOR_YD = 3; // no club is tighter than this in practice; also guards tiny samples
-  const DISP_PRIOR_STRENGTH = 6; // ν₀: prior worth ~6 observations, so ~6 shots move σ halfway to measured
-  const DISP_HALFLIFE_DAYS = 240; // recency half-life; a season-old shot carries half the weight of today's
+  const DISP_REL_SHORT = 0.045;     // prior relative σ at short-iron distances — Broadie (2012/2014) shot patterns
+  const DISP_REL_LONG = 0.062;      // prior relative σ at driver distances — Broadie (2012/2014) shot patterns
+  const DISP_REL_KNEE_LO = 110;     // carry, yd, at which the short-iron relative σ applies
+  const DISP_REL_KNEE_HI = 270;     // carry, yd, at which the driver relative σ applies
+  const DISP_AMATEUR_MULT = 1.55;   // prior inflation for a non-tour player — Arccos/Shot Scope amateur dispersion aggregates
+  const DISP_FLOOR_YD = 3;          // no club is tighter than this in practice; also guards tiny samples
+  const DISP_PRIOR_STRENGTH = 6;    // ν₀: prior worth ~6 observations, so ~6 shots move σ halfway to measured
+  const DISP_HALFLIFE_DAYS = 240;   // recency half-life; a season-old shot carries half the weight of today's
   const DISPERSION_COVERAGE = 0.87; // two-sided predictive coverage of the reported ± band (≈±1.5σ for large n)
-  const LATERAL_REL_PRIOR = 0.065; // prior relative σ of lateral dispersion (offline as a fraction of carry) — Broadie (2014) ch.4
-  const SHOT_SANITY_LO = 0.4; // hard reject below 40% of stock: topped/chunked, not a distance sample
-  const SHOT_SANITY_HI = 1.6; // hard reject above 160% of stock: mis-tagged club or GPS blowup
+  const LATERAL_REL_PRIOR = 0.065;  // prior relative σ of lateral dispersion (offline as a fraction of carry) — Broadie (2014) ch.4
+  const SHOT_SANITY_LO = 0.40;      // hard reject below 40% of stock: topped/chunked, not a distance sample
+  const SHOT_SANITY_HI = 1.60;      // hard reject above 160% of stock: mis-tagged club or GPS blowup
 
   function loadShotLog() {
     const v = load(SHOTLOG_KEY, {});
     return v && typeof v === 'object' ? v : {};
   }
-  function saveShotLog(log) {
-    save(SHOTLOG_KEY, log);
-  }
+  function saveShotLog(log) { save(SHOTLOG_KEY, log); }
 
   // Normalize either schema to { d, c, l, t, a }.
   function normalizeShotEntry(e) {
@@ -7888,21 +6344,13 @@ out geom qt;`;
   function estimateCarryFromTotal(totalYd, firmness = 'medium') {
     const D = Math.max(0, num(totalYd, 0));
     if (D < 15) return D;
-    let carry = D * 0.94; // seed
+    let carry = D * 0.94;                                  // seed
     for (let i = 0; i < 6; i++) {
       const L = launchForStandardCarry(carry);
       const t = integrateTrajectory(L, STILL_AIR_ENV);
-      const roll = rolloutYd(
-        t.landSpeedMps,
-        t.descentDeg,
-        firmness,
-        STILL_AIR_ENV.gravity
-      );
+      const roll = rolloutYd(t.landSpeedMps, t.descentDeg, firmness, STILL_AIR_ENV.gravity);
       const next = clamp(D - roll, 0.55 * D, D);
-      if (Math.abs(next - carry) < 0.05) {
-        carry = next;
-        break;
-      }
+      if (Math.abs(next - carry) < 0.05) { carry = next; break; }
       carry = next;
     }
     return carry;
@@ -7914,14 +6362,9 @@ out geom qt;`;
    */
   function logShot(clubId, distanceYd, baselineYd, lateralYd, gpsAccM) {
     const dist = Number(distanceYd);
-    if (!clubId || !Number.isFinite(dist) || dist <= 0 || dist > 400)
-      return false;
+    if (!clubId || !Number.isFinite(dist) || dist <= 0 || dist > 400) return false;
     const base = num(baselineYd, 0);
-    if (
-      base > 0 &&
-      (dist < base * SHOT_SANITY_LO || dist > base * SHOT_SANITY_HI)
-    )
-      return false;
+    if (base > 0 && (dist < base * SHOT_SANITY_LO || dist > base * SHOT_SANITY_HI)) return false;
     const log = loadShotLog();
     const arr = log[clubId] || (log[clubId] = []);
     arr.push({
@@ -7931,8 +6374,7 @@ out geom qt;`;
       t: Date.now(),
       a: Number.isFinite(gpsAccM) ? Math.round(gpsAccM * 10) / 10 : null,
     });
-    if (arr.length > SHOT_MAX_PER_CLUB)
-      log[clubId] = arr.slice(-SHOT_MAX_PER_CLUB);
+    if (arr.length > SHOT_MAX_PER_CLUB) log[clubId] = arr.slice(-SHOT_MAX_PER_CLUB);
     saveShotLog(log);
     return true;
   }
@@ -7940,29 +6382,18 @@ out geom qt;`;
   // SIGNATURE PRESERVED.
   function shotDataSummary() {
     const log = loadShotLog();
-    let total = 0,
-      clubs = 0;
+    let total = 0, clubs = 0;
     for (const k of Object.keys(log)) {
       const n = (log[k] || []).map(normalizeShotEntry).filter(Boolean).length;
-      if (n > 0) {
-        total += n;
-        clubs += 1;
-      }
+      if (n > 0) { total += n; clubs += 1; }
     }
     return { total, clubs };
   }
-  function clearShotData() {
-    try {
-      localStorage.removeItem(SHOTLOG_KEY);
-    } catch {}
-  }
+  function clearShotData() { try { localStorage.removeItem(SHOTLOG_KEY); } catch { } }
 
   function priorRelSigma(carryYd) {
     const t = smoothstep(DISP_REL_KNEE_LO, DISP_REL_KNEE_HI, num(carryYd, 150));
-    return (
-      (DISP_REL_SHORT + t * (DISP_REL_LONG - DISP_REL_SHORT)) *
-      DISP_AMATEUR_MULT
-    );
+    return (DISP_REL_SHORT + t * (DISP_REL_LONG - DISP_REL_SHORT)) * DISP_AMATEUR_MULT;
   }
 
   // SIGNATURE PRESERVED. formulaDispersionYd(carry) -> prior ±band in yards.
@@ -7986,18 +6417,8 @@ out geom qt;`;
     const club = state.clubs.find((c) => c.id === clubId);
     const stock = club ? num(club.yards, 0) : 0;
     const empty = {
-      mean: null,
-      stdev: null,
-      n: 0,
-      nEff: 0,
-      sigmaPrior: null,
-      sigmaPost: null,
-      meanTotal: null,
-      lateralSigma: null,
-      ciLo: null,
-      ciHi: null,
-      trend: null,
-      source: 'none',
+      mean: null, stdev: null, n: 0, nEff: 0, sigmaPrior: null, sigmaPost: null,
+      meanTotal: null, lateralSigma: null, ciLo: null, ciHi: null, trend: null, source: 'none'
     };
     if (!raw.length) {
       if (stock > 0) {
@@ -8010,20 +6431,16 @@ out geom qt;`;
     const now = Date.now();
     const HL = DISP_HALFLIFE_DAYS * 86400000;
     // Carry values (fall back to a modelled carry for legacy total-only entries).
-    const vals = raw.map((e) =>
-      Number.isFinite(e.c) ? e.c : estimateCarryFromTotal(e.d)
-    );
+    const vals = raw.map((e) => (Number.isFinite(e.c) ? e.c : estimateCarryFromTotal(e.d)));
     // Robust pre-screen at 3× MAD around the median; keeps a single shank from wrecking σ.
     const med = median(vals);
-    const mad =
-      madSigma(vals) || Math.max(DISP_FLOOR_YD, 0.05 * (stock || med));
+    const mad = madSigma(vals) || Math.max(DISP_FLOOR_YD, 0.05 * (stock || med));
     const keep = vals.map((v) => Math.abs(v - med) <= 3 * mad);
     const wts = raw.map((e, i) => {
       if (!keep[i]) return 0;
-      const age = Number.isFinite(e.t) ? Math.max(0, now - e.t) : HL; // undated legacy shots get one half-life of age
+      const age = Number.isFinite(e.t) ? Math.max(0, now - e.t) : HL;   // undated legacy shots get one half-life of age
       let w = Math.pow(0.5, age / HL);
-      if (Number.isFinite(e.a) && e.a > 0)
-        w *= 1 / (1 + (e.a / ROUND_GPS_OK_M) ** 2); // down-weight sloppy fixes
+      if (Number.isFinite(e.a) && e.a > 0) w *= 1 / (1 + (e.a / ROUND_GPS_OK_M) ** 2); // down-weight sloppy fixes
       return w;
     });
     const mom = weightedMoments(vals, wts);
@@ -8034,19 +6451,13 @@ out geom qt;`;
     const mu0 = stock > 0 ? stock : mom.mean;
     const sigPrior = priorRelSigma(mu0) * mu0;
     const nu0 = DISP_PRIOR_STRENGTH;
-    const kappa0 = 2; // weak prior on the mean: worth 2 observations
-    const sampleVar = Number.isFinite(mom.variance)
-      ? mom.variance
-      : sigPrior * sigPrior;
+    const kappa0 = 2;                                     // weak prior on the mean: worth 2 observations
+    const sampleVar = Number.isFinite(mom.variance) ? mom.variance : sigPrior * sigPrior;
     // Posterior scale for σ (mode of the inverse-gamma marginal).
     const nuN = nu0 + nEff;
-    const ss =
-      nu0 * sigPrior * sigPrior +
-      Math.max(0, nEff - 1) * sampleVar +
-      ((kappa0 * nEff) / (kappa0 + nEff)) * (mom.mean - mu0) ** 2;
-    const sigmaPost = Math.sqrt(
-      Math.max((DISP_FLOOR_YD * DISP_FLOOR_YD) / 4, ss / Math.max(1, nuN))
-    );
+    const ss = nu0 * sigPrior * sigPrior + Math.max(0, nEff - 1) * sampleVar +
+      (kappa0 * nEff / (kappa0 + nEff)) * (mom.mean - mu0) ** 2;
+    const sigmaPost = Math.sqrt(Math.max(DISP_FLOOR_YD * DISP_FLOOR_YD / 4, ss / Math.max(1, nuN)));
     const meanPost = (kappa0 * mu0 + nEff * mom.mean) / (kappa0 + nEff);
 
     // Posterior predictive interval for the MEAN (what to set club.yards to).
@@ -8054,58 +6465,29 @@ out geom qt;`;
     const tq = tQuantile(0.975, Math.max(1, nuN));
     // Lateral dispersion.
     const lats = raw.map((e) => e.l).filter((x) => Number.isFinite(x));
-    const latSig =
-      lats.length >= 3
-        ? Math.max(
-            madSigma(lats) || 0,
-            Math.sqrt(
-              weightedMoments(
-                lats,
-                lats.map(() => 1)
-              ).variance || 0
-            )
-          )
-        : LATERAL_REL_PRIOR * (mu0 || 150);
+    const latSig = lats.length >= 3
+      ? Math.max(madSigma(lats) || 0, Math.sqrt(weightedMoments(lats, lats.map(() => 1)).variance || 0))
+      : LATERAL_REL_PRIOR * (mu0 || 150);
     // Distance trend over time (yd per 30 days) — is the player gaining or losing speed?
     // Cap the Theil-Sen input: it is O(n²) and 60 recent shots already resolve a trend.
-    const dated = raw
-      .map((e, i) => ({ e, v: vals[i] }))
-      .filter((o) => Number.isFinite(o.e.t))
-      .slice(-TREND_MAX_SHOTS);
-    const trend =
-      dated.length >= 5
-        ? (
-            theilSen(
-              dated.map((o) => o.e.t / 86400000),
-              dated.map((o) => o.v)
-            ) || {}
-          ).slope
-        : null;
+    const dated = raw.map((e, i) => ({ e, v: vals[i] }))
+      .filter((o) => Number.isFinite(o.e.t)).slice(-TREND_MAX_SHOTS);
+    const trend = dated.length >= 5
+      ? (theilSen(dated.map((o) => o.e.t / 86400000), dated.map((o) => o.v)) || {}).slope
+      : null;
 
     // Legacy-compatible fields: only expose mean/stdev once there is real data.
     const legacyMean = n >= 1 ? mom.mean : null;
-    const legacyStd =
-      n >= 2 && Number.isFinite(sampleVar)
-        ? Math.sqrt(sampleVar) / c4(Math.max(2, Math.round(nEff))) // bias-corrected sample SD
-        : null;
+    const legacyStd = n >= 2 && Number.isFinite(sampleVar)
+      ? Math.sqrt(sampleVar) / c4(Math.max(2, Math.round(nEff)))   // bias-corrected sample SD
+      : null;
 
     return {
-      mean: legacyMean,
-      stdev: legacyStd,
-      n,
-      nEff,
-      meanPost,
-      sigmaPost,
-      sigmaPrior: sigPrior,
-      meanTotal: raw.length
-        ? weightedMoments(
-            raw.map((e) => e.d),
-            wts
-          ).mean
-        : null,
+      mean: legacyMean, stdev: legacyStd, n,
+      nEff, meanPost, sigmaPost, sigmaPrior: sigPrior,
+      meanTotal: raw.length ? weightedMoments(raw.map((e) => e.d), wts).mean : null,
       lateralSigma: latSig,
-      ciLo: meanPost - tq * seMean,
-      ciHi: meanPost + tq * seMean,
+      ciLo: meanPost - tq * seMean, ciHi: meanPost + tq * seMean,
       trendYdPer30d: Number.isFinite(trend) ? trend * 30 : null,
       source: n >= SHOT_MIN_TRUST_N ? 'posterior' : 'prior-dominated',
     };
@@ -8121,9 +6503,7 @@ out geom qt;`;
     const carry = num(club.yards, 0);
     if (carry <= 0) return 0;
     const st = clubStats(club.id);
-    const sig = Number.isFinite(st.sigmaPost)
-      ? st.sigmaPost
-      : priorRelSigma(carry) * carry;
+    const sig = Number.isFinite(st.sigmaPost) ? st.sigmaPost : priorRelSigma(carry) * carry;
     const nu = DISP_PRIOR_STRENGTH + (st.nEff || 0);
     // Predictive spread includes uncertainty in the mean itself.
     const predSig = sig * Math.sqrt(1 + 1 / (2 + (st.nEff || 0)));
@@ -8134,16 +6514,12 @@ out geom qt;`;
   function clubSigmaDistYd(club) {
     if (!club) return 0;
     const st = clubStats(club.id);
-    return Number.isFinite(st.sigmaPost)
-      ? st.sigmaPost
-      : priorRelSigma(num(club.yards, 150)) * num(club.yards, 150);
+    return Number.isFinite(st.sigmaPost) ? st.sigmaPost : priorRelSigma(num(club.yards, 150)) * num(club.yards, 150);
   }
   function clubSigmaLatYd(club) {
     if (!club) return 0;
     const st = clubStats(club.id);
-    return Number.isFinite(st.lateralSigma)
-      ? st.lateralSigma
-      : LATERAL_REL_PRIOR * num(club.yards, 150);
+    return Number.isFinite(st.lateralSigma) ? st.lateralSigma : LATERAL_REL_PRIOR * num(club.yards, 150);
   }
 
   // ============================================================
@@ -8154,9 +6530,9 @@ out geom qt;`;
   //  every call re-parses localStorage and re-runs an O(n²) regression.
   // ============================================================
 
-  const TREND_MAX_SHOTS = 60; // cap on Theil-Sen input; O(n²) cost vs negligible extra trend resolution
-  const CARRY_MEMO_BINS = 2; // memo bins per yard for the total→carry inversion (0.5 yd resolution)
-  const CARRY_MEMO_MAX = 512; // bounded memo; shot distances span at most ~400 yd
+  const TREND_MAX_SHOTS = 60;       // cap on Theil-Sen input; O(n²) cost vs negligible extra trend resolution
+  const CARRY_MEMO_BINS = 2;        // memo bins per yard for the total→carry inversion (0.5 yd resolution)
+  const CARRY_MEMO_MAX = 512;       // bounded memo; shot distances span at most ~400 yd
 
   let _shotLogCache = null;
   let _shotLogVersion = 0;
@@ -8176,9 +6552,7 @@ out geom qt;`;
     _clubStatsCache.clear();
   }
   function clearShotData() {
-    try {
-      localStorage.removeItem(SHOTLOG_KEY);
-    } catch {}
+    try { localStorage.removeItem(SHOTLOG_KEY); } catch { }
     _shotLogCache = null;
     _shotLogVersion++;
     _clubStatsCache.clear();
@@ -8195,17 +6569,9 @@ out geom qt;`;
     for (let i = 0; i < 6; i++) {
       const L = launchForStandardCarry(carry);
       const t = integrateTrajectory(L, STILL_AIR_ENV);
-      const roll = rolloutYd(
-        t.landSpeedMps,
-        t.descentDeg,
-        firmness,
-        STILL_AIR_ENV.gravity
-      );
+      const roll = rolloutYd(t.landSpeedMps, t.descentDeg, firmness, STILL_AIR_ENV.gravity);
       const next = clamp(D - roll, 0.55 * D, D);
-      if (Math.abs(next - carry) < 0.05) {
-        carry = next;
-        break;
-      }
+      if (Math.abs(next - carry) < 0.05) { carry = next; break; }
       carry = next;
     }
     if (_carryMemo.size > CARRY_MEMO_MAX) _carryMemo.clear();
@@ -8216,11 +6582,9 @@ out geom qt;`;
   // SIGNATURE PRESERVED. Cache key folds in the club's stock yardage because the
   // NIG prior is centred on it — editing a club invalidates its entry automatically.
   function clubStats(clubId, opts) {
-    if (opts && Object.keys(opts).length)
-      return clubStatsUncached(clubId, opts);
+    if (opts && Object.keys(opts).length) return clubStatsUncached(clubId, opts);
     const club = state.clubs.find((c) => c.id === clubId);
-    const key =
-      clubId + '|' + _shotLogVersion + '|' + (club ? num(club.yards, 0) : 0);
+    const key = clubId + '|' + _shotLogVersion + '|' + (club ? num(club.yards, 0) : 0);
     const hit = _clubStatsCache.get(key);
     if (hit) return hit;
     const out = clubStatsUncached(clubId, opts);
@@ -8235,36 +6599,15 @@ out geom qt;`;
   // PGA Tour expected-strokes baselines. Distances in yards except putting (feet).
   // Source: M. Broadie, Every Shot Counts (2014), Tour baseline tables; and
   // M. Broadie, "Assessing Golfer Performance on the PGA TOUR", Interfaces 42 (2012) 146.
-  const ES_X_FAIRWAY = [
-    10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 220, 240,
-    260, 280, 300,
-  ];
-  const ES_Y_FAIRWAY = [
-    2.18, 2.4, 2.52, 2.6, 2.66, 2.7, 2.72, 2.75, 2.77, 2.8, 2.85, 2.91, 2.98,
-    3.08, 3.19, 3.32, 3.45, 3.58, 3.7, 3.82,
-  ]; // fairway baseline — Broadie (2014)
-  const ES_Y_ROUGH = [
-    2.34, 2.59, 2.7, 2.78, 2.84, 2.88, 2.91, 2.93, 2.96, 2.98, 3.04, 3.1, 3.17,
-    3.26, 3.36, 3.47, 3.58, 3.68, 3.78, 3.88,
-  ]; // rough baseline — Broadie (2014)
-  const ES_Y_SAND = [
-    2.43, 2.53, 2.66, 2.82, 2.92, 2.99, 3.03, 3.05, 3.07, 3.1, 3.14, 3.19, 3.25,
-    3.32, 3.42, 3.53, 3.64, 3.74, 3.84, 3.94,
-  ]; // sand baseline — Broadie (2014)
-  const ES_Y_RECOV = [
-    2.95, 3.05, 3.1, 3.15, 3.2, 3.25, 3.3, 3.35, 3.4, 3.45, 3.51, 3.57, 3.63,
-    3.69, 3.76, 3.83, 3.9, 3.97, 4.04, 4.11,
-  ]; // recovery baseline — Broadie (2014)
-  const ES_X_GREEN_FT = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70,
-    80, 90, 100,
-  ];
-  const ES_Y_GREEN = [
-    1.001, 1.009, 1.053, 1.147, 1.256, 1.357, 1.443, 1.515, 1.575, 1.626, 1.702,
-    1.784, 1.874, 1.936, 1.985, 2.026, 2.064, 2.098, 2.127, 2.182, 2.231, 2.267,
-    2.298, 2.324,
-  ]; // putting baseline — Broadie (2014)
-  const ES_PENALTY_STROKES = 1.0; // one-stroke penalty for a water/OB drop — Rules of Golf 17.1d / 18.2
+  const ES_X_FAIRWAY = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 220, 240, 260, 280, 300];
+  const ES_Y_FAIRWAY = [2.18, 2.40, 2.52, 2.60, 2.66, 2.70, 2.72, 2.75, 2.77, 2.80, 2.85, 2.91, 2.98, 3.08, 3.19, 3.32, 3.45, 3.58, 3.70, 3.82]; // fairway baseline — Broadie (2014)
+  const ES_Y_ROUGH = [2.34, 2.59, 2.70, 2.78, 2.84, 2.88, 2.91, 2.93, 2.96, 2.98, 3.04, 3.10, 3.17, 3.26, 3.36, 3.47, 3.58, 3.68, 3.78, 3.88]; // rough baseline — Broadie (2014)
+  const ES_Y_SAND = [2.43, 2.53, 2.66, 2.82, 2.92, 2.99, 3.03, 3.05, 3.07, 3.10, 3.14, 3.19, 3.25, 3.32, 3.42, 3.53, 3.64, 3.74, 3.84, 3.94]; // sand baseline — Broadie (2014)
+  const ES_Y_RECOV = [2.95, 3.05, 3.10, 3.15, 3.20, 3.25, 3.30, 3.35, 3.40, 3.45, 3.51, 3.57, 3.63, 3.69, 3.76, 3.83, 3.90, 3.97, 4.04, 4.11]; // recovery baseline — Broadie (2014)
+  const ES_X_GREEN_FT = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100];
+  const ES_Y_GREEN = [1.001, 1.009, 1.053, 1.147, 1.256, 1.357, 1.443, 1.515, 1.575, 1.626, 1.702, 1.784,
+    1.874, 1.936, 1.985, 2.026, 2.064, 2.098, 2.127, 2.182, 2.231, 2.267, 2.298, 2.324];   // putting baseline — Broadie (2014)
+  const ES_PENALTY_STROKES = 1.0;   // one-stroke penalty for a water/OB drop — Rules of Golf 17.1d / 18.2
   // Amateur scaling. Broadie's baselines are Tour; a mid handicap is worse everywhere, but
   // decisions depend on DIFFERENCES, which scale roughly with the player's relative dispersion.
   const ES_AMATEUR_PENALTY_MULT = 1.25; // inflation of off-green penalties for a non-tour short game — Broadie (2014) ch.6 amateur comparisons
@@ -8281,29 +6624,23 @@ out geom qt;`;
     if (d < 1) return 1.0;
     const f = (fn, floor) => clamp(fn(clamp(d, 5, 320)), floor, 5.2);
     switch (lie) {
-      case 'rough':
-        return f(_esRough, 2.1);
-      case 'sand':
-        return f(_esSand, 2.2);
-      case 'recovery':
-        return f(_esRecov, 2.6);
-      case 'penalty':
-        return f(_esFair, 2.0) + ES_PENALTY_STROKES * ES_AMATEUR_PENALTY_MULT;
-      default:
-        return f(_esFair, 2.0);
+      case 'rough': return f(_esRough, 2.1);
+      case 'sand': return f(_esSand, 2.2);
+      case 'recovery': return f(_esRecov, 2.6);
+      case 'penalty': return f(_esFair, 2.0) + ES_PENALTY_STROKES * ES_AMATEUR_PENALTY_MULT;
+      default: return f(_esFair, 2.0);
     }
   }
   // Distance in yards from a landing point back to the hole, given the pin is at pinAlong
   // along the shot line, and the shot finished at (along, lateral) relative to the ball.
-  const distToPin = (along, lateral, pinAlong) =>
-    hypot2(pinAlong - along, lateral);
+  const distToPin = (along, lateral, pinAlong) => hypot2(pinAlong - along, lateral);
 
   /**
    * Classify a finish point into a lie, using whatever green geometry we actually have.
    * geo: { front, center, back, depth, widthYd, axisBearing } — see Block 9.
    * All distances measured along/across the shot line, in yards from the player.
    */
-  const GREEN_FRINGE_YD = 3; // apron/fringe collar depth around a green, yd — typical USGA maintenance practice
+  const GREEN_FRINGE_YD = 3;        // apron/fringe collar depth around a green, yd — typical USGA maintenance practice
   const GREEN_WIDTH_TO_DEPTH = 1.15; // median green is slightly wider than deep — USGA Green Section green-sizing guidance (median ≈6,000 ft²)
   const GREEN_MIN_HALF_WIDTH_YD = 8; // floor on the modelled half-width when depth is unknown
   function classifyLie(along, lateral, geo, opts = {}) {
@@ -8311,26 +6648,17 @@ out geom qt;`;
     if (!geo || geo.front == null || geo.back == null) {
       // No green model: treat "close to the aim point" as green, else the surround.
       const tgt = num(opts.targetAlong, NaN);
-      if (Number.isFinite(tgt) && hypot2(along - tgt, lateral) < 12)
-        return 'green';
+      if (Number.isFinite(tgt) && hypot2(along - tgt, lateral) < 12) return 'green';
       return surround;
     }
-    const halfW = Math.max(
-      GREEN_MIN_HALF_WIDTH_YD,
-      0.5 *
-        (Number.isFinite(geo.widthYd)
-          ? geo.widthYd
-          : GREEN_WIDTH_TO_DEPTH * geo.depth)
-    );
+    const halfW = Math.max(GREEN_MIN_HALF_WIDTH_YD,
+      0.5 * (Number.isFinite(geo.widthYd) ? geo.widthYd : GREEN_WIDTH_TO_DEPTH * geo.depth));
     const inDepth = along >= geo.front && along <= geo.back;
     const inWidth = Math.abs(lateral - num(geo.centerLateral, 0)) <= halfW;
     if (inDepth && inWidth) return 'green';
-    const nearDepth =
-      along >= geo.front - GREEN_FRINGE_YD &&
-      along <= geo.back + GREEN_FRINGE_YD;
-    const nearWidth =
-      Math.abs(lateral - num(geo.centerLateral, 0)) <= halfW + GREEN_FRINGE_YD;
-    if (nearDepth && nearWidth) return 'green'; // fringe putts as green in the baselines
+    const nearDepth = along >= geo.front - GREEN_FRINGE_YD && along <= geo.back + GREEN_FRINGE_YD;
+    const nearWidth = Math.abs(lateral - num(geo.centerLateral, 0)) <= halfW + GREEN_FRINGE_YD;
+    if (nearDepth && nearWidth) return 'green';    // fringe putts as green in the baselines
     return surround;
   }
 
@@ -8340,36 +6668,25 @@ out geom qt;`;
    * distribution on a 9x9 Gauss-Legendre product rule over the normal factors.
    */
   function clubExpectedStrokes(club, playsTarget, pinPlays, geo, opts = {}) {
-    if (!club)
-      return { es: Infinity, pGreen: 0, pShort: 0, pLong: 0, pTrouble: 0 };
+    if (!club) return { es: Infinity, pGreen: 0, pShort: 0, pLong: 0, pTrouble: 0 };
     const mu = num(club.yards, 0);
-    if (mu <= 0)
-      return { es: Infinity, pGreen: 0, pShort: 0, pLong: 0, pTrouble: 0 };
-    const effort = num(opts.effort, 1); // 1 = stock; <1 = smooth; >1 = firm
+    if (mu <= 0) return { es: Infinity, pGreen: 0, pShort: 0, pLong: 0, pTrouble: 0 };
+    const effort = num(opts.effort, 1);                 // 1 = stock; <1 = smooth; >1 = firm
     const muEff = mu * effort;
     // Taking speed off tightens distance a little but costs strike quality; firming up
     // widens both. Empirically σ scales sub-linearly with effort.
-    const sigD =
-      clubSigmaDistYd(club) * (0.82 + 0.18 * effort) * Math.max(0.85, effort);
-    const sigL =
-      clubSigmaLatYd(club) * Math.max(0.85, effort) * (mu > 0 ? muEff / mu : 1);
+    const sigD = clubSigmaDistYd(club) * (0.82 + 0.18 * effort) * Math.max(0.85, effort);
+    const sigL = clubSigmaLatYd(club) * Math.max(0.85, effort) * (mu > 0 ? muEff / mu : 1);
     // Convert plays-like requirement back into the along-line frame: the club's plays-like
     // capability is muEff, and the pin sits pinPlays away in the same units.
     const nodes = NORM_NODES;
-    let es = 0,
-      pGreen = 0,
-      pShort = 0,
-      pLong = 0,
-      pTrouble = 0;
+    let es = 0, pGreen = 0, pShort = 0, pLong = 0, pTrouble = 0;
     for (let i = 0; i < nodes.zs.length; i++) {
       const along = muEff + nodes.zs[i] * sigD;
       for (let j = 0; j < nodes.zs.length; j++) {
         const lateral = nodes.zs[j] * sigL + num(opts.aimLateral, 0);
         const w = nodes.ws[i] * nodes.ws[j];
-        const lie = classifyLie(along, lateral, geo, {
-          surround: opts.surround,
-          targetAlong: playsTarget,
-        });
+        const lie = classifyLie(along, lateral, geo, { surround: opts.surround, targetAlong: playsTarget });
         const dPin = distToPin(along, lateral, pinPlays);
         es += w * expectedStrokes(lie, dPin);
         if (lie === 'green') pGreen += w;
@@ -8389,33 +6706,20 @@ out geom qt;`;
    * green centred on the target, with the player's own dispersion, and reports the
    * effort level that minimizes it rather than a fixed "take the longer club" heuristic.
    */
-  const GENERIC_GREEN_DEPTH_YD = 30; // median depth of a modern green, yd — USGA Green Section green-sizing guidance
-  const EFFORT_LEVELS = [0.88, 0.94, 1.0, 1.06]; // smooth / easy / stock / firm — the four swings most players actually own
+  const GENERIC_GREEN_DEPTH_YD = 30;  // median depth of a modern green, yd — USGA Green Section green-sizing guidance
+  const EFFORT_LEVELS = [0.88, 0.94, 1.0, 1.06];  // smooth / easy / stock / firm — the four swings most players actually own
   const EFFORT_NAMES = ['smooth', 'easy', 'stock', 'firm'];
-  const ES_TIE_THRESHOLD = 0.008; // strokes; below this two options are indistinguishable given model error
+  const ES_TIE_THRESHOLD = 0.008;     // strokes; below this two options are indistinguishable given model error
 
   function recommendClub(playsYd) {
     playsYd = Math.max(0, num(playsYd, 0));
-    const asc = sortedClubsAsc(),
-      desc = sortedClubsDesc();
+    const asc = sortedClubsAsc(), desc = sortedClubsDesc();
     if (!asc.length)
-      return {
-        main: 'Add clubs',
-        sub: 'Go to Clubs and add your stock carry distances.',
-      };
-    const shortest = asc[0],
-      longest = desc[0];
+      return { main: 'Add clubs', sub: 'Go to Clubs and add your stock carry distances.' };
+    const shortest = asc[0], longest = desc[0];
 
-    if (playsYd <= 3)
-      return {
-        main: 'No full shot needed',
-        sub: 'Tap-in or tiny chip — 0–3 yards.',
-      };
-    if (playsYd < 20)
-      return {
-        main: 'Putt / chip',
-        sub: 'Very close. Use feel; no full swing.',
-      };
+    if (playsYd <= 3) return { main: 'No full shot needed', sub: 'Tap-in or tiny chip — 0–3 yards.' };
+    if (playsYd < 20) return { main: 'Putt / chip', sub: 'Very close. Use feel; no full swing.' };
 
     // Generic green centred on the target so short/long misses are penalized symmetrically.
     const geo = {
@@ -8429,10 +6733,7 @@ out geom qt;`;
     for (const c of desc) {
       for (let k = 0; k < EFFORT_LEVELS.length; k++) {
         const eff = EFFORT_LEVELS[k];
-        const r = clubExpectedStrokes(c, playsYd, playsYd, geo, {
-          effort: eff,
-          surround: 'rough',
-        });
+        const r = clubExpectedStrokes(c, playsYd, playsYd, geo, { effort: eff, surround: 'rough' });
         // Penalize efforts outside the stock swing slightly: they are harder to repeat
         // than the dispersion model alone implies.
         const penalty = Math.abs(eff - 1) * 0.02;
@@ -8441,23 +6742,15 @@ out geom qt;`;
           best = { club: c, eff, effName: EFFORT_NAMES[k], score, ...r };
       }
     }
-    if (!best)
-      return {
-        main: 'Add clubs',
-        sub: 'Go to Clubs and add your stock carry distances.',
-      };
+    if (!best) return { main: 'Add clubs', sub: 'Go to Clubs and add your stock carry distances.' };
 
     // Genuinely out of range?
     if (playsYd > longest.yards * 1.08) {
       const gap = Math.round(playsYd - longest.yards);
       return {
         main: 'Lay up',
-        sub: `${gap} yd beyond your ${longest.yards} yd ${
-          longest.name
-        }. Lay up to a full-wedge number (${Math.max(
-          40,
-          Math.round(playsYd - shortest.yards)
-        )} yd carry leaves ${shortest.name}).`,
+        sub: `${gap} yd beyond your ${longest.yards} yd ${longest.name}. Lay up to a full-wedge number (${Math.max(
+          40, Math.round(playsYd - shortest.yards))} yd carry leaves ${shortest.name}).`,
       };
     }
     if (playsYd < shortest.yards * 0.55) {
@@ -8470,36 +6763,22 @@ out geom qt;`;
 
     const c = best.club;
     const delta = Math.round(c.yards * best.eff - playsYd);
-    const label =
-      best.eff === 1 ? `${c.name} stock` : `${c.name} ${best.effName}`;
+    const label = best.eff === 1 ? `${c.name} stock` : `${c.name} ${best.effName}`;
     // Runner-up margin tells the player how much the choice actually matters.
     let runner = null;
     for (const o of desc) {
       if (o.id === c.id) continue;
-      const r = clubExpectedStrokes(o, playsYd, playsYd, geo, {
-        effort: 1,
-        surround: 'rough',
-      });
+      const r = clubExpectedStrokes(o, playsYd, playsYd, geo, { effort: 1, surround: 'rough' });
       if (!runner || r.es < runner.es) runner = { club: o, es: r.es };
     }
     const margin = runner ? runner.es - best.es : 0;
     const bits = [];
-    bits.push(
-      `Stock ${c.name} ${c.yards} yd vs ${fmt(playsYd)} yd plays-like (${
-        delta >= 0 ? '+' : ''
-      }${delta}).`
-    );
-    bits.push(
-      `${Math.round(best.pGreen * 100)}% green, E[strokes] ${fmt(best.es, 2)}.`
-    );
+    bits.push(`Stock ${c.name} ${c.yards} yd vs ${fmt(playsYd)} yd plays-like (${delta >= 0 ? '+' : ''}${delta}).`);
+    bits.push(`${Math.round(best.pGreen * 100)}% green, E[strokes] ${fmt(best.es, 2)}.`);
     if (runner && margin < ES_TIE_THRESHOLD)
-      bits.push(
-        `${runner.club.name} is statistically identical — take the one you trust.`
-      );
+      bits.push(`${runner.club.name} is statistically identical — take the one you trust.`);
     else if (runner)
-      bits.push(
-        `Next best ${runner.club.name} costs ${fmt(margin, 2)} strokes.`
-      );
+      bits.push(`Next best ${runner.club.name} costs ${fmt(margin, 2)} strokes.`);
     return { main: label, sub: bits.join(' ') };
   }
 
@@ -8509,9 +6788,9 @@ out geom qt;`;
    * Full geometry-aware optimizer. Verdict now comes from the expected-strokes surface
    * and the probability of trouble, not from a ±2 yd edge comparison.
    */
-  const VERDICT_GO_PGREEN = 0.55; // ≥55% green with the best club => commit
-  const VERDICT_BAIL_PGREEN = 0.22; // <22% green with the best club => the target itself is wrong
-  const VERDICT_BAIL_ES = 3.35; // expected strokes above which the shot is not worth attempting as aimed
+  const VERDICT_GO_PGREEN = 0.55;      // ≥55% green with the best club => commit
+  const VERDICT_BAIL_PGREEN = 0.22;    // <22% green with the best club => the target itself is wrong
+  const VERDICT_BAIL_ES = 3.35;        // expected strokes above which the shot is not worth attempting as aimed
   function recommendSmart(playsTarget, geo, bearing, accYd) {
     const asc = sortedClubsAsc();
     const desc = sortedClubsDesc();
@@ -8549,41 +6828,39 @@ out geom qt;`;
       geo && Number.isFinite(geo.frontAlong)
         ? geo.frontAlong
         : geo && Number.isFinite(geo.front)
-        ? geo.front
-        : null;
+          ? geo.front
+          : null;
 
     const backRaw =
       geo && Number.isFinite(geo.backAlong)
         ? geo.backAlong
         : geo && Number.isFinite(geo.back)
-        ? geo.back
-        : null;
+          ? geo.back
+          : null;
 
     // Green model remains aligned to the selected target line.
     // Sorting prevents accidental Front/Back placement order from breaking it.
     const model =
       Number.isFinite(frontRaw) && Number.isFinite(backRaw)
         ? {
-            front: Math.min(frontRaw, backRaw) * playsScale,
-            back: Math.max(frontRaw, backRaw) * playsScale,
-            depth: Math.abs(backRaw - frontRaw) * playsScale || 4,
-            widthYd: Number.isFinite(geo.widthYd)
-              ? geo.widthYd
-              : GREEN_WIDTH_TO_DEPTH *
-                Math.max(4, Math.abs(backRaw - frontRaw) * playsScale),
-            centerLateral: num(geo.centerLateral, 0),
-          }
+          front: Math.min(frontRaw, backRaw) * playsScale,
+          back: Math.max(frontRaw, backRaw) * playsScale,
+          depth:
+            Math.abs(backRaw - frontRaw) * playsScale || 4,
+          widthYd: Number.isFinite(geo.widthYd)
+            ? geo.widthYd
+            : GREEN_WIDTH_TO_DEPTH *
+            Math.max(4, Math.abs(backRaw - frontRaw) * playsScale),
+          centerLateral: num(geo.centerLateral, 0),
+        }
         : null;
 
-    let best = null,
-      alternatives = [];
+    let best = null, alternatives = [];
     for (const c of desc) {
       for (let k = 0; k < EFFORT_LEVELS.length; k++) {
         const eff = EFFORT_LEVELS[k];
         const r = clubExpectedStrokes(c, playsTarget, pinPlays, model, {
-          effort: eff,
-          surround: 'rough',
-          aimLateral: 0,
+          effort: eff, surround: 'rough', aimLateral: 0,
         });
         const score = r.es + Math.abs(eff - 1) * 0.02;
         const cand = { club: c, eff, effName: EFFORT_NAMES[k], score, ...r };
@@ -8604,83 +6881,40 @@ out geom qt;`;
     }
 
     const c = best.club;
-    const main =
-      best.eff === 1 ? `${c.name} stock` : `${c.name} ${best.effName}`;
+    const main = best.eff === 1 ? `${c.name} stock` : `${c.name} ${best.effName}`;
     const pG = best.pGreen;
 
     if (pG >= VERDICT_GO_PGREEN) {
       verdict = 'go';
-      tips.push(
-        `🟢 Green light — ${c.name} holds this green ${Math.round(
-          pG * 100
-        )}% of the time from your pattern. Commit and fire.`
-      );
+      tips.push(`🟢 Green light — ${c.name} holds this green ${Math.round(pG * 100)}% of the time from your pattern. Commit and fire.`);
     } else if (pG < VERDICT_BAIL_PGREEN || best.es > VERDICT_BAIL_ES) {
       verdict = 'bail';
-      tips.push(
-        `🔴 Low-percentage shot — only ~${Math.round(
-          pG * 100
-        )}% of your pattern finds this green (E[strokes] ${fmt(
-          best.es,
-          2
-        )}). Play to the fat part or lay back.`
-      );
+      tips.push(`🔴 Low-percentage shot — only ~${Math.round(pG * 100)}% of your pattern finds this green (E[strokes] ${fmt(best.es, 2)}). Play to the fat part or lay back.`);
     } else {
       verdict = 'manage';
-      tips.push(
-        `🟡 Manageable but not free — ~${Math.round(pG * 100)}% green with ${
-          c.name
-        }. Smooth swing, favour the miss you can live with.`
-      );
+      tips.push(`🟡 Manageable but not free — ~${Math.round(pG * 100)}% green with ${c.name}. Smooth swing, favour the miss you can live with.`);
     }
 
     // Which miss is actually costly? Compare conditional expected strokes short vs long.
     if (model) {
       if (best.pLong > best.pShort * 1.6 && best.pLong > 0.12)
-        tips.push(
-          `Your bad miss here is long (${Math.round(
-            best.pLong * 100
-          )}% vs ${Math.round(
-            best.pShort * 100
-          )}% short). Take the club that can't fly the back.`
-        );
+        tips.push(`Your bad miss here is long (${Math.round(best.pLong * 100)}% vs ${Math.round(best.pShort * 100)}% short). Take the club that can't fly the back.`);
       else if (best.pShort > best.pLong * 1.6 && best.pShort > 0.12)
-        tips.push(
-          `Your bad miss here is short (${Math.round(
-            best.pShort * 100
-          )}% vs ${Math.round(
-            best.pLong * 100
-          )}% long) — most amateurs under-club; add one.`
-        );
+        tips.push(`Your bad miss here is short (${Math.round(best.pShort * 100)}% vs ${Math.round(best.pLong * 100)}% long) — most amateurs under-club; add one.`);
       const depth = Math.round(model.depth);
-      if (depth >= 26)
-        tips.push(
-          `Deep green (~${depth} yd playing depth) — plenty of room, be aggressive at the number.`
-        );
-      else if (depth <= 14)
-        tips.push(
-          `Shallow green (~${depth} yd playing depth) — distance control decides this shot, not line.`
-        );
+      if (depth >= 26) tips.push(`Deep green (~${depth} yd playing depth) — plenty of room, be aggressive at the number.`);
+      else if (depth <= 14) tips.push(`Shallow green (~${depth} yd playing depth) — distance control decides this shot, not line.`);
     }
 
     // Is a different club materially better, or is this a coin flip?
-    const distinct = alternatives
-      .filter(
-        (a, i) => alternatives.findIndex((b) => b.club.id === a.club.id) === i
-      )
-      .slice(0, 3);
+    const distinct = alternatives.filter((a, i) =>
+      alternatives.findIndex((b) => b.club.id === a.club.id) === i).slice(0, 3);
     if (distinct.length > 1) {
       const m = distinct[1].score - distinct[0].score;
       if (m < ES_TIE_THRESHOLD)
-        tips.push(
-          `${distinct[0].club.name} and ${distinct[1].club.name} are statistically tied — pick the one you'd rather hit.`
-        );
+        tips.push(`${distinct[0].club.name} and ${distinct[1].club.name} are statistically tied — pick the one you'd rather hit.`);
       else if (m > 0.06)
-        tips.push(
-          `${c.name} is clearly right here — ${
-            distinct[1].club.name
-          } costs about ${fmt(m, 2)} strokes.`
-        );
+        tips.push(`${c.name} is clearly right here — ${distinct[1].club.name} costs about ${fmt(m, 2)} strokes.`);
     }
 
     // Where the target sits relative to the green.
@@ -8703,13 +6937,7 @@ out geom qt;`;
     // GPS uncertainty folded into the decision, not just warned about.
     if (accYd > ACCURACY_WARN_YD) {
       const sigTot = Math.hypot(clubSigmaDistYd(c), accYd / RAYLEIGH_95);
-      tips.push(
-        `GPS is ±${fmt(
-          accYd
-        )} yd — that inflates your effective distance spread to ±${fmt(
-          sigTot * 1.5
-        )} yd. Favour the middle.`
-      );
+      tips.push(`GPS is ±${fmt(accYd)} yd — that inflates your effective distance spread to ±${fmt(sigTot * 1.5)} yd. Favour the middle.`);
     }
 
     const sub =
@@ -8728,8 +6956,8 @@ out geom qt;`;
       club: c,
       effort: best.eff,
       effortName: best.effName,
-    }; // <-- this closes the object literal
-  } // <-- ADD THIS: closes recommendSmart()
+    };          // <-- this closes the object literal
+  }           // <-- ADD THIS: closes recommendSmart()
   /**
      * SIGNATURE PRESERVED: selectedClubGuidance(playsYd) -> string.
      ...
@@ -8740,18 +6968,16 @@ out geom qt;`;
     const mu = num(club.yards, 0);
     if (mu <= 0) return '';
     const sig = Math.max(1, clubSigmaDistYd(club));
-    const pCover = 1 - normCdf((playsYd - mu) / sig); // P(carry >= required)
+    const pCover = 1 - normCdf((playsYd - mu) / sig);   // P(carry >= required)
     const d = mu - playsYd;
     const effort = playsYd / mu;
     const pct = Math.round(pCover * 100);
 
     let head;
     if (Math.abs(d) <= 0.35 * sig) head = `${club.name}: stock`;
-    else if (d > 0 && effort >= 0.9)
-      head = `${club.name}: easy (${Math.round(effort * 100)}%)`;
+    else if (d > 0 && effort >= 0.90) head = `${club.name}: easy (${Math.round(effort * 100)}%)`;
     else if (d > 0) head = `${club.name}: too much — ${fmt(d)} yd long`;
-    else if (effort <= 1.06)
-      head = `${club.name}: firm (${Math.round(effort * 100)}%)`;
+    else if (effort <= 1.06) head = `${club.name}: firm (${Math.round(effort * 100)}%)`;
     else head = `${club.name}: not enough — ${fmt(-d)} yd short`;
 
     return `${head} · ${pct}% chance of covering ${fmt(playsYd)} yd`;
@@ -8763,12 +6989,12 @@ out geom qt;`;
   //            leftoverToGreen, formatLeftover, greenGeometry
   // ============================================================
 
-  const LEFTOVER_HIDE_YD = 3; // below this, leg 2 is degenerate — hide it
-  const OVERSHOOT_TOL_YD = 3; // legacy name kept; superseded by the statistical test below
-  const GREEN_AXIS_MIN_YD = 6; // front/back closer than this cannot define a reliable axis
+  const LEFTOVER_HIDE_YD = 3;        // below this, leg 2 is degenerate — hide it
+  const OVERSHOOT_TOL_YD = 3;        // legacy name kept; superseded by the statistical test below
+  const GREEN_AXIS_MIN_YD = 6;       // front/back closer than this cannot define a reliable axis
   const GREEN_ASPECT_DEFAULT = 1.15; // median green is slightly wider than deep — USGA Green Section green-sizing guidance
-  const GREEN_WIDTH_MIN_YD = 16; // floor on modelled green width, yd — smallest common championship green
-  const GREEN_WIDTH_MAX_YD = 55; // ceiling on modelled green width, yd — very large double green
+  const GREEN_WIDTH_MIN_YD = 16;     // floor on modelled green width, yd — smallest common championship green
+  const GREEN_WIDTH_MAX_YD = 55;     // ceiling on modelled green width, yd — very large double green
 
   /**
    * SIGNATURE PRESERVED: leftoverToGreen(user, aim, green) -> { yards, state }
@@ -8783,12 +7009,10 @@ out geom qt;`;
     // Project the green centre onto the user->aim line. Positive = beyond the aim point.
     const alongGreen = alongTrackYd(user, aim, green);
     const userToAim = haversineMeters(user, aim) * M_TO_YD;
-    const beyond = userToAim - alongGreen; // >0 means the aim point sits past the green centre
+    const beyond = userToAim - alongGreen;   // >0 means the aim point sits past the green centre
     // Threshold = 1σ of the differential GPS error, floored at the legacy tolerance.
-    const sigYd =
-      state.loc && Number.isFinite(state.loc.accuracy)
-        ? state.loc.accuracy * GPS_ACC_TO_SIGMA * M_TO_YD
-        : OVERSHOOT_TOL_YD;
+    const sigYd = state.loc && Number.isFinite(state.loc.accuracy)
+      ? (state.loc.accuracy * GPS_ACC_TO_SIGMA) * M_TO_YD : OVERSHOOT_TOL_YD;
     const tol = Math.max(OVERSHOOT_TOL_YD, sigYd);
     return { yards: aimToGreen, state: beyond > tol ? 'over' : 'short' };
   }
@@ -8811,17 +7035,10 @@ out geom qt;`;
     const center = yd(state.greenCenter);
     const back = yd(state.backPt);
 
-    const aim =
-      state.target || state.greenCenter || state.backPt || state.frontPt;
-    let depth =
-      front != null && back != null ? Math.max(0, back - front) : null;
-    let axisBearing = null,
-      obliquityDeg = null,
-      widthYd = null,
-      centerLateral = 0;
-    let frontAlong = null,
-      backAlong = null,
-      centerAlong = null;
+    const aim = state.target || state.greenCenter || state.backPt || state.frontPt;
+    let depth = front != null && back != null ? Math.max(0, back - front) : null;
+    let axisBearing = null, obliquityDeg = null, widthYd = null, centerLateral = 0;
+    let frontAlong = null, backAlong = null, centerAlong = null;
 
     if (aim && state.frontPt && state.backPt) {
       const axisLen = haversineMeters(state.frontPt, state.backPt) * M_TO_YD;
@@ -8836,16 +7053,11 @@ out geom qt;`;
         // Width perpendicular to the AXIS, estimated from the aspect ratio of the axis
         // length, then re-projected onto the shot line's cross direction. An oblique
         // green presents more width and less depth — both handled here.
-        const axisWidth = clamp(
-          axisLen * GREEN_ASPECT_DEFAULT,
-          GREEN_WIDTH_MIN_YD,
-          GREEN_WIDTH_MAX_YD
-        );
+        const axisWidth = clamp(axisLen * GREEN_ASPECT_DEFAULT, GREEN_WIDTH_MIN_YD, GREEN_WIDTH_MAX_YD);
         const ob = d2r(obliquityDeg);
         widthYd = clamp(
           Math.abs(axisWidth * Math.cos(ob)) + Math.abs(axisLen * Math.sin(ob)),
-          GREEN_WIDTH_MIN_YD,
-          GREEN_WIDTH_MAX_YD * 1.4
+          GREEN_WIDTH_MIN_YD, GREEN_WIDTH_MAX_YD * 1.4
         );
       }
     }
@@ -8854,27 +7066,14 @@ out geom qt;`;
       centerLateral = crossTrackYd(state.loc, aim, state.greenCenter);
     }
     if (widthYd == null && depth != null && depth > 0)
-      widthYd = clamp(
-        depth * GREEN_ASPECT_DEFAULT,
-        GREEN_WIDTH_MIN_YD,
-        GREEN_WIDTH_MAX_YD
-      );
+      widthYd = clamp(depth * GREEN_ASPECT_DEFAULT, GREEN_WIDTH_MIN_YD, GREEN_WIDTH_MAX_YD);
 
     return {
-      front,
-      center,
-      back,
-      depth,
-      widthYd,
-      axisBearing,
-      obliquityDeg,
-      centerLateral,
-      frontAlong,
-      backAlong,
-      centerAlong,
+      front, center, back, depth,
+      widthYd, axisBearing, obliquityDeg, centerLateral,
+      frontAlong, backAlong, centerAlong,
       // Straight-line depth, kept separately so the UI can show both if you want.
-      depthStraight:
-        front != null && back != null ? Math.max(0, back - front) : null,
+      depthStraight: front != null && back != null ? Math.max(0, back - front) : null,
     };
   }
 
@@ -8913,7 +7112,8 @@ out geom qt;`;
       return null;
     }
 
-    const userToTargetYd = haversineMeters(state.loc, state.target) * M_TO_YD;
+    const userToTargetYd =
+      haversineMeters(state.loc, state.target) * M_TO_YD;
 
     const greenAlongShotLineYd = alongTrackYd(
       state.loc,
@@ -8954,8 +7154,8 @@ out geom qt;`;
     const lateralText =
       Math.abs(lateralOffsetYd) >= 8
         ? ` Green center is also about ${Math.round(
-            Math.abs(lateralOffsetYd)
-          )} yd ${lateralOffsetYd > 0 ? 'right' : 'left'} of your target line.`
+          Math.abs(lateralOffsetYd)
+        )} yd ${lateralOffsetYd > 0 ? 'right' : 'left'} of your target line.`
         : '';
 
     if (remainingAlongYd > 3) {
@@ -8986,22 +7186,15 @@ out geom qt;`;
   //            getElevationOrNeutral, updateWeatherUI, stampText
   // ============================================================
 
-  const ELEV_PROFILE_N = 9; // sample count along the shot line; 9 resolves a ridge to ~1/8 of the shot
-  const BLIND_CLEARANCE_FT = 8; // terrain rising this far above the sight line makes the shot blind
+  const ELEV_PROFILE_N = 9;          // sample count along the shot line; 9 resolves a ridge to ~1/8 of the shot
+  const BLIND_CLEARANCE_FT = 8;      // terrain rising this far above the sight line makes the shot blind
   const GEOID_TYPICAL_CONUS_M = -30; // mean EGM96 geoid undulation over the CONUS, m — NGA EGM96 model summary (used only to sanity-check GPS altitude)
 
   function getWeatherOrNeutral() {
-    return (
-      state.context.weather || {
-        tempF: STD_TEMP_F,
-        rh: STD_RH,
-        windMph: 0,
-        windFromDeg: 0,
-        pressureHpa: NaN,
-        gustMph: NaN,
-        shearAlpha: NaN,
-      }
-    );
+    return state.context.weather || {
+      tempF: STD_TEMP_F, rh: STD_RH, windMph: 0, windFromDeg: 0,
+      pressureHpa: NaN, gustMph: NaN, shearAlpha: NaN,
+    };
   }
   function getElevationOrNeutral() {
     if (state.context.elevation) return state.context.elevation;
@@ -9009,35 +7202,22 @@ out geom qt;`;
     // only used for density (a 30 m error costs ~0.3% density, ~0.5 yd on a 200 yd shot).
     const hasGpsAlt = state.loc && Number.isFinite(state.loc.altitude);
     const gpsFt = hasGpsAlt ? state.loc.altitude * M_TO_FT : 0;
-    return {
-      userFt: gpsFt,
-      targetFt: gpsFt,
-      usedGpsFallback: hasGpsAlt,
-      profileFt: null,
-      blindFt: 0,
-    };
+    return { userFt: gpsFt, targetFt: gpsFt, usedGpsFallback: hasGpsAlt, profileFt: null, blindFt: 0 };
   }
 
   async function updateContext() {
-    const user = state.loc,
-      target = state.target;
-    if (!user && !target) {
-      updateWeatherUI();
-      return;
-    }
+    const user = state.loc, target = state.target;
+    if (!user && !target) { updateWeatherUI(); return; }
     const seq = ++state.contextSeq;
     const isCurrent = () => seq === state.contextSeq;
 
     const p = target
-      ? user
-        ? midpointGeodesic(user, target)
-        : { lat: target.lat, lng: target.lng }
+      ? (user ? midpointGeodesic(user, target) : { lat: target.lat, lng: target.lng })
       : { lat: user.lat, lng: user.lng };
 
     // --- Weather: add pressure, gusts, and a second wind level for shear fitting ---
     const wKey = `weather:${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
-    const wUrl =
-      'https://api.open-meteo.com/v1/forecast' +
+    const wUrl = 'https://api.open-meteo.com/v1/forecast' +
       `?latitude=${p.lat.toFixed(5)}&longitude=${p.lng.toFixed(5)}` +
       '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,' +
       'wind_gusts_10m,surface_pressure,pressure_msl,wind_speed_80m,wind_direction_80m' +
@@ -9055,12 +7235,8 @@ out geom qt;`;
         const msl = num(cur.pressure_msl, NaN);
         const e0 = state.context.elevation;
         if (Number.isFinite(msl) && e0)
-          pHpa =
-            stationPressureFromMSL(
-              msl * 100,
-              e0.userFt * FT_TO_M,
-              (num(cur.temperature_2m, 70) - 32) / 1.8
-            ) / 100;
+          pHpa = stationPressureFromMSL(msl * 100, e0.userFt * FT_TO_M,
+            (num(cur.temperature_2m, 70) - 32) / 1.8) / 100;
       }
       state.context.weather = {
         tempF: num(cur.temperature_2m, STD_TEMP_F),
@@ -9082,25 +7258,20 @@ out geom qt;`;
 
     // --- Elevation: 9-point profile along the shot line ---
     if (user && target) {
-      const eKey =
-        `elev:${user.lat.toFixed(4)},${user.lng.toFixed(4)}:` +
+      const eKey = `elev:${user.lat.toFixed(4)},${user.lng.toFixed(4)}:` +
         `${target.lat.toFixed(4)},${target.lng.toFixed(4)}`;
       const g = geodesicInverse(user, target);
       const pts = [];
       for (let i = 0; i < ELEV_PROFILE_N; i++)
         pts.push(geodesicDirect(user, g.az1, (g.s * i) / (ELEV_PROFILE_N - 1)));
-      const eUrl =
-        'https://api.open-meteo.com/v1/elevation' +
+      const eUrl = 'https://api.open-meteo.com/v1/elevation' +
         `?latitude=${pts.map((q) => q.lat.toFixed(5)).join(',')}` +
         `&longitude=${pts.map((q) => q.lng.toFixed(5)).join(',')}`;
       try {
         const e = await cachedJSON(eKey, eUrl, ELEV_TTL);
         if (!isCurrent()) return;
         const arr = Array.isArray(e.data.elevation) ? e.data.elevation : [];
-        const gpsAltM =
-          state.loc && Number.isFinite(state.loc.altitude)
-            ? state.loc.altitude
-            : null;
+        const gpsAltM = state.loc && Number.isFinite(state.loc.altitude) ? state.loc.altitude : null;
         const userM = Number.isFinite(arr[0]) ? arr[0] : gpsAltM;
         const lastIdx = arr.length - 1;
         const targetM = Number.isFinite(arr[lastIdx]) ? arr[lastIdx] : userM;
@@ -9108,9 +7279,7 @@ out geom qt;`;
         // Blind-shot detection: max terrain height above the straight sight line.
         let blindFt = 0;
         if (profileFt.length >= 3) {
-          const u = profileFt[0],
-            t = profileFt[profileFt.length - 1],
-            n = profileFt.length - 1;
+          const u = profileFt[0], t = profileFt[profileFt.length - 1], n = profileFt.length - 1;
           for (let i = 1; i < n; i++) {
             const sight = u + ((t - u) * i) / n;
             blindFt = Math.max(blindFt, profileFt[i] - sight);
@@ -9118,11 +7287,8 @@ out geom qt;`;
         }
         state.context.elevation = {
           userFt: Number.isFinite(userM) ? userM * M_TO_FT : 0,
-          targetFt: Number.isFinite(targetM)
-            ? targetM * M_TO_FT
-            : Number.isFinite(userM)
-            ? userM * M_TO_FT
-            : 0,
+          targetFt: Number.isFinite(targetM) ? targetM * M_TO_FT
+            : Number.isFinite(userM) ? userM * M_TO_FT : 0,
           usedGpsFallback: !Number.isFinite(arr[0]) && gpsAltM !== null,
           profileFt: profileFt.length ? profileFt : null,
           blindFt: Math.max(0, blindFt),
@@ -9131,16 +7297,12 @@ out geom qt;`;
         state.context.elevTs = e.ts;
       } catch {
         if (!isCurrent()) return;
-        const gpsFt =
-          state.loc && Number.isFinite(state.loc.altitude)
-            ? state.loc.altitude * M_TO_FT
-            : 0;
+        const gpsFt = state.loc && Number.isFinite(state.loc.altitude)
+          ? state.loc.altitude * M_TO_FT : 0;
         state.context.elevation = {
-          userFt: gpsFt,
-          targetFt: gpsFt,
+          userFt: gpsFt, targetFt: gpsFt,
           usedGpsFallback: state.loc && Number.isFinite(state.loc.altitude),
-          profileFt: null,
-          blindFt: 0,
+          profileFt: null, blindFt: 0,
         };
         state.context.offlineElevation = true;
       }
@@ -9151,24 +7313,18 @@ out geom qt;`;
   }
 
   function updateWeatherUI() {
-    const w = getWeatherOrNeutral(),
-      e = getElevationOrNeutral();
+    const w = getWeatherOrNeutral(), e = getElevationOrNeutral();
     if (state.context.weather && w.windMph >= 1) {
-      const gust =
-        Number.isFinite(w.gustMph) && w.gustMph > w.windMph + 2
-          ? `–${Math.round(w.gustMph)}`
-          : '';
+      const gust = Number.isFinite(w.gustMph) && w.gustMph > w.windMph + 2
+        ? `–${Math.round(w.gustMph)}` : '';
       els.windMetric.textContent = `${fmt(w.windMph)}${gust} mph`;
       els.windSubMetric.textContent = `from ${bearingToCompass(w.windFromDeg)}`;
     } else {
-      els.windMetric.textContent = state.context.weather
-        ? `${fmt(w.windMph)} mph`
-        : 'Neutral';
+      els.windMetric.textContent = state.context.weather ? `${fmt(w.windMph)} mph` : 'Neutral';
       els.windSubMetric.textContent = '';
     }
     els.tempMetric.textContent = state.context.weather
-      ? `${fmt(w.tempF)}° / ${fmt(w.rh)}%`
-      : `${STD_TEMP_F}° / ${STD_RH}%`;
+      ? `${fmt(w.tempF)}° / ${fmt(w.rh)}%` : `${STD_TEMP_F}° / ${STD_RH}%`;
     if (state.context.elevation) {
       const diff = e.targetFt - e.userFt;
       els.elevMetric.textContent = `${diff >= 0 ? '+' : ''}${fmt(diff)} ft`;
@@ -9180,88 +7336,36 @@ out geom qt;`;
     if (state.context.offlineElevation) bits.push('Cached elev');
     // Density ratio is the single most informative status number for a golfer.
     const rho = airDensity({
-      tempF: w.tempF,
-      rh: w.rh,
+      tempF: w.tempF, rh: w.rh,
       altitudeFt: (e.targetFt + e.userFt) / 2,
       pressureHpa: w.pressureHpa,
     });
-    bits.push(`ρ ${fmt((rho / RHO_STD) * 100)}%`);
+    bits.push(`ρ ${fmt(rho / RHO_STD * 100)}%`);
     if (Number.isFinite(w.pressureHpa)) bits.push('baro');
-    if (
-      !state.context.offlineWeather &&
-      !state.context.offlineElevation &&
-      state.context.weather
-    )
-      bits.push('Live');
+    if (!state.context.offlineWeather && !state.context.offlineElevation &&
+      state.context.weather) bits.push('Live');
     els.weatherStatus.textContent = bits.join(' · ');
   }
 
   function stampText() {
-    const wt = state.context.weatherTs
-      ? new Date(state.context.weatherTs).toLocaleTimeString()
-      : '—';
-    const et = state.context.elevTs
-      ? new Date(state.context.elevTs).toLocaleTimeString()
-      : '—';
+    const wt = state.context.weatherTs ? new Date(state.context.weatherTs).toLocaleTimeString() : '—';
+    const et = state.context.elevTs ? new Date(state.context.elevTs).toLocaleTimeString() : '—';
     const c = state.lastCalc;
-    const model =
-      c && Number.isFinite(c.rhoKgM3)
-        ? ` · ρ=${fmt(c.rhoKgM3, 4)} kg/m³ (${fmt(
-            c.densityRatio * 100,
-            1
-          )}% of std)`
-        : '';
-    const solver =
-      c && c.solverReached === false
-        ? ' · target above apex (extrapolated)'
-        : '';
-    return (
-      `Weather as of ${wt}${state.context.offlineWeather ? ' (offline)' : ''}` +
-      ` · Elevation as of ${et}${
-        state.context.offlineElevation ? ' (offline)' : ''
-      }` +
-      `${model}${solver} · 3-DOF RK4 trajectory solve, lie assumed neutral (0 yd).`
-    );
+    const model = c && Number.isFinite(c.rhoKgM3)
+      ? ` · ρ=${fmt(c.rhoKgM3, 4)} kg/m³ (${fmt(c.densityRatio * 100, 1)}% of std)` : '';
+    const solver = c && c.solverReached === false ? ' · target above apex (extrapolated)' : '';
+    return `Weather as of ${wt}${state.context.offlineWeather ? ' (offline)' : ''}` +
+      ` · Elevation as of ${et}${state.context.offlineElevation ? ' (offline)' : ''}` +
+      `${model}${solver} · 3-DOF RK4 trajectory solve, lie assumed neutral (0 yd).`;
   }
   // ============================================================
   //  BLOCK 11 — WIND LABELING + TIP SCORING
   //  Replaces: bearingToCompass, windRelative, caddyTips, coachTips
   // ============================================================
 
-  const COMPASS_32 = [
-    'N',
-    'NbE',
-    'NNE',
-    'NEbN',
-    'NE',
-    'NEbE',
-    'ENE',
-    'EbN',
-    'E',
-    'EbS',
-    'ESE',
-    'SEbE',
-    'SE',
-    'SEbS',
-    'SSE',
-    'SbE',
-    'S',
-    'SbW',
-    'SSW',
-    'SWbS',
-    'SW',
-    'SWbW',
-    'WSW',
-    'WbS',
-    'W',
-    'WbN',
-    'WNW',
-    'NWbW',
-    'NW',
-    'NWbN',
-    'NNW',
-    'NbW',
-  ]; // 32-point mariner's compass — Bowditch, American Practical Navigator, Table of Compass Points
+  const COMPASS_32 = ['N', 'NbE', 'NNE', 'NEbN', 'NE', 'NEbE', 'ENE', 'EbN', 'E', 'EbS', 'ESE', 'SEbE',
+    'SE', 'SEbS', 'SSE', 'SbE', 'S', 'SbW', 'SSW', 'SWbS', 'SW', 'SWbW', 'WSW', 'WbS',
+    'W', 'WbN', 'WNW', 'NWbW', 'NW', 'NWbN', 'NNW', 'NbW'];  // 32-point mariner's compass — Bowditch, American Practical Navigator, Table of Compass Points
   // SIGNATURE PRESERVED; optional second arg selects 32-point resolution (11.25° bins).
   function bearingToCompass(bearing, points) {
     const b = norm(num(bearing, 0));
@@ -9277,17 +7381,14 @@ out geom qt;`;
    *   along > 0 => tailwind   (unchanged)
    *   cross > 0 => wind FROM the right => ball pushed LEFT => aim RIGHT  (was inverted)
    */
-  const WIND_CALM_MPH = 1.5; // below this the wind is inside model and gauge noise — WMO-No. 8 anemometer starting threshold
+  const WIND_CALM_MPH = 1.5;         // below this the wind is inside model and gauge noise — WMO-No. 8 anemometer starting threshold
   function windRelative(windFromDeg, shotBearing, speedMph) {
     const { headwindMph, crosswindMph } = windComponents({
-      windMph: speedMph,
-      windFromDeg,
-      bearingDeg: shotBearing,
+      windMph: speedMph, windFromDeg, bearingDeg: shotBearing,
     });
-    const along = -headwindMph; // + = tail, matching the original meaning
-    const cross = crosswindMph; // + = from the right => aim right
-    const a = Math.abs(along),
-      c = Math.abs(cross);
+    const along = -headwindMph;          // + = tail, matching the original meaning
+    const cross = crosswindMph;          // + = from the right => aim right
+    const a = Math.abs(along), c = Math.abs(cross);
     let primary;
     if (num(speedMph, 0) < WIND_CALM_MPH) primary = 'calm';
     else if (a >= c) primary = along > 0 ? 'tail' : 'head';
@@ -9302,571 +7403,172 @@ out geom qt;`;
    *
    * Scoring is now an estimated stroke cost, so ranking is meaningful rather than ordinal.
    */
-  const TIP_STROKE_PER_YD_ERROR = 0.011; // marginal strokes per yard of proximity error near a green — differentiated from Broadie (2014) proximity-to-strokes curves
-  const TIP_MIN_SCORE = 0.012; // suppress tips worth less than ~0.012 strokes; below this it is noise
-  const HAZARD_CORRIDOR_YD = 28; // ignore hazards wider than this off the line
-  const HAZARD_BAND_YD = 12; // assumed half-depth of an imported hazard
-  const HAZARD_MIN_CARRY_YD = 30; // anything nearer is not a carry decision
-
-  // Imported hazards, projected onto the current aim line. Returns carries
-  // ahead of the ball, nearest first. This is only possible because the OSM
-  // import now stores bunker/water centroids per hole.
-  function holeHazardCarries() {
-    if (!state.loc || !state.target) return [];
-    const hole = getCurrentHoleData();
-    const list = hole && Array.isArray(hole.hazards) ? hole.hazards : [];
-    if (!list.length) return [];
-
-    const out = [];
-    for (const h of list) {
-      if (!Number.isFinite(h.lat) || !Number.isFinite(h.lng)) continue;
-      const carryYd = alongTrackYd(state.loc, state.target, h);
-      const lateralYd = crossTrackYd(state.loc, state.target, h);
-      if (!(carryYd > HAZARD_MIN_CARRY_YD)) continue;
-      if (Math.abs(lateralYd) > HAZARD_CORRIDOR_YD) continue;
-      out.push({
-        type: h.type === 'bunker' ? 'bunker' : 'water',
-        carryYd,
-        lateralYd,
-      });
-    }
-    return out.sort((a, b) => a.carryYd - b.carryYd);
-  }
-
-  // Probability the recommended club finishes inside a hazard band.
-  function hazardRisk(carryYd, muYd, sigmaYd) {
-    const s = Math.max(1, sigmaYd);
-    return (
-      normCdf((carryYd + HAZARD_BAND_YD - muYd) / s) -
-      normCdf((carryYd - HAZARD_BAND_YD - muYd) / s)
-    );
-  }
-
+  const TIP_STROKE_PER_YD_ERROR = 0.011;  // marginal strokes per yard of proximity error near a green — differentiated from Broadie (2014) proximity-to-strokes curves
+  const TIP_MIN_SCORE = 0.012;            // suppress tips worth less than ~0.012 strokes; below this it is noise
   function caddyTips(ctx, max = 2) {
     const plays = num(ctx.plays, 0);
-    const along = num(ctx.along, 0),
-      cross = num(ctx.cross, 0);
-    const elevFt = num(ctx.elevFt, 0),
-      accYd = num(ctx.accYd, 0);
+    const along = num(ctx.along, 0), cross = num(ctx.cross, 0);
+    const elevFt = num(ctx.elevFt, 0), accYd = num(ctx.accYd, 0);
     const gap = ctx.gap == null ? null : num(ctx.gap, 0);
-    const aimYd = num(ctx.aimYd, 0),
-      gustYd = num(ctx.gustYd, 0);
+    const aimYd = num(ctx.aimYd, 0), gustYd = num(ctx.gustYd, 0);
     const densityRatio = num(ctx.densityRatio, 1);
-    const descentDeg = num(ctx.descentDeg, NaN);
+    const apexFt = num(ctx.apexFt, NaN), descentDeg = num(ctx.descentDeg, NaN);
     const blindFt = num(ctx.blindFt, 0);
     const S = TIP_STROKE_PER_YD_ERROR;
 
-    // --- new, from the OSM import + round session ---
-    const hazards = Array.isArray(ctx.hazards) ? ctx.hazards : [];
-    const recName = ctx.recClubName || 'that club';
-    const recMu = num(ctx.recCarryYd, NaN);
-    const recSig = num(ctx.recSigmaYd, NaN);
-    const greenDepth = num(ctx.greenDepthYds, NaN);
-    const hasGreenModel = !!ctx.hasGreenModel;
-    const holePar = num(ctx.holePar, NaN);
-    const holeYards = num(ctx.holeYards, NaN);
-    const strokeIndex = num(ctx.strokeIndex, NaN);
-    const toPar = num(ctx.toPar, NaN);
-    const holesPlayed = num(ctx.holesPlayed, 0);
-
-    // Worst hazard = highest chance of actually finishing in it.
-    let worstHaz = null;
-    if (hazards.length && Number.isFinite(recMu) && Number.isFinite(recSig)) {
-      for (const h of hazards) {
-        const risk = hazardRisk(h.carryYd, recMu, recSig);
-        if (!worstHaz || risk > worstHaz.risk) worstHaz = { ...h, risk };
-      }
-    }
-    // Nearest hazard you must physically carry, regardless of club.
-    const carryHaz = hazards.find((h) => h.carryYd < plays - 8) || null;
-
     const TIPS = [
       {
-        id: 'hazardRisk',
-        cat: 'hazard',
-        score: () =>
-          worstHaz && worstHaz.risk > 0.1 ? worstHaz.risk * 0.9 : 0,
-        text: () => {
-          const side =
-            Math.abs(worstHaz.lateralYd) < 10
-              ? 'straight down your line'
-              : `${Math.round(Math.abs(worstHaz.lateralYd))} yd ${
-                  worstHaz.lateralYd > 0 ? 'right' : 'left'
-                }`;
-          const noun = worstHaz.type === 'bunker' ? 'Sand' : 'Water';
-          return `${noun} at ${Math.round(
-            worstHaz.carryYd
-          )} yd, ${side}. ${recName} finishes in it about ${Math.round(
-            worstHaz.risk * 100
-          )}% of the time — take the club that flies it, or lay back short of it deliberately.`;
-        },
+        id: 'headwind', cat: 'wind',
+        score: () => (along < -3 ? Math.abs(num(ctx.windAdjYd, along * -1.5)) * S : 0),
+        text: () => `~${Math.abs(Math.round(along))} mph into you — that is worth about ${Math.abs(Math.round(num(ctx.windAdjYd, 0)))} yd of club. Swing ~80%: forcing it adds spin and balloons the ball short.`
       },
       {
-        id: 'hazardCarry',
-        cat: 'hazard',
-        score: () => {
-          if (!carryHaz || !Number.isFinite(recMu) || !Number.isFinite(recSig))
-            return 0;
-          const pCover =
-            1 - normCdf((carryHaz.carryYd - recMu) / Math.max(1, recSig));
-          return pCover < 0.85 ? (0.85 - pCover) * 0.5 : 0;
-        },
-        text: () => {
-          const pCover =
-            1 - normCdf((carryHaz.carryYd - recMu) / Math.max(1, recSig));
-          return `You have to carry ${
-            carryHaz.type === 'bunker' ? 'sand' : 'water'
-          } at ${Math.round(
-            carryHaz.carryYd
-          )} yd and ${recName} clears it only ${Math.round(
-            pCover * 100
-          )}% of the time. That is not a carry you own — go up a club or play around it.`;
-        },
+        id: 'tailwind', cat: 'wind',
+        score: () => (along > 5 ? Math.abs(num(ctx.windAdjYd, 0)) * S * 1.2 : 0),
+        text: () => `Helping wind takes ~${Math.abs(Math.round(num(ctx.windAdjYd, 0)))} yd off and kills spin — the ball will not stop. Land it short of the flag and plan for release.`
       },
       {
-        id: 'greenDepth',
-        cat: 'green',
-        score: () =>
-          !hasGreenModel && Number.isFinite(greenDepth) && plays > 60
-            ? greenDepth <= 16 || greenDepth >= 30
-              ? 0.035
-              : 0
-            : 0,
-        text: () =>
-          greenDepth <= 16
-            ? `Mapped green is only ~${Math.round(
-                greenDepth
-              )} yd deep — distance control is the whole shot here. Favour the middle and accept pin-high.`
-            : `Mapped green is ~${Math.round(
-                greenDepth
-              )} yd deep, so there is real room front to back. Be aggressive at your number.`,
-      },
-      {
-        id: 'holeShape',
-        cat: 'hole',
-        score: () =>
-          Number.isFinite(strokeIndex) && strokeIndex <= 4 && plays > 70
-            ? 0.03
-            : 0,
-        text: () =>
-          `Stroke index ${strokeIndex}${
-            Number.isFinite(holePar) ? ` on a par ${holePar}` : ''
-          } — one of the hardest holes on the card. Par is a good score; play to the fat side and take bogey over double.`,
-      },
-      {
-        id: 'reachable',
-        cat: 'hole',
-        score: () =>
-          holePar === 5 && Number.isFinite(holeYards) && plays > 200
-            ? 0.025
-            : 0,
-        text: () =>
-          `Par 5 at ${Math.round(
-            holeYards
-          )} yd — going for it from ${Math.round(
-            plays
-          )} yd is a long-iron or wood into a green built for a wedge. Laying up to a full-swing number usually wins on expected strokes.`,
-      },
-      {
-        id: 'scoreState',
-        cat: 'mind',
-        score: () =>
-          holesPlayed >= 3 && Number.isFinite(toPar) && toPar >= 5 ? 0.02 : 0,
-        text: () =>
-          `You are ${formatToPar(
-            toPar
-          )} through ${holesPlayed}. Nothing on this shot gets that back — pick the middle of the green and stop the bleeding.`,
-      },
-      {
-        id: 'headwind',
-        cat: 'wind',
-        score: () =>
-          along < -3 ? Math.abs(num(ctx.windAdjYd, along * -1.5)) * S : 0,
-        text: () =>
-          `~${Math.abs(
-            Math.round(along)
-          )} mph into you — worth about ${Math.abs(
-            Math.round(num(ctx.windAdjYd, 0))
-          )} yd of club. Swing ~80%: forcing it adds spin and balloons the ball short.`,
-      },
-      {
-        id: 'tailwind',
-        cat: 'wind',
-        score: () =>
-          along > 5 ? Math.abs(num(ctx.windAdjYd, 0)) * S * 1.2 : 0,
-        text: () =>
-          `Helping wind takes ~${Math.abs(
-            Math.round(num(ctx.windAdjYd, 0))
-          )} yd off and kills spin — the ball will not stop. Land it short of the flag and plan for release.`,
-      },
-      {
-        id: 'cross',
-        cat: 'wind',
+        id: 'cross', cat: 'wind',
         score: () => (Math.abs(aimYd) >= 2 ? Math.abs(aimYd) * S * 0.8 : 0),
         text: () => {
-          const lr =
-            cross > 0 ? 'right-to-left across you' : 'left-to-right across you';
+          const lr = cross > 0 ? 'right-to-left across you' : 'left-to-right across you';
           const side = aimYd > 0 ? 'right' : 'left';
-          return `~${Math.abs(
-            Math.round(cross)
-          )} mph ${lr} — start it ~${Math.abs(
-            aimYd
-          )} yd ${side} of the pin (${fmt(
-            Math.abs(num(ctx.aimDeg, 0)),
-            1
-          )}°) and let it ride back. Do not fight it.`;
-        },
+          return `~${Math.abs(Math.round(cross))} mph ${lr} — start it ~${Math.abs(aimYd)} yd ${side} of the pin (${fmt(Math.abs(num(ctx.aimDeg, 0)), 1)}°) and let it ride back. Do not fight it.`;
+        }
       },
       {
-        id: 'gust',
-        cat: 'wind',
+        id: 'gust', cat: 'wind',
         score: () => (gustYd >= 4 ? gustYd * S * 0.9 : 0),
-        text: () =>
-          `Gusting — the same swing is worth ±${Math.round(
-            gustYd
-          )} yd depending on when you pull the trigger. Wait for a lull or take more club and swing easy.`,
+        text: () => `Gusting — the same swing is worth ±${Math.round(gustYd)} yd depending on when you pull the trigger. Wait for a lull or take the extra club and swing easy.`
       },
       {
-        id: 'uphill',
-        cat: 'elev',
-        score: () =>
-          elevFt > 6 ? Math.abs(num(ctx.elevAdjYd, elevFt / 3)) * S : 0,
-        text: () =>
-          `Plays ~${Math.abs(
-            Math.round(num(ctx.elevAdjYd, elevFt / 3))
-          )} yd uphill — already in your number. Take enough club; uphill shots land steeper and stop faster.`,
+        id: 'uphill', cat: 'elev',
+        score: () => (elevFt > 6 ? Math.abs(num(ctx.elevAdjYd, elevFt / 3)) * S : 0),
+        text: () => `Plays ~${Math.abs(Math.round(num(ctx.elevAdjYd, elevFt / 3)))} yd uphill — already in your number. Take enough club; uphill shots land steeper and stop faster.`
       },
       {
-        id: 'downhill',
-        cat: 'elev',
-        score: () =>
-          elevFt < -6 ? Math.abs(num(ctx.elevAdjYd, elevFt / 3)) * S : 0,
-        text: () =>
-          `Plays ~${Math.abs(
-            Math.round(num(ctx.elevAdjYd, elevFt / 3))
-          )} yd downhill — club down, and expect a shallower landing angle and more roll.`,
+        id: 'downhill', cat: 'elev',
+        score: () => (elevFt < -6 ? Math.abs(num(ctx.elevAdjYd, elevFt / 3)) * S : 0),
+        text: () => `Plays ~${Math.abs(Math.round(num(ctx.elevAdjYd, elevFt / 3)))} yd downhill — club down, and expect a shallower landing angle and more roll.`
       },
       {
-        id: 'blind',
-        cat: 'elev',
+        id: 'blind', cat: 'elev',
         score: () => (blindFt > BLIND_CLEARANCE_FT ? 0.05 : 0),
-        text: () =>
-          `Terrain rises ~${Math.round(
-            blindFt
-          )} ft above your sight line — this is a blind shot. Pick an aim point on the horizon before you address the ball.`,
+        text: () => `Terrain rises ~${Math.round(blindFt)} ft above your sight line — this is a blind shot. Pick an aim point on the horizon before you address the ball.`
       },
       {
-        id: 'density',
-        cat: 'air',
-        score: () =>
-          Math.abs(densityRatio - 1) > 0.03
-            ? Math.abs(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0)) * S
-            : 0,
-        text: () =>
-          densityRatio < 1
-            ? `Thin air (${fmt(
-                densityRatio * 100
-              )}% of standard density) — carrying ~${Math.abs(
-                Math.round(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0))
-              )} yd farther than your stock numbers.`
-            : `Heavy air (${fmt(
-                densityRatio * 100
-              )}% of standard density) — costs ~${Math.abs(
-                Math.round(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0))
-              )} yd. Take the extra club.`,
+        id: 'density', cat: 'air',
+        score: () => (Math.abs(densityRatio - 1) > 0.03
+          ? Math.abs(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0)) * S : 0),
+        text: () => densityRatio < 1
+          ? `Thin air (${fmt(densityRatio * 100)}% of standard density) — the ball is carrying ~${Math.abs(Math.round(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0)))} yd farther than your stock numbers.`
+          : `Heavy air (${fmt(densityRatio * 100)}% of standard density) — costs ~${Math.abs(Math.round(num(ctx.altitudeAdjYd, 0) + num(ctx.tempAdjYd, 0)))} yd. Take the extra club.`
       },
       {
-        id: 'between',
-        cat: 'club',
+        id: 'between', cat: 'club',
         score: () => (gap !== null && gap > 3 && gap <= 16 ? 0.04 : 0),
-        text: () =>
-          `Between clubs — take the ${ctx.longerName} and smooth it. Most amateur approach misses are short, and pin-high is rarely a bad result.`,
+        text: () => `Between clubs — take the ${ctx.longerName} and smooth it. Most amateur approach misses are short, and pin-high is rarely a bad result.`
       },
       {
-        id: 'stock',
-        cat: 'club',
+        id: 'stock', cat: 'club',
         score: () => (gap !== null && Math.abs(gap) <= 3 ? 0.018 : 0),
-        text: () =>
-          `Stock ${ctx.longerName} number — commit and make your normal swing.`,
+        text: () => `Stock ${ctx.longerName} number — commit and make your normal swing.`
       },
       {
-        id: 'wedge',
-        cat: 'club',
+        id: 'wedge', cat: 'club',
         score: () => (plays > 20 && plays < 60 ? 0.045 : 0),
-        text: () =>
-          `Partial wedge — control distance with swing length, never by decelerating. Pick a stock 3/4 or 1/2 carry you have actually practiced.`,
+        text: () => `Partial wedge — control distance with swing length, never by decelerating. Pick a stock 3/4 or 1/2 carry you have actually practiced.`
       },
       {
-        id: 'steep',
-        cat: 'flight',
-        score: () =>
-          Number.isFinite(descentDeg) && descentDeg > 48 && plays > 60
-            ? 0.02
-            : 0,
-        text: () =>
-          `Steep ${fmt(
-            descentDeg
-          )}° descent — this one will stop quickly. You can fly it at the flag.`,
+        id: 'steep', cat: 'flight',
+        score: () => (Number.isFinite(descentDeg) && descentDeg > 48 && plays > 60 ? 0.02 : 0),
+        text: () => `Steep ${fmt(descentDeg)}° descent — this one will stop quickly. You can fly it at the flag.`
       },
       {
-        id: 'shallow',
-        cat: 'flight',
-        score: () =>
-          Number.isFinite(descentDeg) && descentDeg < 35 && plays > 120
-            ? 0.03
-            : 0,
-        text: () =>
-          `Shallow ${fmt(
-            descentDeg
-          )}° descent — the ball will run out. Land it short and use the ground.`,
+        id: 'shallow', cat: 'flight',
+        score: () => (Number.isFinite(descentDeg) && descentDeg < 35 && plays > 120 ? 0.03 : 0),
+        text: () => `Shallow ${fmt(descentDeg)}° descent — the ball will run out. Land it short and use the ground.`
       },
       {
-        id: 'layup',
-        cat: 'strategy',
-        score: () => (ctx.beyondLongest ? 0.1 : 0),
-        text: () =>
-          `Beyond your longest club — lay up to a full-wedge number rather than forcing a hero shot. Expected strokes favour the layup here.`,
+        id: 'layup', cat: 'strategy',
+        score: () => (ctx.beyondLongest ? 0.10 : 0),
+        text: () => `Beyond your longest club — lay up to a full-wedge number rather than forcing a hero shot. Expected strokes favour the layup here.`
       },
       {
-        id: 'accuracy',
-        cat: 'strategy',
+        id: 'accuracy', cat: 'strategy',
         score: () => (accYd > ACCURACY_WARN_YD ? accYd * S * 0.6 : 0),
-        text: () =>
-          `GPS is only ±${fmt(
-            accYd
-          )} yd — real distance uncertainty on top of your swing. Favour the centre of the green.`,
+        text: () => `GPS is only ±${fmt(accYd)} yd — that is real distance uncertainty on top of your swing. Favour the centre of the green.`
       },
     ];
-
     const seen = new Set();
     return TIPS.map((t) => {
       let s = 0;
-      try {
-        s = t.score();
-      } catch {
-        s = 0;
-      }
+      try { s = t.score(); } catch { s = 0; }
       return { ...t, s: Number.isFinite(s) ? s : 0 };
     })
       .filter((t) => t.s > TIP_MIN_SCORE)
       .sort((a, b) => b.s - a.s)
       .filter((t) => (seen.has(t.cat) ? false : seen.add(t.cat)))
       .slice(0, max)
-      .map((t) => {
-        try {
-          return t.text();
-        } catch {
-          return null;
-        }
-      })
+      .map((t) => { try { return t.text(); } catch { return null; } })
       .filter(Boolean);
   }
 
-  const COACH_TRUST_N = 8;
-  const GAP_IDEAL_YD = 12; // target spacing between adjacent clubs, yd — standard full-bag fitting practice
-  const GAP_OVERLAP_FRAC = 0.55; // adjacent clubs whose gap is under this fraction of combined σ are redundant
-
-  // Which clubs this course will genuinely put in your hands, from imported
-  // Which clubs this course will genuinely put in your hands, from imported
-  // hole yardages. Par 4 approach ≈ yards − driver; par 5 ≈ − driver − next.
-  function courseApproachDemand(course) {
-    const desc = sortedClubsDesc();
-    if (!desc.length || !course || !Array.isArray(course.holes)) return [];
-
-    const drv = num(desc[0].yards, 0);
-    const second = desc[1] ? num(desc[1].yards, drv * 0.9) : drv * 0.9;
-    if (drv <= 0) return [];
-
-    const counts = new Map();
-    for (const h of course.holes) {
-      const y = num(h.yards, 0);
-      if (y <= 0) continue;
-      const par = clamp(Math.round(num(h.par, 4)), 3, 6);
-
-      const approach =
-        par <= 3
-          ? y
-          : par === 4
-          ? Math.max(15, y - drv)
-          : Math.max(15, y - drv - second);
-
-      let best = null;
-      for (const c of desc) {
-        const d = Math.abs(num(c.yards, 0) - approach);
-        if (!best || d < best.d) best = { c, d };
-      }
-      if (best) counts.set(best.c.id, (counts.get(best.c.id) || 0) + 1);
-    }
-
-    return [...counts.entries()]
-      .map(([id, n]) => ({ club: desc.find((c) => c.id === id), n }))
-      .filter((o) => o.club)
-      .sort((a, b) => b.n - a.n);
-  }
-
+  /**
+   * SIGNATURE PRESERVED: coachTips(ctx) -> string[]
+   * Now driven by the posterior model: reports which clubs have enough data to trust,
+   * which are still prior-dominated, and where the bag has gaps or overlaps.
+   */
+  const COACH_TRUST_N = 8;           // shots per club before the posterior clearly dominates the prior at ν₀=6
+  const GAP_IDEAL_YD = 12;           // target spacing between adjacent clubs, yd — standard fitting practice for a full bag
+  const GAP_OVERLAP_FRAC = 0.55;     // adjacent clubs whose gap is under this fraction of their combined σ are redundant
   function coachTips(ctx) {
     const tips = [];
     const { total, clubs: clubCount } = shotDataSummary();
     const desc = sortedClubsDesc();
-    const course = getCurrentCourse() || state.selectedCourseTemplate || null;
-    const courseName =
-      course && course.name !== 'Casual Round' ? course.name : null;
 
     if (!total) {
       tips.push(
-        'No tracked shots yet. Start Round mode, choose a club, tap Start shot, walk to your ball, then tap Finish shot. Each accepted shot sharpens your distance and dispersion model.'
+        'No tracked shots yet. Start Round mode, choose a club, tap Start shot, walk to your ball, then tap Finish shot. Each accepted shot improves your distance and dispersion model.'
       );
-      tips.push(
-        `Until then Caddy assumes about ${fmt(
-          priorRelSigma(150) * 100,
-          1
-        )}% relative dispersion. Real data usually beats that guess within 10 shots per club.`
-      );
-      if (courseName) {
-        const demand = courseApproachDemand(course);
-        if (demand.length) {
-          tips.push(
-            `${courseName} will hand you ${demand
-              .slice(0, 3)
-              .map((d) => d.club.name)
-              .join(
-                ', '
-              )} most often. Those are the three worth dialling in first.`
-          );
-        }
-      }
+      tips.push(`Until then Caddy uses a skill prior of about ${fmt(priorRelSigma(150) * 100, 1)}% relative dispersion. Real data typically beats that within 10 shots per club.`);
       return tips;
     }
+    tips.push(`${total} shot${total === 1 ? '' : 's'} logged across ${clubCount} club${clubCount === 1 ? '' : 's'}. Posterior dispersion is now driving your club choices.`);
 
-    tips.push(
-      `${total} shot${total === 1 ? '' : 's'} logged across ${clubCount} club${
-        clubCount === 1 ? '' : 's'
-      }. Posterior dispersion is now driving your club choices.`
-    );
-
-    // Course-weighted practice prescription: thin data × high demand.
-    const demand = courseApproachDemand(course);
-    if (demand.length) {
-      const priority = demand
-        .map((d) => ({ ...d, st: clubStats(d.club.id) }))
-        .filter((d) => (d.st.nEff || 0) < COACH_TRUST_N)
-        .slice(0, 3);
-      if (priority.length) {
-        tips.push(
-          `Highest-leverage practice${
-            courseName ? ` for ${courseName}` : ''
-          }: ${priority
-            .map(
-              (d) =>
-                `${d.club.name} (${d.n} hole${d.n === 1 ? '' : 's'}, only ${fmt(
-                  d.st.nEff,
-                  1
-                )} effective shots)`
-            )
-            .join(
-              '; '
-            )}. Those clubs decide the most shots and have the least data.`
-        );
-      } else {
-        tips.push(
-          `Your data covers the clubs${
-            courseName ? ` ${courseName}` : ' this course'
-          } actually demands — ${demand
-            .slice(0, 3)
-            .map((d) => d.club.name)
-            .join(
-              ', '
-            )}. Recommendations there are evidence-driven, not prior-driven.`
-        );
-      }
-    } else {
-      const thin = desc
-        .map((c) => ({ c, st: clubStats(c.id) }))
-        .filter((o) => (o.st.nEff || 0) < COACH_TRUST_N)
-        .sort((a, b) => (a.st.nEff || 0) - (b.st.nEff || 0));
-      if (thin.length) {
-        tips.push(
-          `Thinnest data: ${thin
-            .slice(0, 3)
-            .map((o) => o.c.name)
-            .join(
-              ', '
-            )}. About ${COACH_TRUST_N} tracked shots each and the model stops guessing for them.`
-        );
-      }
+    // Which clubs need data most? Rank by prior weight still remaining.
+    const thin = desc.map((c) => ({ c, st: clubStats(c.id) }))
+      .filter((o) => (o.st.nEff || 0) < COACH_TRUST_N)
+      .sort((a, b) => (a.st.nEff || 0) - (b.st.nEff || 0));
+    if (thin.length) {
+      const names = thin.slice(0, 3).map((o) => o.c.name).join(', ');
+      tips.push(`Thinnest data: ${names}. About ${COACH_TRUST_N} tracked shots each and the model stops guessing for them.`);
     }
 
-    // Stock numbers the data contradicts.
+    // Is any club's stock number contradicted by the data?
     for (const c of desc) {
       const st = clubStats(c.id);
-      if ((st.nEff || 0) < SHOT_MIN_TRUST_N || !Number.isFinite(st.ciLo))
-        continue;
+      if ((st.nEff || 0) < SHOT_MIN_TRUST_N || !Number.isFinite(st.ciLo)) continue;
       const stock = num(c.yards, 0);
       if (stock > 0 && (stock < st.ciLo || stock > st.ciHi)) {
-        tips.push(
-          `${c.name} is set to ${stock} yd but your tracked carry is ${fmt(
-            st.meanPost
-          )} yd (95% CI ${fmt(st.ciLo)}–${fmt(
-            st.ciHi
-          )}). Update it in the Clubs tab — every recommendation keys off that number.`
-        );
+        tips.push(`${c.name} is set to ${stock} yd but your tracked carry is ${fmt(st.meanPost)} yd (95% CI ${fmt(st.ciLo)}–${fmt(st.ciHi)}). Update it in the Clubs tab.`);
         break;
       }
     }
-
-    // Widest club, by relative dispersion — where strokes leak fastest.
-    const spread = desc
-      .map((c) => ({ c, st: clubStats(c.id) }))
-      .filter((o) => (o.st.nEff || 0) >= SHOT_MIN_TRUST_N && o.st.meanPost > 0)
-      .map((o) => ({ ...o, rel: o.st.sigmaPost / o.st.meanPost }))
-      .sort((a, b) => b.rel - a.rel);
-    if (
-      spread.length &&
-      spread[0].rel > priorRelSigma(spread[0].st.meanPost) * 1.15
-    ) {
-      tips.push(
-        `${spread[0].c.name} is your least repeatable club at ±${fmt(
-          spread[0].st.sigmaPost,
-          1
-        )} yd (${fmt(
-          spread[0].rel * 100,
-          1
-        )}% of carry) — wider than expected for that distance. Strike quality, not yardage, is the fix.`
-      );
-    }
-
-    // Trend.
+    // Trend detection.
     for (const c of desc) {
       const st = clubStats(c.id);
-      if (
-        Number.isFinite(st.trendYdPer30d) &&
-        Math.abs(st.trendYdPer30d) >= 3
-      ) {
-        tips.push(
-          st.trendYdPer30d > 0
-            ? `${c.name} is trending ~${fmt(
-                st.trendYdPer30d,
-                1
-              )} yd longer per month — you are gaining speed. Re-check its stock number.`
-            : `${c.name} is trending ~${fmt(
-                -st.trendYdPer30d,
-                1
-              )} yd shorter per month — worth checking strike or equipment.`
-        );
+      if (Number.isFinite(st.trendYdPer30d) && Math.abs(st.trendYdPer30d) >= 3) {
+        tips.push(st.trendYdPer30d > 0
+          ? `${c.name} is trending ~${fmt(st.trendYdPer30d, 1)} yd longer per month — you are gaining speed.`
+          : `${c.name} is trending ~${fmt(-st.trendYdPer30d, 1)} yd shorter per month — worth checking strike or equipment.`);
         break;
       }
     }
-
-    // Gapping, weighted toward gaps this course exposes.
-    const gaps = gapAnalysis().filter((g) => g.verdict !== 'ok');
-    if (gaps.length) {
-      const demandIds = new Set(demand.map((d) => d.club.id));
-      const relevant =
-        gaps.find((g) => demandIds.has(g.hi.id) || demandIds.has(g.lo.id)) ||
-        gaps[0];
-      tips.push(relevant.note);
-    }
-
+    // Gapping.
+    const gaps = gapAnalysis();
+    const bad = gaps.find((g) => g.verdict !== 'ok');
+    if (bad) tips.push(bad.note);
     return tips;
   }
   // ============================================================
@@ -9874,14 +7576,12 @@ out geom qt;`;
   //  Replaces: gpsAccMeters, fixIsUsable, finishShot
   // ============================================================
 
-  const SHOT_SNR_MIN = 4.0; // require the measured displacement to exceed 4σ of its own uncertainty
-  const SHOT_LATERAL_MAX_DEG = 45; // beyond this off-line the "shot" is a re-tee or a walk, not a swing
-  const SHOT_DWELL_MS = 1500; // require the fix to have settled this long before trusting a capture
+  const SHOT_SNR_MIN = 4.0;          // require the measured displacement to exceed 4σ of its own uncertainty
+  const SHOT_LATERAL_MAX_DEG = 45;   // beyond this off-line the "shot" is a re-tee or a walk, not a swing
+  const SHOT_DWELL_MS = 1500;        // require the fix to have settled this long before trusting a capture
 
   function gpsAccMeters() {
-    return state.loc && Number.isFinite(state.loc.accuracy)
-      ? state.loc.accuracy
-      : Infinity;
+    return state.loc && Number.isFinite(state.loc.accuracy) ? state.loc.accuracy : Infinity;
   }
   function fixIsUsable() {
     if (!state.loc || state.locStale) return false;
@@ -9901,20 +7601,8 @@ out geom qt;`;
   function finishShot(discard) {
     const rs = state.roundSession;
     if (!rs || !rs.pending) return;
-    if (discard && !state.loc) {
-      // Discarding with no fix at all: drop the pending shot cleanly.
-      rs.pending = null;
-      rs.status = 'active';
-      saveRoundSession();
-      renderRoundShotUI();
-      setNotice('Shot discarded.', 'greenish');
-      return;
-    }
     if (!discard && !fixIsUsable()) {
-      setNotice(
-        'Need a good, settled GPS fix to measure the shot. Stand still for a moment, or discard.',
-        'danger'
-      );
+      setNotice('Need a good, settled GPS fix to measure the shot. Stand still for a moment, or discard.', 'danger');
       haptic(12);
       return;
     }
@@ -9926,11 +7614,7 @@ out geom qt;`;
     // Signed lateral offset from the intended line via the exact cross-track projection.
     let lateralYd = null;
     if (p.intendedBearing != null && distanceYd > 0) {
-      const aimPt = geodesicDirect(
-        p.startPt,
-        p.intendedBearing,
-        distanceYd * YD_TO_M
-      );
+      const aimPt = geodesicDirect(p.startPt, p.intendedBearing, distanceYd * YD_TO_M);
       lateralYd = Math.round(-crossTrackYd(p.startPt, aimPt, endPt));
     }
 
@@ -9939,36 +7623,22 @@ out geom qt;`;
 
     // Statistical rejection instead of a fixed 8 yd floor.
     const sigYd = shotDistanceSigmaYd(p.startAcc, gpsAccMeters());
-    const belowNoise =
-      distanceYd < Math.max(ROUND_MIN_SHOT_YD, SHOT_SNR_MIN * sigYd);
-    const wayOffLine =
-      p.intendedBearing != null &&
+    const belowNoise = distanceYd < Math.max(ROUND_MIN_SHOT_YD, SHOT_SNR_MIN * sigYd);
+    const wayOffLine = p.intendedBearing != null &&
       Math.abs(angleDiff(bearingDeg, p.intendedBearing)) > SHOT_LATERAL_MAX_DEG;
     const doDiscard = !!discard || belowNoise;
 
     let counted = false;
     if (!doDiscard && p.clubId && !wayOffLine)
-      counted = logShot(
-        p.clubId,
-        distanceYd,
-        baseline,
-        lateralYd,
-        gpsAccMeters()
-      );
+      counted = logShot(p.clubId, distanceYd, baseline, lateralYd, gpsAccMeters());
 
     rs.shots.push({
-      clubId: p.clubId,
-      startPt: p.startPt,
-      endPt,
+      clubId: p.clubId, startPt: p.startPt, endPt,
       distanceYd: Math.round(distanceYd),
       bearingDeg: Math.round(bearingDeg),
-      intendedBearing:
-        p.intendedBearing == null ? null : Math.round(p.intendedBearing),
-      lateralYd,
-      hole: rs.hole,
-      ts: Date.now(),
-      discarded: doDiscard,
-      counted,
+      intendedBearing: p.intendedBearing == null ? null : Math.round(p.intendedBearing),
+      lateralYd, hole: rs.hole, ts: Date.now(),
+      discarded: doDiscard, counted,
     });
     rs.pending = null;
     rs.status = 'active';
@@ -9976,42 +7646,17 @@ out geom qt;`;
     renderRoundShotUI();
 
     if (belowNoise && !discard)
-      setNotice(
-        `Only ${Math.round(distanceYd)} yd — inside GPS noise (±${fmt(
-          sigYd
-        )} yd). Logged as non-counting.`,
-        'greenish'
-      );
+      setNotice(`Only ${Math.round(distanceYd)} yd — inside GPS noise (±${fmt(sigYd)} yd). Logged as non-counting.`, 'greenish');
     else if (doDiscard)
-      setNotice(
-        'Shot discarded — kept in history, excluded from your model.',
-        'greenish'
-      );
+      setNotice('Shot discarded — kept in history, excluded from your model.', 'greenish');
     else if (wayOffLine)
-      setNotice(
-        `${Math.round(distanceYd)} yd but ${Math.round(
-          Math.abs(angleDiff(bearingDeg, p.intendedBearing))
-        )}° off line — recorded, excluded from distance stats.`,
-        'greenish'
-      );
+      setNotice(`${Math.round(distanceYd)} yd but ${Math.round(Math.abs(angleDiff(bearingDeg, p.intendedBearing)))}° off line — recorded, excluded from distance stats.`, 'greenish');
     else if (counted) {
       const st = clubStats(p.clubId);
-      setNotice(
-        `${club ? club.name : 'Shot'}: ${Math.round(distanceYd)} yd (±${fmt(
-          sigYd
-        )} yd GPS). ` +
-          `Carry model now ${fmt(st.meanPost)} ± ${fmt(st.sigmaPost)} yd from ${
-            st.n
-          } shot${st.n === 1 ? '' : 's'}.`,
-        'greenish'
-      );
+      setNotice(`${club ? club.name : 'Shot'}: ${Math.round(distanceYd)} yd (±${fmt(sigYd)} yd GPS). ` +
+        `Carry model now ${fmt(st.meanPost)} ± ${fmt(st.sigmaPost)} yd from ${st.n} shot${st.n === 1 ? '' : 's'}.`, 'greenish');
     } else
-      setNotice(
-        `${Math.round(
-          distanceYd
-        )} yd recorded (outside normal range — excluded from club stats).`,
-        'greenish'
-      );
+      setNotice(`${Math.round(distanceYd)} yd recorded (outside normal range — excluded from club stats).`, 'greenish');
 
     haptic(10);
     if (state.target && state.loc) calculateRange();
@@ -10031,11 +7676,9 @@ out geom qt;`;
     const desc = sortedClubsDesc();
     const out = [];
     for (let i = 0; i < desc.length - 1; i++) {
-      const hi = desc[i],
-        lo = desc[i + 1];
+      const hi = desc[i], lo = desc[i + 1];
       const gap = hi.yards - lo.yards;
-      const sHi = clubSigmaDistYd(hi),
-        sLo = clubSigmaDistYd(lo);
+      const sHi = clubSigmaDistYd(hi), sLo = clubSigmaDistYd(lo);
       const sComb = Math.sqrt(sHi * sHi + sLo * sLo);
       // Probability that a shot aimed at the midpoint misses both clubs' comfortable range.
       const mid = (hi.yards + lo.yards) / 2;
@@ -10043,24 +7686,13 @@ out geom qt;`;
         1 - normCdf((mid - lo.yards) / Math.max(EPS, sLo)),
         normCdf((mid - hi.yards) / Math.max(EPS, sHi))
       );
-      let verdict = 'ok',
-        note = '';
+      let verdict = 'ok', note = '';
       if (gap > 1.9 * sComb && gap > GAP_IDEAL_YD * 1.6) {
         verdict = 'gap';
-        note = `${gap} yd between ${hi.name} and ${
-          lo.name
-        } is wider than your dispersion (±${fmt(
-          sComb
-        )} yd) can bridge — around ${Math.round(
-          mid
-        )} yd you have no comfortable club.`;
+        note = `${gap} yd between ${hi.name} and ${lo.name} is wider than your dispersion (±${fmt(sComb)} yd) can bridge — around ${Math.round(mid)} yd you have no comfortable club.`;
       } else if (gap < GAP_OVERLAP_FRAC * sComb) {
         verdict = 'overlap';
-        note = `${hi.name} and ${
-          lo.name
-        } are only ${gap} yd apart versus ±${fmt(
-          sComb
-        )} yd of spread — statistically the same club. One slot is wasted.`;
+        note = `${hi.name} and ${lo.name} are only ${gap} yd apart versus ±${fmt(sComb)} yd of spread — statistically the same club. One slot is wasted.`;
       }
       out.push({ hi, lo, gap, sComb, pMid, verdict, note });
     }
@@ -10082,8 +7714,7 @@ out geom qt;`;
 
     const desc = sortedClubsDesc();
     if (!total || !desc.length) {
-      pb.innerHTML =
-        '<div class="hint">Track shots to see per-club posterior carry, dispersion and gapping here.</div>';
+      pb.innerHTML = '<div class="hint">Track shots to see per-club posterior carry, dispersion and gapping here.</div>';
       return;
     }
     const rows = [];
@@ -10092,63 +7723,29 @@ out geom qt;`;
       if (!st.n) continue;
       const disp = clubDispersionYd(c);
       const rel = st.meanPost > 0 ? (st.sigmaPost / st.meanPost) * 100 : NaN;
-      const ci = Number.isFinite(st.ciLo)
-        ? `${fmt(st.ciLo)}–${fmt(st.ciHi)}`
-        : '—';
-      const flag =
-        num(c.yards, 0) > 0 &&
-        Number.isFinite(st.ciLo) &&
-        (c.yards < st.ciLo || c.yards > st.ciHi)
-          ? ' ⚠︎'
-          : '';
+      const ci = Number.isFinite(st.ciLo) ? `${fmt(st.ciLo)}–${fmt(st.ciHi)}` : '—';
+      const flag = num(c.yards, 0) > 0 && Number.isFinite(st.ciLo) &&
+        (c.yards < st.ciLo || c.yards > st.ciHi) ? ' ⚠︎' : '';
       rows.push(
         `<div class="break-row"><span>${escapeHtml(c.name)}${flag}</span>` +
-          `<b>${fmt(st.meanPost)} ±${fmt(st.sigmaPost, 1)} yd · ${fmt(
-            rel,
-            1
-          )}% · ` +
-          `n=${st.n} (n<sub>eff</sub> ${fmt(
-            st.nEff,
-            1
-          )}) · CI ${ci} · band ±${disp}</b></div>`
+        `<b>${fmt(st.meanPost)} ±${fmt(st.sigmaPost, 1)} yd · ${fmt(rel, 1)}% · ` +
+        `n=${st.n} (n<sub>eff</sub> ${fmt(st.nEff, 1)}) · CI ${ci} · band ±${disp}</b></div>`
       );
       if (Number.isFinite(st.lateralSigma))
-        rows.push(
-          `<div class="break-row"><span style="opacity:.6">↳ lateral σ</span>` +
-            `<b style="opacity:.75">±${fmt(st.lateralSigma, 1)} yd (${fmt(
-              (st.lateralSigma / Math.max(1, st.meanPost)) * 100,
-              1
-            )}%)</b></div>`
-        );
-      if (
-        Number.isFinite(st.trendYdPer30d) &&
-        Math.abs(st.trendYdPer30d) >= 1.5
-      )
-        rows.push(
-          `<div class="break-row"><span style="opacity:.6">↳ trend</span>` +
-            `<b style="opacity:.75">${st.trendYdPer30d > 0 ? '+' : ''}${fmt(
-              st.trendYdPer30d,
-              1
-            )} yd / 30 d</b></div>`
-        );
+        rows.push(`<div class="break-row"><span style="opacity:.6">↳ lateral σ</span>` +
+          `<b style="opacity:.75">±${fmt(st.lateralSigma, 1)} yd (${fmt((st.lateralSigma / Math.max(1, st.meanPost)) * 100, 1)}%)</b></div>`);
+      if (Number.isFinite(st.trendYdPer30d) && Math.abs(st.trendYdPer30d) >= 1.5)
+        rows.push(`<div class="break-row"><span style="opacity:.6">↳ trend</span>` +
+          `<b style="opacity:.75">${st.trendYdPer30d > 0 ? '+' : ''}${fmt(st.trendYdPer30d, 1)} yd / 30 d</b></div>`);
     }
     const gaps = gapAnalysis().filter((g) => g.verdict !== 'ok');
     if (gaps.length) {
-      rows.push(
-        '<div class="break-row" style="margin-top:6px"><span><b>— Gapping —</b></span><b></b></div>'
-      );
+      rows.push('<div class="break-row" style="margin-top:6px"><span><b>— Gapping —</b></span><b></b></div>');
       for (const g of gaps)
-        rows.push(
-          `<div class="break-row"><span>${escapeHtml(g.hi.name)} → ${escapeHtml(
-            g.lo.name
-          )}</span>` +
-            `<b>${g.gap} yd · ${
-              g.verdict === 'gap' ? 'too wide' : 'redundant'
-            }</b></div>`
-        );
+        rows.push(`<div class="break-row"><span>${escapeHtml(g.hi.name)} → ${escapeHtml(g.lo.name)}</span>` +
+          `<b>${g.gap} yd · ${g.verdict === 'gap' ? 'too wide' : 'redundant'}</b></div>`);
     }
-    pb.innerHTML = rows.length
-      ? rows.join('')
+    pb.innerHTML = rows.length ? rows.join('')
       : '<div class="hint">No shots tracked yet.</div>';
   }
   // ============================================================
@@ -10156,9 +7753,9 @@ out geom qt;`;
   //  Replaces: summarizeRound, renderStats
   // ============================================================
 
-  const STATS_CONF = 0.9; // reporting confidence for rate intervals; 90% is the right call at ~14 samples
-  const HISTORY_HALFLIFE_ROUNDS = 8; // exponential recency half-life for history averages, rounds
-  const PUTTS_PAR_BASELINE = 1.75; // Tour putts per green hit in regulation — Broadie, Every Shot Counts (2014) ch.5
+  const STATS_CONF = 0.90;             // reporting confidence for rate intervals; 90% is the right call at ~14 samples
+  const HISTORY_HALFLIFE_ROUNDS = 8;   // exponential recency half-life for history averages, rounds
+  const PUTTS_PAR_BASELINE = 1.75;     // Tour putts per green hit in regulation — Broadie, Every Shot Counts (2014) ch.5
 
   /**
    * SIGNATURE PRESERVED: summarizeRound(round) -> all original keys, plus extras.
@@ -10166,13 +7763,9 @@ out geom qt;`;
    */
   function summarizeRound(round) {
     const rows = Array.isArray(round) ? round : [];
-    const played = rows.filter(
-      (r) => r.score !== '' && Number.isFinite(Number(r.score))
-    );
+    const played = rows.filter((r) => r.score !== '' && Number.isFinite(Number(r.score)));
     const totalScore = played.reduce((s, r) => s + num(r.score, 0), 0);
-    const puttRows = rows.filter(
-      (r) => r.putts !== '' && Number.isFinite(Number(r.putts))
-    );
+    const puttRows = rows.filter((r) => r.putts !== '' && Number.isFinite(Number(r.putts)));
     const totalPutts = puttRows.reduce((s, r) => s + num(r.putts, 0), 0);
     const firRows = rows.filter((r) => r.fir === 'Y' || r.fir === 'N');
     const firMade = firRows.filter((r) => r.fir === 'Y').length;
@@ -10181,56 +7774,28 @@ out geom qt;`;
 
     // Putts split by whether the green was hit — the single most diagnostic split available
     // from this scorecard, because putts on missed greens conflate chipping with putting.
-    const girHoles = rows.filter(
-      (r) => r.gir === 'Y' && r.putts !== '' && Number.isFinite(Number(r.putts))
-    );
-    const nonGirHoles = rows.filter(
-      (r) => r.gir === 'N' && r.putts !== '' && Number.isFinite(Number(r.putts))
-    );
-    const puttsOnGir = girHoles.length
-      ? girHoles.reduce((s, r) => s + num(r.putts, 0), 0) / girHoles.length
-      : null;
-    const puttsOffGir = nonGirHoles.length
-      ? nonGirHoles.reduce((s, r) => s + num(r.putts, 0), 0) /
-        nonGirHoles.length
-      : null;
+    const girHoles = rows.filter((r) => r.gir === 'Y' && r.putts !== '' && Number.isFinite(Number(r.putts)));
+    const nonGirHoles = rows.filter((r) => r.gir === 'N' && r.putts !== '' && Number.isFinite(Number(r.putts)));
+    const puttsOnGir = girHoles.length ? girHoles.reduce((s, r) => s + num(r.putts, 0), 0) / girHoles.length : null;
+    const puttsOffGir = nonGirHoles.length ? nonGirHoles.reduce((s, r) => s + num(r.putts, 0), 0) / nonGirHoles.length : null;
     const scores = played.map((r) => num(r.score, 0));
-    const scoreSd =
-      scores.length >= 2
-        ? Math.sqrt(
-            scores.reduce(
-              (a, b) => a + (b - totalScore / scores.length) ** 2,
-              0
-            ) /
-              (scores.length - 1)
-          )
-        : null;
+    const scoreSd = scores.length >= 2
+      ? Math.sqrt(scores.reduce((a, b) => a + (b - totalScore / scores.length) ** 2, 0) / (scores.length - 1)) : null;
     // Unbiased 18-hole projection with its own standard error, rather than a bare sum.
     const proj = played.length ? (totalScore / played.length) * 18 : null;
-    const projSe =
-      played.length >= 2 && scoreSd != null
-        ? 18 *
-          (scoreSd / Math.sqrt(played.length)) *
-          Math.sqrt(Math.max(0, (18 - played.length) / 17))
-        : null;
+    const projSe = played.length >= 2 && scoreSd != null
+      ? 18 * (scoreSd / Math.sqrt(played.length)) * Math.sqrt(Math.max(0, (18 - played.length) / 17)) : null;
 
     return {
-      played: played.length,
-      totalScore,
-      puttRows: puttRows.length,
-      totalPutts,
-      firRows: firRows.length,
-      firMade,
-      girRows: girRows.length,
-      girMade,
+      played: played.length, totalScore,
+      puttRows: puttRows.length, totalPutts,
+      firRows: firRows.length, firMade,
+      girRows: girRows.length, girMade,
       // extras
       firCI: wilsonInterval(firMade, firRows.length, STATS_CONF),
       girCI: wilsonInterval(girMade, girRows.length, STATS_CONF),
-      puttsOnGir,
-      puttsOffGir,
-      scoreSd,
-      projected18: proj,
-      projected18Se: projSe,
+      puttsOnGir, puttsOffGir, scoreSd,
+      projected18: proj, projected18Se: projSe,
       threePutts: puttRows.filter((r) => num(r.putts, 0) >= 3).length,
       onePutts: puttRows.filter((r) => num(r.putts, 0) === 1).length,
     };
@@ -10241,49 +7806,26 @@ out geom qt;`;
     const s = summarizeRound(state.round);
     els.statScore.textContent = s.played ? `${s.totalScore}` : '—';
     els.statPutts.textContent = s.puttRows ? `${s.totalPutts}` : '—';
-    els.statFir.textContent = s.firRows
-      ? `${Math.round(s.firCI.p * 100)}%`
-      : '—';
-    els.statGir.textContent = s.girRows
-      ? `${Math.round(s.girCI.p * 100)}%`
-      : '—';
+    els.statFir.textContent = s.firRows ? `${Math.round(s.firCI.p * 100)}%` : '—';
+    els.statGir.textContent = s.girRows ? `${Math.round(s.girCI.p * 100)}%` : '—';
 
     const avgScore = s.played ? s.totalScore / s.played : null;
     const avgPutts = s.puttRows ? s.totalPutts / s.puttRows : null;
-    const pctCI = (ci) =>
-      ci && ci.n
-        ? `${Math.round(ci.p * 100)}% (${Math.round(ci.lo * 100)}–${Math.round(
-            ci.hi * 100
-          )}%, n=${ci.n})`
-        : '—';
+    const pctCI = (ci) => ci && ci.n
+      ? `${ci.n ? `${Math.round(ci.p * 100)}%` : '—'} (${Math.round(ci.lo * 100)}–${Math.round(ci.hi * 100)}%, n=${ci.n})`
+      : '—';
 
     const rows = [
       ['Holes entered', `${s.played} / 18`],
       ['Avg score / hole', avgScore === null ? '—' : fmt(avgScore, 2)],
       ['Score SD / hole', s.scoreSd === null ? '—' : fmt(s.scoreSd, 2)],
-      [
-        'Projected 18',
-        s.projected18 === null
-          ? '—'
-          : `${fmt(s.projected18, 1)}${
-              s.projected18Se ? ` ± ${fmt(s.projected18Se, 1)}` : ''
-            }`,
-      ],
+      ['Projected 18', s.projected18 === null ? '—'
+        : `${fmt(s.projected18, 1)}${s.projected18Se ? ` ± ${fmt(s.projected18Se, 1)}` : ''}`],
       ['Avg putts / hole', avgPutts === null ? '—' : fmt(avgPutts, 2)],
-      [
-        'Putts when GIR',
-        s.puttsOnGir === null
-          ? '—'
-          : `${fmt(s.puttsOnGir, 2)} (Tour ${PUTTS_PAR_BASELINE})`,
-      ],
-      [
-        'Putts when missed',
-        s.puttsOffGir === null ? '—' : fmt(s.puttsOffGir, 2),
-      ],
-      [
-        '1-putts / 3-putts',
-        s.puttRows ? `${s.onePutts} / ${s.threePutts}` : '—',
-      ],
+      ['Putts when GIR', s.puttsOnGir === null ? '—'
+        : `${fmt(s.puttsOnGir, 2)} (Tour ${PUTTS_PAR_BASELINE})`],
+      ['Putts when missed', s.puttsOffGir === null ? '—' : fmt(s.puttsOffGir, 2)],
+      ['1-putts / 3-putts', s.puttRows ? `${s.onePutts} / ${s.threePutts}` : '—'],
       [`Fairways (${Math.round(STATS_CONF * 100)}% CI)`, pctCI(s.firCI)],
       [`Greens (${Math.round(STATS_CONF * 100)}% CI)`, pctCI(s.girCI)],
     ];
@@ -10291,72 +7833,32 @@ out geom qt;`;
     const hist = state.history || [];
     if (hist.length) {
       // Recency-weighted history: an eight-round half-life keeps averages responsive.
-      const w = hist.map((_, i) =>
-        Math.pow(0.5, (hist.length - 1 - i) / HISTORY_HALFLIFE_ROUNDS)
-      );
+      const w = hist.map((_, i) => Math.pow(0.5, (hist.length - 1 - i) / HISTORY_HALFLIFE_ROUNDS));
       const wAvg = (vals) => {
-        const pairs = vals
-          .map((v, i) => [v, w[i]])
-          .filter(([v]) => Number.isFinite(v));
+        const pairs = vals.map((v, i) => [v, w[i]]).filter(([v]) => Number.isFinite(v));
         if (!pairs.length) return null;
         const sw = pairs.reduce((a, [, ww]) => a + ww, 0);
         return pairs.reduce((a, [v, ww]) => a + v * ww, 0) / sw;
       };
       const scores = hist.map((h) => h.totalScore);
       const putts = hist.map((h) => h.totalPutts);
-      const firPct = hist.map((h) =>
-        h.firRows ? (100 * h.firMade) / h.firRows : NaN
-      );
-      const girPct = hist.map((h) =>
-        h.girRows ? (100 * h.girMade) / h.girRows : NaN
-      );
+      const firPct = hist.map((h) => (h.firRows ? (100 * h.firMade) / h.firRows : NaN));
+      const girPct = hist.map((h) => (h.girRows ? (100 * h.girMade) / h.girRows : NaN));
       const valid = scores.filter(Number.isFinite);
       // Robust trend in score over rounds.
-      const idx = scores
-        .map((_, i) => i)
-        .filter((i) => Number.isFinite(scores[i]));
-      const ts =
-        idx.length >= 4
-          ? theilSen(
-              idx,
-              idx.map((i) => scores[i])
-            )
-          : null;
+      const idx = scores.map((_, i) => i).filter((i) => Number.isFinite(scores[i]));
+      const ts = idx.length >= 4 ? theilSen(idx, idx.map((i) => scores[i])) : null;
 
-      rows.push([
-        '— History —',
-        `${hist.length} round${hist.length > 1 ? 's' : ''}`,
-      ]);
+      rows.push(['— History —', `${hist.length} round${hist.length > 1 ? 's' : ''}`]);
       rows.push(['Best score', valid.length ? Math.min(...valid) : '—']);
-      rows.push([
-        'Recent avg score',
-        wAvg(scores) === null ? '—' : fmt(wAvg(scores), 1),
-      ]);
-      rows.push([
-        'Recent avg putts',
-        wAvg(putts) === null ? '—' : fmt(wAvg(putts), 1),
-      ]);
-      rows.push([
-        'Recent avg FIR',
-        wAvg(firPct) === null ? '—' : `${fmt(wAvg(firPct))}%`,
-      ]);
-      rows.push([
-        'Recent avg GIR',
-        wAvg(girPct) === null ? '—' : `${fmt(wAvg(girPct))}%`,
-      ]);
-      if (ts)
-        rows.push([
-          'Trend',
-          `${ts.slope >= 0 ? '+' : ''}${fmt(ts.slope, 2)} strokes / round`,
-        ]);
+      rows.push(['Recent avg score', wAvg(scores) === null ? '—' : fmt(wAvg(scores), 1)]);
+      rows.push(['Recent avg putts', wAvg(putts) === null ? '—' : fmt(wAvg(putts), 1)]);
+      rows.push(['Recent avg FIR', wAvg(firPct) === null ? '—' : `${fmt(wAvg(firPct))}%`]);
+      rows.push(['Recent avg GIR', wAvg(girPct) === null ? '—' : `${fmt(wAvg(girPct))}%`]);
+      if (ts) rows.push(['Trend', `${ts.slope >= 0 ? '+' : ''}${fmt(ts.slope, 2)} strokes / round`]);
     }
     els.statsBreakdown.innerHTML = rows
-      .map(
-        ([k, v]) =>
-          `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(
-            v
-          )}</b></div>`
-      )
+      .map(([k, v]) => `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`)
       .join('');
   }
   // ============================================================
@@ -10370,47 +7872,33 @@ out geom qt;`;
       els.rawLabel.textContent = 'Tap a target';
       els.playsLikeYards.textContent = '—';
       els.clubRecommendation.textContent = 'No target selected';
-      els.clubRecommendationSub.textContent =
-        'Tap a point on the map for club guidance.';
+      els.clubRecommendationSub.textContent = 'Tap a point on the map for club guidance.';
       renderCaddyTips([]);
       updateAdvice([], 'neutral');
       renderFcb();
       return;
     }
-    const w = getWeatherOrNeutral(),
-      e = getElevationOrNeutral();
+    const w = getWeatherOrNeutral(), e = getElevationOrNeutral();
     const meanAltM = ((e.targetFt + e.userFt) / 2) * FT_TO_M;
-    const horizontalYd =
-      haversineMeters(state.loc, state.target, meanAltM) * M_TO_YD;
+    const horizontalYd = haversineMeters(state.loc, state.target, meanAltM) * M_TO_YD;
     const bearing = initialBearingDeg(state.loc, state.target);
 
     const calc = playsLike({
-      horizontalYd,
-      bearingDeg: bearing,
+      horizontalYd, bearingDeg: bearing,
       elevDiffFt: e.targetFt - e.userFt,
       courseAltitudeFt: (e.targetFt + e.userFt) / 2,
-      tempF: w.tempF,
-      rh: w.rh,
-      windMph: w.windMph,
-      windFromDeg: w.windFromDeg,
-      pressureHpa: w.pressureHpa,
-      gustMph: w.gustMph,
-      shearAlpha: w.shearAlpha,
-      latDeg: state.loc.lat,
-      lieYd: 0,
+      tempF: w.tempF, rh: w.rh,
+      windMph: w.windMph, windFromDeg: w.windFromDeg,
+      pressureHpa: w.pressureHpa, gustMph: w.gustMph, shearAlpha: w.shearAlpha,
+      latDeg: state.loc.lat, lieYd: 0,
     });
     state.lastCalc = calc;
 
     els.rawYards.textContent = fmt(horizontalYd);
-    let label = `actual yds · aim ${bearingToCompass(bearing)} (${fmt(
-      bearing
-    )}°)`;
+    let label = `actual yds · aim ${bearingToCompass(bearing)} (${fmt(bearing)}°)`;
     if (state.greenCenter && state.target) {
       const lo = leftoverToGreen(state.loc, state.target, state.greenCenter);
-      if (lo)
-        label = `actual yds · ${formatLeftover(lo)} · aim ${bearingToCompass(
-          bearing
-        )}`;
+      if (lo) label = `actual yds · ${formatLeftover(lo)} · aim ${bearingToCompass(bearing)}`;
     }
     els.rawLabel.textContent = label;
     els.playsLikeYards.textContent = fmt(calc.playsLikeYd);
@@ -10419,44 +7907,20 @@ out geom qt;`;
 
     const accYd = state.loc.accuracy ? state.loc.accuracy * M_TO_YD : 999;
 
-    if (horizontalYd <= 3)
-      setNotice('Very close target — no full shot needed.', 'greenish');
-    else if (horizontalYd < 20)
-      setNotice('Very close — chip or putt; no full swing.', 'greenish');
+    if (horizontalYd <= 3) setNotice('Very close target — no full shot needed.', 'greenish');
+    else if (horizontalYd < 20) setNotice('Very close — chip or putt; no full swing.', 'greenish');
     else if (state.locStale)
-      setNotice(
-        'Using last-known location (stale). Tap the GPS pill for a fresh fix.',
-        'danger'
-      );
+      setNotice('Using last-known location (stale). Tap the GPS pill for a fresh fix.', 'danger');
     else if (accYd > ACCURACY_WARN_YD)
-      setNotice(
-        `GPS accuracy is ±${fmt(
-          accYd
-        )} yd (worse than ${ACCURACY_WARN_YD} yd). Yardage may be unreliable.`,
-        'danger'
-      );
+      setNotice(`GPS accuracy is ±${fmt(accYd)} yd (worse than ${ACCURACY_WARN_YD} yd). Yardage may be unreliable.`, 'danger');
     else if (calc.solverReached === false)
-      setNotice(
-        'Target sits above the ball flight apex for this distance — the number is extrapolated. Treat it as a minimum.',
-        'danger'
-      );
+      setNotice('Target sits above the ball flight apex for this distance — the number is extrapolated. Treat it as a minimum.', 'danger');
     else if (e.blindFt > BLIND_CLEARANCE_FT)
-      setNotice(
-        `Blind shot — terrain rises ~${Math.round(
-          e.blindFt
-        )} ft above your sight line. Pick a horizon aim point.`,
-        'greenish'
-      );
+      setNotice(`Blind shot — terrain rises ~${Math.round(e.blindFt)} ft above your sight line. Pick a horizon aim point.`, 'greenish');
     else if (state.context.offlineWeather || state.context.offlineElevation)
-      setNotice(
-        'Using cached/offline weather or elevation where available. Neutral defaults fill any gaps.',
-        'greenish'
-      );
+      setNotice('Using cached/offline weather or elevation where available. Neutral defaults fill any gaps.', 'greenish');
     else
-      setNotice(
-        'Tap another point to move the target. Front/Center/Back update automatically on a mapped green — or set them by hand.',
-        'greenish'
-      );
+      setNotice('Tap another point to move the target. Long-press the green (or Set Front/Back) for edge yardages.', 'greenish');
 
     const geo = greenGeometry();
     const hasGreen =
@@ -10495,9 +7959,11 @@ out geom qt;`;
       smart && smart.club
         ? smart.club
         : sortedClubsAsc().find((c) => c.yards >= calc.playsLikeYd) ||
-          sortedClubsDesc()[0];
+        sortedClubsDesc()[0];
 
-    state.lastRecClubId = recClub ? recClub.id : state.lastRecClubId;
+    state.lastRecClubId = recClub
+      ? recClub.id
+      : state.lastRecClubId;
 
     els.clubRecommendation.textContent = rec.main;
     let sub = rec.sub;
@@ -10517,60 +7983,32 @@ out geom qt;`;
     const longerC = ascC.find((c) => c.yards >= calc.playsLikeYd);
     const longestC = sortedClubsDesc()[0];
     const wr = windRelative(w.windFromDeg, bearing, w.windMph);
-    const holeNow = state.roundSession ? getCurrentHoleData() : null;
-    const scoreNow = state.roundSession ? roundScoreToPar() : null;
-    const recSigmaYd = recClub ? clubSigmaDistYd(recClub) : NaN;
-
-    const baseTips = caddyTips(
-      {
-        plays: calc.playsLikeYd,
-        along: wr.along,
-        cross: wr.cross,
-        elevFt: calc.elevDiffFt,
-        gap: longerC ? longerC.yards - calc.playsLikeYd : null,
-        longerName: longerC ? longerC.name : '',
-        beyondLongest: longestC && calc.playsLikeYd > longestC.yards * 1.08,
-        accYd,
-        aimYd: calc.aimYd,
-        aimDeg: calc.aimDeg,
-        gustYd: calc.gustYd,
-        windAdjYd: calc.windAdjYd,
-        elevAdjYd: calc.elevAdjYd,
-        tempAdjYd: calc.tempAdjYd,
-        altitudeAdjYd: calc.altitudeAdjYd,
-        densityRatio: calc.densityRatio,
-        apexFt: calc.apexFt,
-        descentDeg: calc.descentDeg,
-        blindFt: e.blindFt,
-
-        // imported-course context
-        hazards: holeHazardCarries(),
-        recClubName: recClub ? recClub.name : null,
-        recCarryYd: recClub ? num(recClub.yards, NaN) : NaN,
-        recSigmaYd,
-        greenDepthYds: holeNow ? num(holeNow.greenDepthYds, NaN) : NaN,
-        hasGreenModel: useGreenStrategy,
-        holePar: holeNow ? num(holeNow.par, NaN) : NaN,
-        holeYards: holeNow ? num(holeNow.yards, NaN) : NaN,
-        strokeIndex: holeNow ? num(holeNow.strokeIndex, NaN) : NaN,
-        toPar: scoreNow ? scoreNow.toPar : NaN,
-        holesPlayed: scoreNow ? scoreNow.holesPlayed : 0,
-      },
-      3
-    );
+    const baseTips = caddyTips({
+      plays: calc.playsLikeYd,
+      along: wr.along, cross: wr.cross,
+      elevFt: calc.elevDiffFt,
+      gap: longerC ? longerC.yards - calc.playsLikeYd : null,
+      longerName: longerC ? longerC.name : '',
+      beyondLongest: longestC && calc.playsLikeYd > longestC.yards * 1.08,
+      accYd,
+      // new context consumed by the upgraded tip engine
+      aimYd: calc.aimYd, aimDeg: calc.aimDeg, gustYd: calc.gustYd,
+      windAdjYd: calc.windAdjYd, elevAdjYd: calc.elevAdjYd,
+      tempAdjYd: calc.tempAdjYd, altitudeAdjYd: calc.altitudeAdjYd,
+      densityRatio: calc.densityRatio, apexFt: calc.apexFt,
+      descentDeg: calc.descentDeg, blindFt: e.blindFt,
+    }, 3);
 
     if (state.prefs.mode === 'range') {
       const cTips = coachTips({ clubCount: Object.keys(loadShotLog()).length });
       renderCaddyTips([]);
-      updateAdvice(cTips, 'neutral', {
-        main: rec.main,
-        sub: rec.sub,
-        plays: calc.playsLikeYd,
-      });
+      updateAdvice(cTips, 'neutral', { main: rec.main, sub: rec.sub, plays: calc.playsLikeYd });
     } else {
       // `smartTips` contains either true green-strategy advice or the
       // selected-target-versus-green explanation for an intentional layup.
-      const tips = [...smartTips, ...baseTips].filter(Boolean).slice(0, 4);
+      const tips = [...smartTips, ...baseTips]
+        .filter(Boolean)
+        .slice(0, 4);
 
       // Tips live in the map popover.
       renderCaddyTips([]);
@@ -10594,69 +8032,31 @@ out geom qt;`;
     const windKind = calc.headwindMph >= 0 ? 'head' : 'tail';
     const rows = [
       ['Horizontal (WGS-84 geodesic)', `${fmt(calc.horizontalYd, 1)} yd`],
-      [
-        'Bearing',
-        `${bearingToCompass(calc.bearingDeg, 32)} (${fmt(
-          calc.bearingDeg,
-          1
-        )}°)`,
-      ],
-      [
-        'Elevation',
-        `${sgn(calc.elevAdjYd)} yd (${sgn(calc.elevDiffFt, 0)} ft)`,
-      ],
-      [
-        `Wind (${windKind})`,
-        `${sgn(calc.windAdjYd)} yd (${fmt(
-          Math.abs(calc.headwindMph),
-          1
-        )} mph ${windKind}, from ${bearingToCompass(calc.windFromDeg)})`,
-      ],
-      [
-        'Crosswind aim',
+      ['Bearing', `${bearingToCompass(calc.bearingDeg, 32)} (${fmt(calc.bearingDeg, 1)}°)`],
+      ['Elevation', `${sgn(calc.elevAdjYd)} yd (${sgn(calc.elevDiffFt, 0)} ft)`],
+      [`Wind (${windKind})`,
+      `${sgn(calc.windAdjYd)} yd (${fmt(Math.abs(calc.headwindMph), 1)} mph ${windKind}, from ${bearingToCompass(calc.windFromDeg)})`],
+      ['Crosswind aim',
         Math.abs(calc.crosswindMph) < PHYSICS.MIN_CROSSWIND_MPH
           ? 'minimal'
-          : `${fmt(Math.abs(calc.crosswindMph), 1)} mph — ${
-              calc.crossFrom
-            } ${Math.abs(calc.aimYd)} yd (${fmt(Math.abs(calc.aimDeg), 1)}°)`,
-      ],
+          : `${fmt(Math.abs(calc.crosswindMph), 1)} mph — ${calc.crossFrom} ${Math.abs(calc.aimYd)} yd (${fmt(Math.abs(calc.aimDeg), 1)}°)`],
       ['Temperature', `${sgn(calc.tempAdjYd)} yd (${fmt(calc.tempF)}°F)`],
-      [
-        'Altitude',
-        `${sgn(calc.altitudeAdjYd)} yd (${fmt(calc.courseAltitudeFt)} ft)`,
-      ],
+      ['Altitude', `${sgn(calc.altitudeAdjYd)} yd (${fmt(calc.courseAltitudeFt)} ft)`],
       ['Humidity', `${sgn(calc.humidityAdjYd, 2)} yd (${fmt(calc.rh)}% RH)`],
-      [
-        'Air density',
-        `${fmt(calc.rhoKgM3, 4)} kg/m³ · ${fmt(
-          calc.densityRatio * 100,
-          1
-        )}% of standard`,
-      ],
+      ['Air density', `${fmt(calc.rhoKgM3, 4)} kg/m³ · ${fmt(calc.densityRatio * 100, 1)}% of standard`],
       ['Lie', `${sgn(calc.lieYd)} yd (neutral)`],
       ['Plays-like', `${fmt(calc.playsLikeYd)} yd`],
     ];
     if (Number.isFinite(calc.apexFt))
-      rows.push([
-        'Apex / flight',
-        `${fmt(calc.apexFt)} ft · ${fmt(calc.flightTimeS, 2)} s`,
-      ]);
+      rows.push(['Apex / flight', `${fmt(calc.apexFt)} ft · ${fmt(calc.flightTimeS, 2)} s`]);
     if (Number.isFinite(calc.descentDeg))
-      rows.push([
-        'Descent / landing',
-        `${fmt(calc.descentDeg, 1)}° at ${fmt(calc.landSpeedMph)} mph`,
-      ]);
+      rows.push(['Descent / landing', `${fmt(calc.descentDeg, 1)}° at ${fmt(calc.landSpeedMph)} mph`]);
     if (calc.rolloutYd > 0)
       rows.push(['Est. rollout', `${fmt(calc.rolloutYd, 1)} yd (medium turf)`]);
     if (calc.gustYd > 0)
       rows.push(['Gust exposure', `±${fmt(calc.gustYd, 1)} yd`]);
     el.innerHTML = rows
-      .map(
-        ([k, v]) =>
-          `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(
-            v
-          )}</b></div>`
-      )
+      .map(([k, v]) => `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`)
       .join('');
   }
   // ============================================================
@@ -10718,12 +8118,11 @@ out geom qt;`;
       // aimYd is SIGNED (+ = aim right). The old `calc.aimYd > 0` test silently
       // dropped this line for every right-to-left crosswind.
       if (Math.abs(calc.aimYd) > 0)
-        sub += ` · Crosswind ${fmt(
-          Math.abs(calc.crosswindMph),
-          1
-        )} mph — aim ${Math.abs(calc.aimYd)} yd ${
-          calc.aimYd > 0 ? 'right' : 'left'
-        } (${fmt(Math.abs(calc.aimDeg), 1)}°).`;
+        sub += ` · Crosswind ${fmt(Math.abs(calc.crosswindMph), 1)} mph — aim ${Math.abs(calc.aimYd)
+          } yd ${calc.aimYd > 0 ? 'right' : 'left'} (${fmt(
+            Math.abs(calc.aimDeg),
+            1
+          )}°).`;
       els.manualRecSub.textContent = sub;
       renderBreakdown(calc, els.manualBreakdown);
     });
@@ -10733,228 +8132,348 @@ out geom qt;`;
   // ============================================================
   window.__caddySelfTest = function () {
     const out = [];
-    const ok = (name, pass, detail) =>
-      out.push(`${pass ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`);
+    const ok = (name, pass, detail) => out.push(`${pass ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`);
 
     // 1. Geodesy: meridian arc, lat 40->41 on WGS-84.
     // Simpson's rule on M(φ)=a(1-e²)/(1-e²sin²φ)^1.5 over 40°..41° gives 111046.6 m;
     // cross-checks against the standard table value of 111.048 km per degree at 40.5°.
     const g = geodesicInverse({ lat: 40, lng: -105 }, { lat: 41, lng: -105 });
-    ok(
-      'Vincenty meridian arc 40°→41°',
-      Math.abs(g.s - 111046.6) < 5,
-      `${g.s.toFixed(1)} m (expect ≈111047 m)`
-    );
+    ok('Vincenty meridian arc 40°→41°', Math.abs(g.s - 111046.6) < 5, `${g.s.toFixed(1)} m (expect ≈111047 m)`);
 
     // 2. Direct/inverse round trip.
     const p2 = geodesicDirect({ lat: 33.5, lng: -84.4 }, 73.2, 4211.7);
     const back = geodesicInverse({ lat: 33.5, lng: -84.4 }, p2);
-    ok(
-      'Geodesic direct/inverse round trip',
-      Math.abs(back.s - 4211.7) < 1e-3 &&
-        Math.abs(angleDiff(back.az1, 73.2)) < 1e-6,
-      `Δs=${(back.s - 4211.7).toExponential(2)} m`
-    );
+    ok('Geodesic direct/inverse round trip', Math.abs(back.s - 4211.7) < 1e-3 && Math.abs(angleDiff(back.az1, 73.2)) < 1e-6,
+      `Δs=${(back.s - 4211.7).toExponential(2)} m`);
 
     // 3. Air density at CIPM reference: 20 °C, 101325 Pa, 50% RH -> 1.1992 kg/m³.
     const rho = airDensityCIPM(20, 101325, 50);
-    ok(
-      'CIPM-2007 density @20°C/101325Pa/50%RH',
-      Math.abs(rho - 1.1992) < 0.0005,
-      `${rho.toFixed(5)} kg/m³`
-    );
+    ok('CIPM-2007 density @20°C/101325Pa/50%RH', Math.abs(rho - 1.1992) < 0.0005, `${rho.toFixed(5)} kg/m³`);
 
     // 4. Standard atmosphere: ISA at 5000 ft -> 843.1 hPa.
     const pIsa = pressureFromISA(5000 * FT_TO_M) / 100;
-    ok(
-      'ISA pressure @5000 ft',
-      Math.abs(pIsa - 843.1) < 1.0,
-      `${pIsa.toFixed(1)} hPa`
-    );
+    ok('ISA pressure @5000 ft', Math.abs(pIsa - 843.1) < 1.0, `${pIsa.toFixed(1)} hPa`);
 
     // 5. Special functions.
     ok('erf(1)', Math.abs(erf(1) - 0.8427007929) < 1e-9, erf(1).toFixed(10));
-    ok(
-      'invNorm(0.975)',
-      Math.abs(invNorm(0.975) - 1.959963985) < 1e-8,
-      invNorm(0.975).toFixed(9)
-    );
-    ok(
-      'tQuantile(0.975, 10)',
-      Math.abs(tQuantile(0.975, 10) - 2.228138852) < 1e-6,
-      tQuantile(0.975, 10).toFixed(9)
-    );
-    ok(
-      'chi2Inv(0.995, 2)',
-      Math.abs(chi2Inv(0.995, 2) - 10.5966347) < 1e-5,
-      chi2Inv(0.995, 2).toFixed(7)
-    );
+    ok('invNorm(0.975)', Math.abs(invNorm(0.975) - 1.959963985) < 1e-8, invNorm(0.975).toFixed(9));
+    ok('tQuantile(0.975, 10)', Math.abs(tQuantile(0.975, 10) - 2.228138852) < 1e-6, tQuantile(0.975, 10).toFixed(9));
+    ok('chi2Inv(0.995, 2)', Math.abs(chi2Inv(0.995, 2) - 10.5966347) < 1e-5, chi2Inv(0.995, 2).toFixed(7));
 
     // 6. Trajectory family monotone and physically plausible.
     const F = referenceLaunchFamily();
     let mono = true;
-    for (let i = 1; i < F.rows.length; i++)
-      if (F.rows[i].carryYd <= F.rows[i - 1].carryYd) mono = false;
-    ok(
-      'Launch family monotone in carry',
-      mono,
-      `${fmt(F.minCarry)}–${fmt(F.maxCarry)} yd`
-    );
+    for (let i = 1; i < F.rows.length; i++) if (F.rows[i].carryYd <= F.rows[i - 1].carryYd) mono = false;
+    ok('Launch family monotone in carry', mono, `${fmt(F.minCarry)}–${fmt(F.maxCarry)} yd`);
     const drv = F.rows[F.rows.length - 1];
-    ok(
-      'Driver carry plausible (230–320 yd)',
-      drv.carryYd > 230 && drv.carryYd < 320,
-      `${drv.carryYd.toFixed(1)} yd`
-    );
+    ok('Driver carry plausible (230–320 yd)', drv.carryYd > 230 && drv.carryYd < 320, `${drv.carryYd.toFixed(1)} yd`);
 
     // 6b. Truncation guard. TRAJ_DT and the step budget are coupled: if dt shrinks
     // without the cap rising, long trajectories end mid-flight and the entire
     // plays-like scale compresses — while the identity test below still passes.
     const drvTraj = integrateTrajectory(
-      {
-        speedMps: 167 * MPH_TO_MPS,
-        launchDeg: 10.9,
-        spinRadS: 2686 * RPM_TO_RADS,
-        aimOffsetDeg: 0,
-      },
+      { speedMps: 167 * MPH_TO_MPS, launchDeg: 10.9, spinRadS: 2686 * RPM_TO_RADS, aimOffsetDeg: 0 },
       STILL_AIR_ENV
     );
-    ok(
-      'Driver trajectory reaches the ground (not step-capped)',
-      drvTraj.reached === true,
-      `t=${drvTraj.timeS.toFixed(2)} s of ${(TRAJ_MAX_STEPS * TRAJ_DT).toFixed(
-        1
-      )} s budget`
-    );
-    ok(
-      'Driver descent angle plausible (32–48°)',
-      drvTraj.descentDeg > 32 && drvTraj.descentDeg < 48,
-      `${drvTraj.descentDeg.toFixed(1)}°`
-    );
+    ok('Driver trajectory reaches the ground (not step-capped)', drvTraj.reached === true,
+      `t=${drvTraj.timeS.toFixed(2)} s of ${(TRAJ_MAX_STEPS * TRAJ_DT).toFixed(1)} s budget`);
+    ok('Driver descent angle plausible (32–48°)',
+      drvTraj.descentDeg > 32 && drvTraj.descentDeg < 48, `${drvTraj.descentDeg.toFixed(1)}°`);
 
     // 7. Inverse solver identity: standard conditions must be a fixed point.
     const idn = playsLike({
-      horizontalYd: 165,
-      bearingDeg: 0,
-      elevDiffFt: 0,
-      courseAltitudeFt: 0,
-      tempF: STD_TEMP_F,
-      rh: STD_RH,
-      windMph: 0,
-      windFromDeg: 0,
-      latDeg: STD_LAT,
+      horizontalYd: 165, bearingDeg: 0, elevDiffFt: 0,
+      courseAltitudeFt: 0, tempF: STD_TEMP_F, rh: STD_RH, windMph: 0, windFromDeg: 0, latDeg: STD_LAT
     });
-    ok(
-      'Plays-like identity in standard conditions',
-      Math.abs(idn.playsLikeYd - 165) <= 1,
-      `${idn.playsLikeYd} yd`
-    );
+    ok('Plays-like identity in standard conditions', Math.abs(idn.playsLikeYd - 165) <= 1, `${idn.playsLikeYd} yd`);
 
     // 8. Monotonicity and direction of each physical effect at 165 yd.
-    const base = (o) =>
-      playsLike(
-        Object.assign(
-          {
-            horizontalYd: 165,
-            bearingDeg: 0,
-            elevDiffFt: 0,
-            courseAltitudeFt: 0,
-            tempF: STD_TEMP_F,
-            rh: STD_RH,
-            windMph: 0,
-            windFromDeg: 0,
-            latDeg: STD_LAT,
-          },
-          o
-        )
-      ).playsLikeYd;
-    ok(
-      'Headwind plays longer',
-      base({ windMph: 15, windFromDeg: 0 }) > 165 + 6,
-      `${base({ windMph: 15, windFromDeg: 0 })} yd`
-    );
-    ok(
-      'Tailwind plays shorter',
-      base({ windMph: 15, windFromDeg: 180 }) < 165 - 3,
-      `${base({ windMph: 15, windFromDeg: 180 })} yd`
-    );
-    ok(
-      'Headwind costs more than tail gains (asymmetry)',
-      base({ windMph: 15, windFromDeg: 0 }) - 165 >
-        165 - base({ windMph: 15, windFromDeg: 180 })
-    );
-    ok(
-      'Uphill plays longer',
-      base({ elevDiffFt: 30 }) > 165 + 6,
-      `${base({ elevDiffFt: 30 })} yd`
-    );
-    ok(
-      'Altitude plays shorter',
-      base({ courseAltitudeFt: 5280 }) < 165 - 6,
-      `${base({ courseAltitudeFt: 5280 })} yd`
-    );
-    ok(
-      'Cold plays longer',
-      base({ tempF: 40 }) > 165,
-      `${base({ tempF: 40 })} yd`
-    );
-    ok(
-      'Humid plays marginally longer (shorter required)',
-      base({ rh: 95 }) <= base({ rh: 5 })
-    );
+    const base = (o) => playsLike(Object.assign({
+      horizontalYd: 165, bearingDeg: 0, elevDiffFt: 0,
+      courseAltitudeFt: 0, tempF: STD_TEMP_F, rh: STD_RH, windMph: 0, windFromDeg: 0, latDeg: STD_LAT
+    }, o)).playsLikeYd;
+    ok('Headwind plays longer', base({ windMph: 15, windFromDeg: 0 }) > 165 + 6, `${base({ windMph: 15, windFromDeg: 0 })} yd`);
+    ok('Tailwind plays shorter', base({ windMph: 15, windFromDeg: 180 }) < 165 - 3, `${base({ windMph: 15, windFromDeg: 180 })} yd`);
+    ok('Headwind costs more than tail gains (asymmetry)',
+      (base({ windMph: 15, windFromDeg: 0 }) - 165) > (165 - base({ windMph: 15, windFromDeg: 180 })));
+    ok('Uphill plays longer', base({ elevDiffFt: 30 }) > 165 + 6, `${base({ elevDiffFt: 30 })} yd`);
+    ok('Altitude plays shorter', base({ courseAltitudeFt: 5280 }) < 165 - 6, `${base({ courseAltitudeFt: 5280 })} yd`);
+    ok('Cold plays longer', base({ tempF: 40 }) > 165, `${base({ tempF: 40 })} yd`);
+    ok('Humid plays marginally longer (shorter required)', base({ rh: 95 }) <= base({ rh: 5 }));
 
     // 9. Wind sign convention consistency (the bug that was fixed).
     const wc = windComponents({ windMph: 10, windFromDeg: 90, bearingDeg: 0 });
     const wr = windRelative(90, 0, 10);
-    ok(
-      'windComponents/windRelative crosswind signs agree',
-      Math.sign(wc.crosswindMph) === Math.sign(wr.cross),
-      `${wc.crosswindMph.toFixed(2)} vs ${wr.cross.toFixed(2)}`
-    );
-    ok(
-      'Wind from the east on a north shot is from the right',
-      wc.crosswindMph > 0
-    );
+    ok('windComponents/windRelative crosswind signs agree', Math.sign(wc.crosswindMph) === Math.sign(wr.cross),
+      `${wc.crosswindMph.toFixed(2)} vs ${wr.cross.toFixed(2)}`);
+    ok('Wind from the east on a north shot is from the right', wc.crosswindMph > 0);
 
     // 10. Expected-strokes baselines sane and monotone.
-    ok(
-      'E[strokes] fairway monotone 100→200 yd',
-      expectedStrokes('fairway', 200) > expectedStrokes('fairway', 100)
-    );
-    ok(
-      'Rough costs more than fairway',
-      expectedStrokes('rough', 150) > expectedStrokes('fairway', 150)
-    );
-    ok(
-      'E[strokes] 8 ft putt ≈ 1.5',
-      Math.abs(expectedStrokes('green', 8 / 3) - 1.515) < 0.05
-    );
+    ok('E[strokes] fairway monotone 100→200 yd', expectedStrokes('fairway', 200) > expectedStrokes('fairway', 100));
+    ok('Rough costs more than fairway', expectedStrokes('rough', 150) > expectedStrokes('fairway', 150));
+    ok('E[strokes] 8 ft putt ≈ 1.5', Math.abs(expectedStrokes('green', 8 / 3) - 1.515) < 0.05);
 
     // 11. Dispersion posterior shrinks with data.
     const prior = formulaDispersionYd(165);
-    ok(
-      'Prior dispersion plausible at 165 yd',
-      prior >= 8 && prior <= 22,
-      `±${prior} yd`
-    );
+    ok('Prior dispersion plausible at 165 yd', prior >= 8 && prior <= 22, `±${prior} yd`);
 
     // 12. GPS fuser is not overconfident.
-    const fx = Array.from({ length: 10 }, () => ({
-      lat: 33.5,
-      lng: -84.4,
-      accuracy: 10,
-      ts: Date.now(),
-    }));
+    const fx = Array.from({ length: 10 }, () => ({ lat: 33.5, lng: -84.4, accuracy: 10, ts: Date.now() }));
     const fused = weightedAverage(fx);
-    ok(
-      'Fused accuracy respects correlated-error floor',
-      fused.accuracy >= GPS_CORRELATED_FRAC * 10,
-      `±${fused.accuracy.toFixed(2)} m from ten ±10 m fixes`
-    );
+    ok('Fused accuracy respects correlated-error floor', fused.accuracy >= GPS_CORRELATED_FRAC * 10,
+      `±${fused.accuracy.toFixed(2)} m from ten ±10 m fixes`);
 
     console.log(out.join('\n'));
     return out;
   };
+
+  /* ================= Overpass transport: mirrors + timeout + cache ================= */
+
+  const OVERPASS_ENDPOINTS = [
+    'https://overpass.kumi.systems/api/interpreter',   // strong hardware, no registration
+    'https://overpass.private.coffee/api/interpreter', // no rate limits
+    'https://overpass-api.de/api/interpreter',         // official — LAST resort, rate-limited
+  ];
+  const OSM_CACHE_PREFIX = 'osm:v2:';                  // v2 == invalidates the old buggy data
+  const OSM_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
+  const OSM_CACHE_MAX_ENTRIES = 20;
+
+  function osmSleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  function osmCacheGet(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const rec = JSON.parse(raw);
+      if (!rec || Date.now() - rec.t > rec.ttl) return null;
+      return rec.v;
+    } catch {
+      return null;
+    }
+  }
+
+  function osmCacheSet(key, value, ttl) {
+    const write = () =>
+      localStorage.setItem(key, JSON.stringify({ t: Date.now(), ttl, v: value }));
+    try {
+      write();
+    } catch {
+      // Quota: evict oldest osm: entries, retry once.
+      try {
+        const entries = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith(OSM_CACHE_PREFIX)) {
+            try {
+              entries.push({ k, t: JSON.parse(localStorage.getItem(k)).t || 0 });
+            } catch { }
+          }
+        }
+        entries
+          .sort((a, b) => a.t - b.t)
+          .slice(0, Math.max(1, entries.length - OSM_CACHE_MAX_ENTRIES))
+          .forEach((e) => localStorage.removeItem(e.k));
+        write();
+      } catch { }
+    }
+  }
+
+  /**
+   * Sequential mirror failover. Retries only transient statuses.
+   * NOTE: the client abort (45s) is deliberately LONGER than the query's
+   * [timeout:40] so a server-side query-cost failure surfaces as a real
+   * Overpass error rather than an opaque AbortError.
+   * Returns an Array of elements, with a non-enumerable-ish `.meta` tacked on.
+   */
+  async function overpassFetch(query, opts = {}) {
+    const {
+      timeoutMs = 45000,
+      cacheKey = null,
+      cacheTtlMs = OSM_CACHE_TTL_MS,
+    } = opts;
+
+    if (cacheKey) {
+      const hit = osmCacheGet(cacheKey);
+      if (hit && Array.isArray(hit)) {
+        hit.meta = { cached: true, endpoint: 'cache' };
+        return hit;
+      }
+    }
+
+    let lastErr = null;
+
+    for (const base of OVERPASS_ENDPOINTS) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+        try {
+          const res = await fetch(base, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'data=' + encodeURIComponent(query),
+            signal: ctrl.signal,
+          });
+          clearTimeout(timer);
+
+          if (res.status === 429) {
+            const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
+            lastErr = new Error(`${base} HTTP 429`);
+            await osmSleep(Math.min(Math.max(ra * 1000, 900 * (attempt + 1)), 8000));
+            continue; // retry same mirror
+          }
+          if (res.status >= 500) {
+            lastErr = new Error(`${base} HTTP ${res.status}`);
+            break; // gateway timeout etc. -> next mirror
+          }
+          if (!res.ok) {
+            lastErr = new Error(`${base} HTTP ${res.status}`);
+            break;
+          }
+
+          const json = await res.json();
+          const elements = Array.isArray(json.elements) ? json.elements : [];
+          elements.meta = {
+            endpoint: base,
+            cached: false,
+            remark: json.remark || null,
+          };
+          if (cacheKey && elements.length) {
+            osmCacheSet(cacheKey, elements, cacheTtlMs);
+          }
+          return elements;
+        } catch (err) {
+          clearTimeout(timer);
+          lastErr = err;
+          if (err.name !== 'AbortError') await osmSleep(400);
+          break; // timeout / network -> next mirror
+        }
+      }
+    }
+
+    throw lastErr || new Error('All Overpass endpoints failed');
+  }
+
+  /* ================= OSM geometry helpers (planar, lng convention) ================= */
+
+  const OSM_M_PER_DEG = 111320;
+  const OSM_YD_PER_M = 1.0936133;
+
+  function osmXY(lat, lng, refLat) {
+    return {
+      x: lng * OSM_M_PER_DEG * Math.cos((refLat * Math.PI) / 180),
+      y: lat * OSM_M_PER_DEG,
+    };
+  }
+
+  function osmDistM(a, b) {
+    const refLat = (a.lat + b.lat) / 2;
+    const pa = osmXY(a.lat, a.lng, refLat);
+    const pb = osmXY(b.lat, b.lng, refLat);
+    return Math.hypot(pa.x - pb.x, pa.y - pb.y);
+  }
+
+  const osmDistYds = (a, b) => osmDistM(a, b) * OSM_YD_PER_M;
+
+  // Overpass geometry nodes are {lat, lon}. Normalize to {lat, lng}.
+  function osmGeomLatLng(g) {
+    return { lat: g.lat, lng: g.lon != null ? g.lon : g.lng };
+  }
+
+  function osmPathLatLng(el) {
+    if (!el || !Array.isArray(el.geometry) || el.geometry.length < 2) return null;
+    return el.geometry.map(osmGeomLatLng);
+  }
+
+  function osmPathLengthYds(path) {
+    let m = 0;
+    for (let i = 1; i < path.length; i++) m += osmDistM(path[i - 1], path[i]);
+    return m * OSM_YD_PER_M;
+  }
+
+  // Closed-ring vertex list for areas (way, or first outer member of a relation).
+  function osmRing(el) {
+    if (!el) return null;
+    if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length >= 3) {
+      const pts = el.geometry.map(osmGeomLatLng);
+      const a = pts[0];
+      const b = pts[pts.length - 1];
+      if (Math.abs(a.lat - b.lat) < 1e-9 && Math.abs(a.lng - b.lng) < 1e-9) pts.pop();
+      return pts;
+    }
+    if (el.type === 'relation' && Array.isArray(el.members)) {
+      const outer = el.members.find(
+        (m) => m.role === 'outer' && Array.isArray(m.geometry)
+      );
+      if (outer) return osmRing({ type: 'way', geometry: outer.geometry });
+    }
+    return null;
+  }
+
+  // Replaces the old osmFeaturePoint. Node -> its coords; area -> ring centroid;
+  // last resort -> element.center (only for nearby-course candidates).
+  function osmFeaturePoint(element) {
+    if (!element) return null;
+    const eLng = element.lon != null ? element.lon : element.lng;
+    if (Number.isFinite(element.lat) && Number.isFinite(eLng)) {
+      return { lat: Number(element.lat), lng: Number(eLng) };
+    }
+    const ring = osmRing(element);
+    if (ring && ring.length) {
+      let la = 0;
+      let ln = 0;
+      ring.forEach((p) => {
+        la += p.lat;
+        ln += p.lng;
+      });
+      return { lat: la / ring.length, lng: ln / ring.length };
+    }
+    if (element.center && Number.isFinite(element.center.lat)) {
+      const cLng =
+        element.center.lon != null ? element.center.lon : element.center.lng;
+      return { lat: Number(element.center.lat), lng: Number(cLng) };
+    }
+    return null;
+  }
+
+  function osmPointInRing(pt, ring) {
+    const refLat = pt.lat;
+    const p = osmXY(pt.lat, pt.lng, refLat);
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = osmXY(ring[i].lat, ring[i].lng, refLat);
+      const b = osmXY(ring[j].lat, ring[j].lng, refLat);
+      if (
+        a.y > p.y !== b.y > p.y &&
+        p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x
+      ) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  // Min distance from a point to a polyline, meters. Used to filter hazards.
+  function osmDistPointToPathM(pt, path) {
+    const refLat = pt.lat;
+    const p = osmXY(pt.lat, pt.lng, refLat);
+    let best = Infinity;
+    for (let i = 1; i < path.length; i++) {
+      const a = osmXY(path[i - 1].lat, path[i - 1].lng, refLat);
+      const b = osmXY(path[i].lat, path[i].lng, refLat);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len2 = dx * dx + dy * dy || 1e-9;
+      let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      best = Math.min(
+        best,
+        Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+      );
+    }
+    return best;
+  }
 
   // ============================================================
   //  OSM STANDARD BASEMAP (Option A) — worldwide, no key, no account

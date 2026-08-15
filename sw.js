@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.43';
+const CACHE_VERSION = 'v1.0.16';
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
@@ -33,7 +33,9 @@ self.addEventListener('install', (event) => {
       // If a required app file is missing, keep the old worker active.
       await Promise.all(
         APP_SHELL.map(async (asset) => {
-          const response = await fetch(new Request(asset, { cache: 'reload' }));
+          const response = await fetch(
+            new Request(asset, { cache: 'reload' })
+          );
 
           if (!cacheable(response)) {
             throw new Error(`Unable to precache ${asset}`);
@@ -93,7 +95,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.origin === self.location.origin) {
-    event.respondWith(networkFirstAsset(request, SHELL_CACHE));
+    event.respondWith(cacheFirstAsset(request, SHELL_CACHE));
     return;
   }
 
@@ -108,21 +110,18 @@ async function handleNavigation(request) {
   const cache = await caches.open(SHELL_CACHE);
   const shellRequest = new Request('./index.html');
 
+  const cached = await cache.match(shellRequest);
+  if (cached) return cached;
+
   try {
-    const response = await fetch(request, { cache: 'no-store' });
+    const response = await fetch(request);
 
     if (cacheable(response)) {
-      cache.put(shellRequest, response.clone()).catch(() => {});
+      cache.put(shellRequest, response.clone()).catch(() => { });
     }
 
     return response;
   } catch {
-    const cached = await cache.match(shellRequest);
-
-    if (cached) {
-      return cached;
-    }
-
     return new Response(
       '<!doctype html><title>Offline</title><h1>You are offline</h1><p>Open Caddy once while online before using it offline.</p>',
       {
@@ -135,24 +134,22 @@ async function handleNavigation(request) {
   }
 }
 
-// Same-origin app assets: NETWORK-FIRST so edited code actually ships
-// without clearing site data; the cache is only the offline fallback.
-// (Cache-first here meant a modified app.js was silently ignored forever
-// after the first install.)
-async function networkFirstAsset(request, cacheName) {
+async function cacheFirstAsset(request, cacheName) {
   const cache = await caches.open(cacheName);
+
+  const cached = await cache.match(request, { ignoreSearch: true });
+  if (cached) return cached;
 
   try {
     const response = await fetch(request);
 
     if (cacheable(response)) {
-      cache.put(request, response.clone()).catch(() => {});
+      cache.put(request, response.clone()).catch(() => { });
     }
 
     return response;
   } catch {
-    const cached = await cache.match(request, { ignoreSearch: true });
-    return cached || new Response('', { status: 504 });
+    return new Response('', { status: 504 });
   }
 }
 
