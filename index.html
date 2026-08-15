@@ -288,6 +288,7 @@
                     —
                   </div>
                   <div class="big-label" id="rawLabel">Tap a target</div>
+                  <div class="aim-chip" id="aimChip" hidden></div>
                 </div>
                 <div class="plays-like">
                   <div class="mini">plays like</div>
@@ -305,7 +306,7 @@
                     <div class="fcb-v" id="fcbFront">—</div>
                   </div>
                   <div class="fcb center">
-                    <div class="fcb-l">Center</div>
+                    <div class="fcb-l">Middle</div>
                     <div class="fcb-v" id="fcbCenter">—</div>
                   </div>
                   <div class="fcb">
@@ -314,14 +315,17 @@
                   </div>
                 </div>
                 <div class="fcb-actions" id="fcbActions">
+                  <button class="fcb-btn" id="setFrontBtn" type="button">
+                    Set Front
+                  </button>
+                  <button class="fcb-btn" id="setCenterBtn" type="button">
+                    Set Middle
+                  </button>
                   <button class="fcb-btn" id="setBackBtn" type="button">
                     Set Back
                   </button>
-                  <button class="fcb-btn" id="setCenterBtn" type="button">
-                    Set Center
-                  </button>
-                  <button class="fcb-btn" id="setFrontBtn" type="button">
-                    Set Front
+                  <button class="fcb-btn" id="restoreGreenBtn" type="button" disabled>
+                    Restore Green
                   </button>
                   <button class="fcb-btn clear" id="clearFbBtn" type="button">
                     Clear Green
@@ -413,12 +417,16 @@
                 <details class="howto" style="margin-top: 4px">
                   <summary>How it works</summary>
                   <div class="hint" style="margin-top: 8px">
-                    <b>Single-tap</b> sets your center target.
-                    <b>Set Front</b> / <b>Set Back</b> then tap the green
-                    edges (or long-press the green) for edge yardages. Tapping
-                    a new target near the current one keeps your front/back;
-                    moving far away resets them. Plays-like folds in
-                    elevation, wind, temp, altitude &amp; humidity.
+                    <b>Single-tap</b> the map to set your aim target.
+                    <b>Set Front</b> / <b>Set Middle</b> / <b>Set Back</b>,
+                    then tap the green edges to mark reference yardages. Your
+                    aim target and the green middle stay separate — a small
+                    chip above the number tells you which one you are looking
+                    at, and a dashed line links them on the map when they
+                    differ. <b>Restore Green</b> re-applies an imported
+                    course's green edges; <b>Clear Green</b> removes them.
+                    Plays-like folds in elevation, wind, temp, altitude &amp;
+                    humidity.
                   </div>
                 </details>
               </div>

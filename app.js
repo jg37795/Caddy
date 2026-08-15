@@ -117,6 +117,7 @@
     advicePopTitle: $('advicePopTitle'),
     rawYards: $('rawYards'),
     rawLabel: $('rawLabel'),
+    aimChip: $('aimChip'),
     playsLikeYards: $('playsLikeYards'),
     rangeNotice: $('rangeNotice'),
     weatherStatus: $('weatherStatus'),
@@ -185,6 +186,7 @@
     setFrontBtn: $('setFrontBtn'),
     setCenterBtn: $('setCenterBtn'),
     setBackBtn: $('setBackBtn'),
+    restoreGreenBtn: $('restoreGreenBtn'),
     clearFbBtn: $('clearFbBtn'),
     modeToggle: $('modeToggle'),
   };
@@ -1308,6 +1310,37 @@
       }).addTo(state.map);
     else state.markers.line.setLatLngs(pts);
     restyleShotLines();
+    updateTargetGreenConnector();
+  }
+  // Dashed connector linking the aim target to the green middle, so the two
+  // concepts are visually distinct. Hidden when they overlap or are missing.
+  function updateTargetGreenConnector() {
+    if (!state.mapReady) return;
+    const gap =
+      state.target && state.greenCenter
+        ? haversineMeters(state.target, state.greenCenter) * M_TO_YD
+        : 0;
+    if (!gap || gap < 4) {
+      if (state.markers.greenConnector && state.map) {
+        state.map.removeLayer(state.markers.greenConnector);
+        state.markers.greenConnector = null;
+      }
+      return;
+    }
+    const pts = [
+      [state.target.lat, state.target.lng],
+      [state.greenCenter.lat, state.greenCenter.lng],
+    ];
+    if (!state.markers.greenConnector)
+      state.markers.greenConnector = L.polyline(pts, {
+        color: '#34d399',
+        weight: 2,
+        opacity: 0.9,
+        dashArray: '5 7',
+        lineCap: 'round',
+        interactive: false,
+      }).addTo(state.map);
+    else state.markers.greenConnector.setLatLngs(pts);
   }
   function restyleShotLines() {
     const img = isImagery();
@@ -1705,8 +1738,9 @@
       els.fcbBack.textContent = '—';
       return;
     }
-    // Center = green center if set, otherwise aim target
-    const centerRef = state.greenCenter || state.target;
+    // Middle = the marked green middle ONLY. Never fall back to the aim target —
+    // mixing the two concepts is what made "Center" confusing.
+    const centerRef = state.greenCenter;
     els.fcbCenter.textContent = centerRef
       ? Math.round(haversineMeters(state.loc, centerRef) * M_TO_YD)
       : '—';
@@ -1763,6 +1797,50 @@
   }
 
 
+  // One-line explanation of what the aim target actually IS relative to the
+  // marked green middle: Middle / Pin / Layup / past-middle / off-line.
+  function setAimChip() {
+    if (!els.aimChip) return;
+    if (!state.target) {
+      els.aimChip.hidden = true;
+      return;
+    }
+    const gap =
+      state.greenCenter && state.target
+        ? haversineMeters(state.target, state.greenCenter) * M_TO_YD
+        : null;
+    let cls = 'pin';
+    let html = 'Aim: Pin';
+    if (gap != null) {
+      if (gap < 4) {
+        cls = 'middle';
+        html = 'Aim: Middle';
+      } else if (state.loc) {
+        const shotDist = haversineMeters(state.loc, state.target) * M_TO_YD;
+        const remaining =
+          alongTrackYd(state.loc, state.target, state.greenCenter) - shotDist;
+        const lateral = crossTrackYd(state.loc, state.target, state.greenCenter);
+        cls = 'layup';
+        if (Math.abs(lateral) >= 8 && Math.abs(remaining) < 6) {
+          html = `Aim: Pin · middle ${Math.round(Math.abs(lateral))} yd ${
+            lateral > 0 ? 'right' : 'left'
+          }`;
+        } else if (remaining > 3) {
+          html = `Aim: Layup · ${Math.round(remaining)} yd to middle`;
+        } else if (remaining < -3) {
+          html = `Aim: ${Math.round(Math.abs(remaining))} yd past middle`;
+        } else {
+          html = `Aim: ${Math.round(gap)} yd from middle`;
+        }
+      } else {
+        cls = 'layup';
+        html = `Aim: ${Math.round(gap)} yd from middle`;
+      }
+    }
+    els.aimChip.className = 'aim-chip ' + cls;
+    els.aimChip.textContent = html;
+    els.aimChip.hidden = false;
+  }
   function renderClubChips(playsYd) {
     const desc = sortedClubsDesc();
     els.clubChips.innerHTML =
@@ -2158,7 +2236,8 @@
       }).addTo(state.map);
     }
 
-    // Default the aim point to green centre for the new hole.
+    // Default the aim point to the green MIDDLE for the new hole, and label it
+    // clearly ("Aim: Middle") so it is never confused with a tapped pin.
     if (center && state.mapReady) {
       state.target = center;
       save('caddy:lastTarget', state.target);
@@ -2175,11 +2254,25 @@
 
     renderFcb();
     updateLine();
+    updateRestoreGreenBtn();
 
     if (state.target && state.loc) {
       calculateRange();
       scheduleContextUpdate();
     }
+  }
+
+  // Enable "Restore Green" only when the current round hole actually carries
+  // imported front/middle/back geometry worth re-applying.
+  function updateRestoreGreenBtn() {
+    if (!els.restoreGreenBtn) return;
+    const hole = getCurrentHoleData();
+    const hasGeo =
+      !!state.roundSession &&
+      !!hole &&
+      !!(hole.greenCenter || hole.front || hole.back);
+    els.restoreGreenBtn.disabled = !hasGeo;
+    els.restoreGreenBtn.style.opacity = hasGeo ? '1' : '0.45';
   }
 
   function syncHoleGeometry() {
@@ -2189,6 +2282,7 @@
     if (key === state.holeGeoKey) return;
 
     state.holeGeoKey = key;
+    updateRestoreGreenBtn();
     applyHoleGeometryToMap();
   }
 
@@ -4628,6 +4722,7 @@ out geom;`;
       clearFbMarkers();
       renderFcb();
       updateLine();
+      updateRestoreGreenBtn();
 
       // Return immediately to target-only recommendation behavior.
       if (state.target) {
@@ -4638,6 +4733,23 @@ out geom;`;
       haptic(6);
       setNotice('Green cleared. Recommendations now use your selected target only.', 'greenish');
     });
+    if (els.restoreGreenBtn) {
+      els.restoreGreenBtn.addEventListener('click', () => {
+        const hole = getCurrentHoleData();
+        if (
+          !state.roundSession ||
+          !hole ||
+          !(hole.greenCenter || hole.front || hole.back)
+        ) {
+          setNotice('This hole has no imported green geometry to restore.', 'greenish');
+          haptic(8);
+          return;
+        }
+        applyHoleGeometryToMap();
+        haptic(8);
+        setNotice('Imported green restored.', 'greenish');
+      });
+    }
     // Practice reset button (in sheet)
     const prb = document.getElementById('practiceResetBtn');
     if (prb) {
@@ -5528,12 +5640,55 @@ out geom;`;
       const t = integrateTrajectory(launch, STILL_AIR_ENV);
       return { carryYd: t.carryM * M_TO_YD, ...launch, apexM: t.apexM };
     }).sort((a, b) => a.carryYd - b.carryYd);
+    // Extend beyond PGA-Tour carry with self-consistent long-drive anchors so the
+    // solver stays monotone for far tee-to-green measurement taps (par-5 layup
+    // planning). Launch ≈11°, spin ≈1800 rpm (long-drive optimized); ball speed is
+    // solved so the integrator reproduces each anchor carry exactly.
+    const EXT_ANCHORS = [
+      { carryYd: 350, seedMps: 88 },
+      { carryYd: 460, seedMps: 104 },
+      { carryYd: 560, seedMps: 118 },
+      { carryYd: 650, seedMps: 132 },
+    ];
+    for (const { carryYd: targetYd, seedMps } of EXT_ANCHORS) {
+      let speed = seedMps;
+      for (let i = 0; i < 30; i++) {
+        const t0 = integrateTrajectory({
+          speedMps: speed, launchDeg: 11,
+          spinRadS: 1800 * RPM_TO_RADS, aimOffsetDeg: 0,
+        }, STILL_AIR_ENV);
+        const f = t0.carryM * M_TO_YD - targetYd;
+        if (Math.abs(f) < 0.05) break;
+        const h = Math.max(1, 0.02 * speed);
+        const tP = integrateTrajectory({
+          speedMps: speed + h, launchDeg: 11,
+          spinRadS: 1800 * RPM_TO_RADS, aimOffsetDeg: 0,
+        }, STILL_AIR_ENV);
+        const fp = ((tP.carryM * M_TO_YD) - (t0.carryM * M_TO_YD)) / h;
+        speed = fp > 1e-3 ? speed - f / fp : speed + (f > 0 ? 0.5 : -0.5);
+        if (speed < 20) speed = 20;
+      }
+      const t = integrateTrajectory({
+        speedMps: speed, launchDeg: 11,
+        spinRadS: 1800 * RPM_TO_RADS, aimOffsetDeg: 0,
+      }, STILL_AIR_ENV);
+      rows.push({
+        carryYd: t.carryM * M_TO_YD,
+        speedMps: speed,
+        launchDeg: 11,
+        spinRadS: 1800 * RPM_TO_RADS,
+        apexM: t.apexM,
+        extended: true,
+      });
+    }
+    rows.sort((a, b) => a.carryYd - b.carryYd);
+    const tourMaxCarry = Math.max(...rows.filter((r) => !r.extended).map((r) => r.carryYd));
     // Enforce strict monotonicity so the interpolators are invertible.
     for (let i = 1; i < rows.length; i++)
       if (rows[i].carryYd <= rows[i - 1].carryYd) rows[i].carryYd = rows[i - 1].carryYd + 0.5;
     const cs = rows.map((r) => r.carryYd);
     _launchFamily = {
-      minCarry: cs[0], maxCarry: cs[cs.length - 1],
+      minCarry: cs[0], maxCarry: cs[cs.length - 1], tourMaxCarry,
       speed: pchip(cs, rows.map((r) => r.speedMps)),
       launch: pchip(cs, rows.map((r) => r.launchDeg)),
       spin: pchip(cs, rows.map((r) => r.spinRadS)),
@@ -5545,13 +5700,14 @@ out geom;`;
   // Launch conditions for a player whose standard-condition carry is `carryYd`.
   function launchForStandardCarry(carryYd) {
     const F = referenceLaunchFamily();
-    const c = clamp(num(carryYd, 100), 8, 420);
+    const c = clamp(num(carryYd, 100), 8, 650);
     return {
       speedMps: Math.max(8, F.speed(c)),
       launchDeg: clamp(F.launch(c), 4, 42),
       spinRadS: Math.max(500 * RPM_TO_RADS, F.spin(c)),
       aimOffsetDeg: 0,
       apexM: Math.max(1, F.apex(c)),
+      extended: c > F.tourMaxCarry,
     };
   }
   // ============================================================
@@ -5651,8 +5807,8 @@ out geom;`;
     if (hit) return hit;
 
     const env = buildEnv(cond);
-    let lo = 5, hi = 420;
-    let P = clamp(D - num(cond.elevDiffFt, 0) / 3, 8, 400);   // legacy linear rule used ONLY as the Newton seed
+    let lo = 5, hi = 650;
+    let P = clamp(D - num(cond.elevDiffFt, 0) / 3, 8, 600);   // legacy linear rule used ONLY as the Newton seed
     let f = carryUnder(P, env) - D;
     for (let i = 0; i < PHYSICS.SOLVER_MAX_ITER; i++) {
       if (Math.abs(f) < PHYSICS.SOLVER_TOL_YD) break;
@@ -5794,6 +5950,7 @@ out geom;`;
       rolloutYd: roll,
       solvedCarryYd: P,
       solverReached: sol.traj ? sol.traj.reached : true,
+      extended: sol.launch ? !!sol.launch.extended : false,
     };
   }
 
@@ -7018,9 +7175,9 @@ out geom;`;
   }
 
   function formatLeftover(lo) {
-    if (!lo || lo.state === 'on') return 'at green';
+    if (!lo || lo.state === 'on') return 'at middle';
     const y = Math.round(lo.yards);
-    return lo.state === 'over' ? `${y} yd past` : `${y} yd left`;
+    return lo.state === 'over' ? `${y} yd past middle` : `${y} yd to middle`;
   }
 
   /**
@@ -7870,6 +8027,7 @@ out geom;`;
     if (!state.loc || !state.target) {
       els.rawYards.textContent = '—';
       els.rawLabel.textContent = 'Tap a target';
+      if (els.aimChip) els.aimChip.hidden = true;
       els.playsLikeYards.textContent = '—';
       els.clubRecommendation.textContent = 'No target selected';
       els.clubRecommendationSub.textContent = 'Tap a point on the map for club guidance.';
@@ -7901,7 +8059,9 @@ out geom;`;
       if (lo) label = `actual yds · ${formatLeftover(lo)} · aim ${bearingToCompass(bearing)}`;
     }
     els.rawLabel.textContent = label;
-    els.playsLikeYards.textContent = fmt(calc.playsLikeYd);
+    setAimChip();
+    els.playsLikeYards.textContent =
+      fmt(calc.playsLikeYd) + (calc.extended ? '~' : '');
     updateLine();
     renderFcb();
 
@@ -7967,6 +8127,8 @@ out geom;`;
 
     els.clubRecommendation.textContent = rec.main;
     let sub = rec.sub;
+    if (calc.extended)
+      sub = 'Beyond calibrated carry — estimate for layup planning. ' + sub;
     const g = selectedClubGuidance(calc.playsLikeYd);
     if (g) sub += ' · ' + g;
     els.clubRecommendationSub.textContent = sub;
@@ -8055,6 +8217,8 @@ out geom;`;
       rows.push(['Est. rollout', `${fmt(calc.rolloutYd, 1)} yd (medium turf)`]);
     if (calc.gustYd > 0)
       rows.push(['Gust exposure', `±${fmt(calc.gustYd, 1)} yd`]);
+    if (calc.extended)
+      rows.push(['Carry range', 'beyond calibrated — estimate only']);
     el.innerHTML = rows
       .map(([k, v]) => `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`)
       .join('');
@@ -8165,7 +8329,7 @@ out geom;`;
     let mono = true;
     for (let i = 1; i < F.rows.length; i++) if (F.rows[i].carryYd <= F.rows[i - 1].carryYd) mono = false;
     ok('Launch family monotone in carry', mono, `${fmt(F.minCarry)}–${fmt(F.maxCarry)} yd`);
-    const drv = F.rows[F.rows.length - 1];
+    const drv = [...F.rows].reverse().find((r) => !r.extended);
     ok('Driver carry plausible (230–320 yd)', drv.carryYd > 230 && drv.carryYd < 320, `${drv.carryYd.toFixed(1)} yd`);
 
     // 6b. Truncation guard. TRAJ_DT and the step budget are coupled: if dt shrinks
