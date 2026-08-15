@@ -120,6 +120,23 @@ button {
   touch-action: manipulation;
 }
 
+button:focus-visible,
+[role='button']:focus-visible,
+summary:focus-visible {
+  outline: 3px solid rgba(24, 164, 91, 0.42);
+  outline-offset: 3px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+@media (hover: hover) {
+  button:not(:disabled):hover {
+    filter: brightness(1.025);
+  }
+}
+
 input,
 select {
   width: 100%;
@@ -2165,19 +2182,26 @@ body[data-dragging='1'] .fcb-block {
 
 #restoreGreenBtn {
   grid-column: span 2;
-  background: rgba(22, 119, 255, 0.12);
-  color: var(--blue);
-  border: 1px solid rgba(22, 119, 255, 0.25);
+  background: rgba(15, 122, 67, 0.09);
+  color: var(--green);
+  border: 1px dashed rgba(15, 122, 67, 0.3);
+  box-shadow: none;
+}
+
+#restoreGreenBtn:not(:disabled):active {
+  background: rgba(15, 122, 67, 0.18);
 }
 
 #restoreGreenBtn:disabled {
-  opacity: 0.45;
+  opacity: 0.38;
+  cursor: not-allowed;
+  filter: saturate(0.55);
 }
 
 body.dark #restoreGreenBtn {
-  background: rgba(22, 119, 255, 0.16);
-  color: #6cb2ff;
-  border-color: rgba(22, 119, 255, 0.28);
+  background: rgba(24, 164, 91, 0.12);
+  color: #63e89a;
+  border-color: rgba(99, 232, 154, 0.3);
 }
 
 .aim-chip {
@@ -3223,6 +3247,7 @@ body.dark .nearby-course-option.selected .nearby-course-name {
 .leaflet-container img.leaflet-tile {
   mix-blend-mode: normal;
 }
+
 .hole-badge {
   display: inline-block;
   margin-left: 4px;

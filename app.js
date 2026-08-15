@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.9.6';
+  const APP_VERSION = '1.9.7';
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -788,6 +788,14 @@
     const m = state.prefs.mode || 'golf';
     document.body.setAttribute('data-mode', m);
 
+    if (
+      m === 'range' &&
+      (state.prefs.activeTab === 'round' || state.prefs.activeTab === 'stats')
+    ) {
+      state.prefs.activeTab = 'range';
+      showTab('range');
+    }
+
     // Toggle buttons
     const opts = els.modeToggle?.querySelectorAll('.mode-opt');
     if (opts) {
@@ -1512,6 +1520,7 @@
   // ===== Advice on the map: a pill that opens a popover =====
   // Keeps the bottom sheet short by moving the tip list onto the map.
   state.adviceTips = [];
+  let adviceCloseTimer = null;
   function updateAdvice(tips, verdict, rec) {
     state.adviceTips = Array.isArray(tips) ? tips.filter(Boolean) : [];
     state.adviceRec = rec || null;
@@ -1665,7 +1674,13 @@
   function openAdvice() {
     if (!els.advicePop || !state.adviceRec) return;
 
+    if (adviceCloseTimer !== null) {
+      clearTimeout(adviceCloseTimer);
+      adviceCloseTimer = null;
+    }
+
     renderAdvicePop();
+
     els.advicePopScrim.hidden = false;
     els.advicePop.hidden = false;
 
@@ -1673,18 +1688,35 @@
 
     els.advicePopScrim.classList.add('open');
     els.advicePop.classList.add('open');
+
     haptic(6);
   }
+
   function closeAdvice() {
     if (!els.advicePop) return;
+
+    if (adviceCloseTimer !== null) {
+      clearTimeout(adviceCloseTimer);
+      adviceCloseTimer = null;
+    }
+
     els.advicePopScrim.classList.remove('open');
     els.advicePop.classList.remove('open');
+
     const done = () => {
-      els.advicePop.hidden = true;
-      els.advicePopScrim.hidden = true;
+      adviceCloseTimer = null;
+
+      if (!els.advicePop.classList.contains('open')) {
+        els.advicePop.hidden = true;
+        els.advicePopScrim.hidden = true;
+      }
     };
-    if (reduceMotion) done();
-    else setTimeout(done, 260);
+
+    if (reduceMotion) {
+      done();
+    } else {
+      adviceCloseTimer = window.setTimeout(done, 260);
+    }
   }
   function initAdvice() {
     if (els.shotDetailsBtn) {
@@ -1822,9 +1854,8 @@
         const lateral = crossTrackYd(state.loc, state.target, state.greenCenter);
         cls = 'layup';
         if (Math.abs(lateral) >= 8 && Math.abs(remaining) < 6) {
-          html = `Aim: Pin · middle ${Math.round(Math.abs(lateral))} yd ${
-            lateral > 0 ? 'right' : 'left'
-          }`;
+          html = `Aim: Pin · middle ${Math.round(Math.abs(lateral))} yd ${lateral > 0 ? 'right' : 'left'
+            }`;
         } else if (remaining > 3) {
           html = `Aim: Layup · ${Math.round(remaining)} yd to middle`;
         } else if (remaining < -3) {
@@ -2056,9 +2087,9 @@
   function endRound() {
     if (!confirm('End round mode? Logged shots stay in your club data.'))
       return;
-      state.roundSession = null;
-      state.holeGeoKey = null;
-      saveRoundSession();
+    state.roundSession = null;
+    state.holeGeoKey = null;
+    saveRoundSession();
     renderRoundShotUI();
     haptic(8);
   }
@@ -2204,7 +2235,7 @@
   // Push the current hole's imported geometry onto the map: green centre,
   // front/back edges, and an initial aim target. Keyed so it runs once per
   // hole change, not on every GPS tick.
-  function applyHoleGeometryToMap() {
+  function applyHoleGeometryToMap({ resetAim = true } = {}) {
     const hole = getCurrentHoleData();
     if (!hole) return;
 
@@ -2238,8 +2269,8 @@
 
     // Default the aim point to the green MIDDLE for the new hole, and label it
     // clearly ("Aim: Middle") so it is never confused with a tapped pin.
-    if (center && state.mapReady) {
-      state.target = center;
+    if (resetAim && center && state.mapReady) {
+      state.target = { ...center };
       save('caddy:lastTarget', state.target);
 
       if (!state.markers.target) {
@@ -2868,34 +2899,34 @@
       ? state.nearbyCourses
       : [];
 
-      if (state.nearbyCourseLoading) {
-        els.nearbyCourseStatus.textContent = 'Searching around your location…';
-        els.nearbyCourseList.innerHTML =
-          `<div class="hint">Looking for nearby golf courses…</div>`;
-        return;
-      }
-  
-      if (!state.loc) {
-        els.nearbyCourseStatus.textContent = 'Enable GPS first to find nearby courses.';
-        els.nearbyCourseList.innerHTML = '';
-        return;
-      }
-  
-      if (!courses.length) {
-        els.nearbyCourseStatus.textContent =
-          'No mapped courses found nearby. You can still create one manually.';
-        els.nearbyCourseList.innerHTML = '';
-        return;
-      }
-  
-      if (state.nearbyCourseLoadingScorecard) {
-        els.nearbyCourseStatus.textContent =
-          'Course selected — loading mapped scorecard data…';
-      } else if (!state.selectedNearbyCourse) {
-        els.nearbyCourseStatus.textContent =
-          `${courses.length} nearby course${courses.length === 1 ? '' : 's'} found.`;
-      }
-      // fall through to render the list either way
+    if (state.nearbyCourseLoading) {
+      els.nearbyCourseStatus.textContent = 'Searching around your location…';
+      els.nearbyCourseList.innerHTML =
+        `<div class="hint">Looking for nearby golf courses…</div>`;
+      return;
+    }
+
+    if (!state.loc) {
+      els.nearbyCourseStatus.textContent = 'Enable GPS first to find nearby courses.';
+      els.nearbyCourseList.innerHTML = '';
+      return;
+    }
+
+    if (!courses.length) {
+      els.nearbyCourseStatus.textContent =
+        'No mapped courses found nearby. You can still create one manually.';
+      els.nearbyCourseList.innerHTML = '';
+      return;
+    }
+
+    if (state.nearbyCourseLoadingScorecard) {
+      els.nearbyCourseStatus.textContent =
+        'Course selected — loading mapped scorecard data…';
+    } else if (!state.selectedNearbyCourse) {
+      els.nearbyCourseStatus.textContent =
+        `${courses.length} nearby course${courses.length === 1 ? '' : 's'} found.`;
+    }
+    // fall through to render the list either way
 
     els.nearbyCourseList.innerHTML = courses
       .map((course, index) => {
@@ -3496,14 +3527,14 @@ out geom;`;
 
       els.nearbyCourseStatus.textContent =
         `Selected ${candidate.name}. Scorecard lookup was unavailable; add pars and yardages manually.`;
-      } finally {
-        state.nearbyCourseLoadingScorecard = false;
-        renderNearbyCourses();
-        haptic(8);
-      }
+    } finally {
+      state.nearbyCourseLoadingScorecard = false;
+      renderNearbyCourses();
+      haptic(8);
     }
-  
-    async function findNearbyCourses() {
+  }
+
+  async function findNearbyCourses() {
     state.nearbySearchRequested = true;
 
     if (!state.loc || state.locStale) {
@@ -3788,7 +3819,7 @@ out geom;`;
           ? Math.max(0, Math.round(Number(row.putts)))
           : '',
 
-      fir: row.fir || '',
+      fir: row.fir || (Number(hole.par) === 3 ? 'NA' : ''),
       gir: row.gir || '',
     };
   }
@@ -4745,9 +4776,12 @@ out geom;`;
           haptic(8);
           return;
         }
-        applyHoleGeometryToMap();
+        applyHoleGeometryToMap({ resetAim: false });
         haptic(8);
-        setNotice('Imported green restored.', 'greenish');
+        setNotice(
+          'Imported green restored without changing your selected target.',
+          'greenish'
+        );
       });
     }
     // Practice reset button (in sheet)
@@ -6378,8 +6412,9 @@ out geom;`;
     const sm = kalman.process(wAvg.lat, wAvg.lng, wAvg.accuracy, raw.ts);
     state.smoothed = sm;
     // Report the filter's own 95% radius, never better than the correlated-error floor.
-    const acc = Math.min(num(wAvg.accuracy, raw.accuracy),
-      Number.isFinite(sm.accuracy95) ? sm.accuracy95 : num(wAvg.accuracy, raw.accuracy));
+    const acc = Number.isFinite(sm.accuracy95)
+      ? sm.accuracy95
+      : num(wAvg.accuracy, raw.accuracy);
     state.currentAccuracy = acc;
     state.loc = {
       lat: sm.lat, lng: sm.lng, accuracy: acc,
@@ -6432,7 +6467,7 @@ out geom;`;
     }
     const accYd = (state.loc.accuracy || 0) * M_TO_YD;
     const moving = kalman.speedMps() > KF_ZUPT_SPEED_MPS;
-    const suffix = moving ? '' : ' ·';   // a trailing dot marks a settled, averaging fix
+    const suffix = moving ? '' : ' · settled';
     if (state.locStale || !state.gpsRunning) {
       dot.classList.add('warn');
       els.gpsText.textContent = `Last GPS · ±${fmt(accYd)} yd`;
@@ -8060,8 +8095,18 @@ out geom;`;
     }
     els.rawLabel.textContent = label;
     setAimChip();
-    els.playsLikeYards.textContent =
-      fmt(calc.playsLikeYd) + (calc.extended ? '~' : '');
+    els.playsLikeYards.textContent = fmt(calc.playsLikeYd);
+
+    els.playsLikeYards.title = calc.extended
+      ? 'Approximate yardage beyond the calibrated carry range'
+      : '';
+
+    els.playsLikeYards.setAttribute(
+      'aria-label',
+      calc.extended
+        ? `${fmt(calc.playsLikeYd)} yards, approximate`
+        : `${fmt(calc.playsLikeYd)} yards`
+    );
     updateLine();
     renderFcb();
 

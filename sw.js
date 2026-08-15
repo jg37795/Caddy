@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.17';
+const CACHE_VERSION = 'v1.0.18';
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
@@ -95,7 +95,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.origin === self.location.origin) {
-    event.respondWith(cacheFirstAsset(request, SHELL_CACHE));
+    event.respondWith(networkFirstAsset(request, SHELL_CACHE));
     return;
   }
 
@@ -110,20 +110,24 @@ async function handleNavigation(request) {
   const cache = await caches.open(SHELL_CACHE);
   const shellRequest = new Request('./index.html');
 
-  const cached = await cache.match(shellRequest);
-  if (cached) return cached;
-
   try {
     const response = await fetch(request);
 
     if (cacheable(response)) {
-      cache.put(shellRequest, response.clone()).catch(() => { });
+      await cache.put(shellRequest, response.clone());
     }
 
     return response;
   } catch {
+    const cached =
+      (await cache.match(shellRequest)) ||
+      (await cache.match('./')) ||
+      (await caches.match(request));
+
+    if (cached) return cached;
+
     return new Response(
-      '<!doctype html><title>Offline</title><h1>You are offline</h1><p>Open Caddy once while online before using it offline.</p>',
+      '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Caddy Offline</title><body style="font-family:system-ui;padding:24px"><h1>You are offline</h1><p>Open Caddy once while online before using it offline.</p></body></html>',
       {
         status: 503,
         headers: {
@@ -134,22 +138,23 @@ async function handleNavigation(request) {
   }
 }
 
-async function cacheFirstAsset(request, cacheName) {
+async function networkFirstAsset(request, cacheName) {
   const cache = await caches.open(cacheName);
-
-  const cached = await cache.match(request, { ignoreSearch: true });
-  if (cached) return cached;
 
   try {
     const response = await fetch(request);
 
     if (cacheable(response)) {
-      cache.put(request, response.clone()).catch(() => { });
+      await cache.put(request, response.clone());
     }
 
     return response;
   } catch {
-    return new Response('', { status: 504 });
+    const cached = await cache.match(request, {
+      ignoreSearch: true,
+    });
+
+    return cached || new Response('', { status: 504 });
   }
 }
 
