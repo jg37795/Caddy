@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Caddy</title>
+    <meta name="application-name" content="Caddy" />
+    <meta name="apple-mobile-web-app-title" content="Caddy" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="theme-color" content="#0f7a43" id="themeColorMeta" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <link id="manifestLink" rel="manifest" />
+    <link
+      rel="apple-touch-icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230f7a43'/%3E%3Ccircle cx='90' cy='90' r='58' fill='%23eafff1'/%3E%3Cpath d='M74 127V47h45v14H91v18h25v14H91v34z' fill='%230f7a43'/%3E%3Ccircle cx='128' cy='47' r='10' fill='%23ffffff'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./leaflet.css" />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+
+  <body>
+    <!-- ONBOARDING / GET STARTED -->
+    <div
+      class="onboard"
+      id="onboard"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Welcome to Caddy"
+      hidden
+    >
+      <div class="onboard-inner">
+        <div class="ob-top">
+          <div class="ob-logo">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M8 20V4h9v4h-6v4h5v4h-5v4"
+                stroke="currentColor"
+                stroke-width="2.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+          <div class="ob-title">Caddy</div>
+          <div class="ob-tag">Know your distance.<br />Play smarter.</div>
+        </div>
+
+        <div class="ob-divider" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M6 21V4"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+            <path
+              d="M6 5h10l-1.5 3L16 11H6"
+              fill="currentColor"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </div>
+
+        <div class="ob-features">
+          <div class="ob-feature">
+            <div class="ob-feat-icon">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 21s7-6.1 7-12a7 7 0 1 0-14 0c0 5.9 7 12 7 12Z"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  d="M12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+              </svg>
+            </div>
+            <div class="ob-feat-text">
+              <h3>Precise Yardages</h3>
+              <p>Get instant club recommendations.</p>
+            </div>
+          </div>
+
+          <div class="ob-feature">
+            <div class="ob-feat-icon">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M7 3v11a4 4 0 0 0 8 0V3"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M15 6h3a3 3 0 0 1 0 6h-3M7 21h10"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </div>
+            <div class="ob-feat-text">
+              <h3>Built Around Your Bag</h3>
+              <p>Customize carry distances for every club.</p>
+            </div>
+          </div>
+
+          <div class="ob-feature">
+            <div class="ob-feat-icon">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M5 20V10M12 20V4M19 20v-7"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M3 20h18"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </div>
+            <div class="ob-feat-text">
+              <h3>Track Your Improvement</h3>
+              <p>Analyze your game and lower your scores.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ob-bottom">
+        <button class="ob-start" id="obStartBtn" type="button">
+          Get Started
+          <span class="arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path
+                d="M5 12h14M13 6l6 6-6 6"
+                stroke="currentColor"
+                stroke-width="2.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+        </button>
+        <div class="ob-foot">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M12 3l7 3v5c0 4.5-3 8.2-7 9-4-0.8-7-4.5-7-9V6l7-3Z"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M9 12l2 2 4-4"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          No account required
+        </div>
+      </div>
+    </div>
+
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="23" height="23" fill="none">
+              <path
+                d="M8 20V4h9v4h-6v4h5v4h-5v4"
+                stroke="currentColor"
+                stroke-width="2.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+          <div>
+            <h1>Caddy</h1>
+            <div class="sub" id="topSubtitle">
+              Personal golf caddy · all local
+            </div>
+          </div>
+        </div>
+        <div class="top-actions">
+          <label class="toggle" title="Pro Mode">
+            <input id="proToggle" type="checkbox" />
+            <span class="switch"></span>
+            <span class="hide-sm">Pro</span>
+          </label>
+          <button
+            class="icon-btn"
+            id="darkToggle"
+            title="Dark mode"
+            aria-label="Toggle dark mode"
+          >
+            <svg viewBox="0 0 24 24" width="21" height="21" fill="none">
+              <path
+                d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="main">
+        <!-- RANGE FINDER -->
+        <section id="rangeScreen" class="screen active">
+          <div class="range-wrap" id="rangeWrap">
+            <div id="map"></div>
+
+            <div class="range-top-ui">
+              <div style="display: flex; align-items: center; gap: 8px">
+                <div class="brand-mark" aria-label="Caddy" id="brandMark">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M8 20V4h9v4h-6v4h5v4h-5v4"
+                      stroke="currentColor"
+                      stroke-width="2.4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </div>
+                <div
+                  class="mode-toggle glass"
+                  id="modeToggle"
+                  role="radiogroup"
+                  aria-label="App mode"
+                >
+                  <button
+                    class="mode-opt active"
+                    data-mode="golf"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    Golf
+                  </button>
+                  <button
+                    class="mode-opt"
+                    data-mode="range"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    Range
+                  </button>
+                </div>
+              </div>
+
+              <div class="top-right-col">
+                <div class="top-cluster">
+                  <div
+                    class="layer-seg glass"
+                    id="layerSeg"
+                    role="radiogroup"
+                    aria-label="Map style"
+                  >
+                    <span class="seg-thumb" id="segThumb"></span>
+                    <button
+                      class="seg-opt"
+                      data-layer="satellite"
+                      role="radio"
+                      aria-checked="true"
+                    >
+                      Satellite
+                    </button>
+                    <button
+                      class="seg-opt"
+                      data-layer="osmstd"
+                      role="radio"
+                      aria-checked="false"
+                    >
+                      Course
+                    </button>
+                  </div>
+                  <button
+                    class="map-fab glass"
+                    id="settingsBtn"
+                    aria-label="Settings"
+                  >
+                    <svg viewBox="0 0 24 24" width="21" height="21" fill="none">
+                      <path
+                        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      />
+                      <path
+                        d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 0 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1H3a2 2 0 0 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9.1A1.7 1.7 0 0 0 10 3.6V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9.1a1.7 1.7 0 0 0 1.56 1H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"
+                        stroke="currentColor"
+                        stroke-width="1.7"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+
+                <button
+                  class="map-fab recenter-fab glass"
+                  id="recenterBtn"
+                  aria-label="Center map on me"
+                  aria-pressed="false"
+                >
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="3.2"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    />
+                    <path
+                      d="M12 2v3M12 19v3M2 12h3M19 12h3"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="8"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      opacity="0.55"
+                    />
+                  </svg>
+                  <span class="lock-badge" id="lockBadge" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none">
+                      <rect
+                        x="4"
+                        y="10"
+                        width="16"
+                        height="11"
+                        rx="2.5"
+                        fill="currentColor"
+                      />
+                      <path
+                        d="M7.5 10V7a4.5 4.5 0 0 1 9 0v3"
+                        stroke="currentColor"
+                        stroke-width="2.6"
+                        fill="none"
+                      />
+                    </svg>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <button
+              class="gps-chip glass"
+              id="gpsChip"
+              aria-live="polite"
+              aria-label="Enable GPS"
+            >
+              <span class="gps-dot" id="gpsDot"></span
+              ><span id="gpsText">Enable GPS</span>
+            </button>
+            <section
+              class="round-map-hud glass"
+              id="roundMapHud"
+              aria-label="Current round"
+              hidden
+            >
+              <div class="round-map-hud-top">
+                <div class="round-map-hole" id="roundMapHole">
+                  Hole 1 · Par 4
+                </div>
+
+                <div class="round-map-score" id="roundMapScore">E</div>
+
+                <div class="round-map-actions">
+                  <button
+                    class="round-map-score-btn"
+                    id="roundMapScoreBtn"
+                    type="button"
+                    aria-label="Score current hole"
+                  >
+                    Score
+                  </button>
+
+                  <button
+                    class="round-map-mini-btn"
+                    id="roundMapPrevBtn"
+                    type="button"
+                    aria-label="Previous hole"
+                  >
+                    ‹
+                  </button>
+
+                  <button
+                    class="round-map-mini-btn"
+                    id="roundMapNextBtn"
+                    type="button"
+                    aria-label="Next hole"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+
+              <!-- Kept in the DOM because app.js updates these values.
+                 CSS hides them in the compact map HUD. -->
+              <div class="round-map-course" id="roundMapCourse">
+                Casual Round
+              </div>
+
+              <div class="round-map-hud-bottom">
+                <span id="roundMapStatus">Ready for next shot</span>
+              </div>
+            </section>
+            <div class="round-fab-wrap" id="roundFabWrap" hidden>
+              <div class="round-live glass" id="roundLive" hidden>
+                <span class="round-live-v" id="roundLiveV">—</span>
+                <span class="round-live-l" id="roundLiveL">yd from start</span>
+              </div>
+              <div class="round-club-pop glass" id="roundClubPop" hidden></div>
+              <div class="round-fab-row">
+                <button
+                  class="round-fab"
+                  id="roundFab"
+                  type="button"
+                  aria-live="polite"
+                >
+                  <span
+                    class="round-fab-ic"
+                    id="roundFabIc"
+                    aria-hidden="true"
+                  ></span>
+                  <span id="roundFabText">Start shot</span>
+                </button>
+
+                <button
+                  class="round-fab-club"
+                  id="roundFabClub"
+                  type="button"
+                  aria-label="Change club"
+                  hidden
+                >
+                  <span id="roundFabClubName">—</span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="13"
+                    height="13"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M6 9l6 6 6-6"
+                      stroke="currentColor"
+                      stroke-width="2.4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <button
+              class="advice-pill glass"
+              id="advicePill"
+              type="button"
+              aria-label="Caddy advice"
+              hidden
+            >
+              <span class="advice-pill-ic" id="advicePillIc">💡</span>
+              <span class="advice-pill-count" id="advicePillCount" hidden
+                >0</span
+              >
+            </button>
+
+            <div class="advice-pop-scrim" id="advicePopScrim" hidden></div>
+            <div
+              class="advice-pop glass"
+              id="advicePop"
+              role="dialog"
+              aria-label="Caddy advice"
+              hidden
+            >
+              <div class="advice-pop-head">
+                <span class="advice-pop-title" id="advicePopTitle"
+                  >Caddy says</span
+                >
+                <button
+                  class="advice-pop-close"
+                  id="advicePopClose"
+                  type="button"
+                  aria-label="Close"
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+                    <path
+                      d="M6 6l12 12M18 6L6 18"
+                      stroke="currentColor"
+                      stroke-width="2.4"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <div class="advice-pop-body" id="advicePopBody"></div>
+            </div>
+
+            <section
+              class="sheet glass"
+              id="sheet"
+              aria-label="Yardage details"
+            >
+              <div
+                class="sheet-drag"
+                id="sheetDrag"
+                role="button"
+                tabindex="0"
+                aria-expanded="false"
+                aria-label="Expand yardage panel"
+              >
+                <div class="sheet-handle"></div>
+                <div class="sheet-peek">
+                  <div>
+                    <div class="big-number" id="rawYards" aria-live="polite">
+                      —
+                    </div>
+                    <div class="big-label" id="rawLabel">Tap a target</div>
+                  </div>
+                  <div class="plays-like">
+                    <div class="mini">plays like</div>
+                    <div class="num" id="playsLikeYards">—</div>
+                    <div class="mini">yards</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sheet-scroll">
+                <div class="fcb-block">
+                  <div class="fcb-row" id="fcbRow">
+                    <div class="fcb">
+                      <div class="fcb-l">Front</div>
+                      <div class="fcb-v" id="fcbFront">—</div>
+                    </div>
+                    <div class="fcb center">
+                      <div class="fcb-l">Center</div>
+                      <div class="fcb-v" id="fcbCenter">—</div>
+                    </div>
+                    <div class="fcb">
+                      <div class="fcb-l">Back</div>
+                      <div class="fcb-v" id="fcbBack">—</div>
+                    </div>
+                  </div>
+                  <div class="fcb-actions" id="fcbActions">
+                    <button class="fcb-btn" id="setBackBtn" type="button">
+                      Set Back
+                    </button>
+                    <button class="fcb-btn" id="setCenterBtn" type="button">
+                      Set Center
+                    </button>
+                    <button class="fcb-btn" id="setFrontBtn" type="button">
+                      Set Front
+                    </button>
+                    <button class="fcb-btn clear" id="clearFbBtn" type="button">
+                      Clear Green
+                    </button>
+                  </div>
+                </div>
+
+                <div class="detail-block">
+                  <div
+                    class="card rec-card"
+                    id="recCard"
+                    style="margin-top: 6px"
+                  >
+                    <div class="rec-kicker">Recommended shot</div>
+
+                    <div class="rec-main" id="clubRecommendation">
+                      No target selected
+                    </div>
+
+                    <div class="rec-sub" id="clubRecommendationSub">
+                      Tap a point on the map for club guidance.
+                    </div>
+
+                    <div class="rec-action" id="shotAction">
+                      Select a target to build your shot plan.
+                    </div>
+
+                    <div class="rec-chips" id="shotPlanChips"></div>
+
+                    <button
+                      class="rec-details-btn"
+                      id="shotDetailsBtn"
+                      type="button"
+                      aria-expanded="false"
+                      aria-controls="inlineAdvice"
+                    >
+                      <span id="shotDetailsLabel">Why this shot?</span>
+                      <span class="rec-details-chevron" aria-hidden="true"
+                        >›</span
+                      >
+                    </button>
+
+                    <div
+                      class="inline-advice"
+                      id="inlineAdvice"
+                      aria-live="polite"
+                      hidden
+                    ></div>
+
+                    <!-- Kept for compatibility with your existing element references. -->
+                    <div class="rec-tips" id="caddyTips" hidden></div>
+                  </div>
+                  <div
+                    class="card compact practice-card"
+                    id="practiceCard"
+                    style="display: none"
+                  >
+                    <div class="card-title">
+                      <h3>Practice</h3>
+                      <span class="chip" id="practiceSessionChip"
+                        >No session</span
+                      >
+                    </div>
+                    <div class="grid-2" style="margin-top: 4px">
+                      <div class="metric">
+                        <div class="v" id="practiceShots">0</div>
+                        <div class="l">Shots tracked</div>
+                      </div>
+                      <div class="metric">
+                        <div class="v" id="practiceClubs">0</div>
+                        <div class="l">Clubs used</div>
+                      </div>
+                    </div>
+                    <div
+                      id="practiceBreakdown"
+                      class="breakdown"
+                      style="margin-top: 10px"
+                    ></div>
+                    <button
+                      class="ghost-btn"
+                      id="practiceResetBtn"
+                      style="margin-top: 10px; width: 100%"
+                    >
+                      Reset session
+                    </button>
+                  </div>
+                  <div id="rangeNotice" class="notice greenish"></div>
+
+                  <div class="card compact" style="margin-top: 13px">
+                    <div class="card-title">
+                      <h3>Pick a club</h3>
+                      <span class="chip" id="weatherStatus">Neutral</span>
+                    </div>
+                    <div class="chip-row" id="clubChips"></div>
+                    <div class="grid-3" style="margin-top: 6px">
+                      <div class="metric">
+                        <div class="v" id="windMetric">—</div>
+                        <div class="l">Wind</div>
+                        <div class="sub" id="windSubMetric"></div>
+                      </div>
+                      <div class="metric">
+                        <div class="v" id="tempMetric">—</div>
+                        <div class="l">Temp / RH</div>
+                      </div>
+                      <div class="metric">
+                        <div class="v" id="elevMetric">—</div>
+                        <div class="l">Elevation</div>
+                      </div>
+                    </div>
+                    <div id="proBreakdownWrap" style="display: none">
+                      <details open>
+                        <summary>Pro Mode breakdown</summary>
+                        <div
+                          class="breakdown"
+                          id="rangeBreakdown"
+                          style="margin-top: 8px"
+                        ></div>
+                        <div
+                          class="hint"
+                          id="rangeStamp"
+                          style="margin-top: 9px"
+                        ></div>
+                      </details>
+                    </div>
+                  </div>
+
+                  <details class="howto" style="margin-top: 4px">
+                    <summary>How it works</summary>
+                    <div class="hint" style="margin-top: 8px">
+                      On a mapped course, <b>Front / Center / Back</b> fill in
+                      automatically and are re-solved along your actual line to
+                      the green as you walk — not from the tee.
+                      <b>Single-tap</b>
+                      moves your aim target only and never changes them.
+                      <b>Set Front</b> / <b>Set Center</b> / <b>Set Back</b> arm
+                      a placement tap and take over permanently;
+                      <b>Clear Green</b> hands control back. Switch the map to
+                      <b>Course</b> to see the green and fairway themselves —
+                      Caddy only overlays yardage points, tees and hazards.
+                      Plays-like folds in elevation, wind, temp, altitude &amp;
+                      humidity.
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- CLUBS -->
+        <section id="clubsScreen" class="screen">
+          <div class="card">
+            <div class="card-title">
+              <h2>Clubs</h2>
+              <button class="ghost-btn" id="resetClubsBtn">
+                Reset defaults
+              </button>
+            </div>
+            <div class="hint">
+              Edit your stock carry distances in yards. Recommendations prefer
+              the longer club when between clubs, with an easy/choke-down note.
+            </div>
+            <div id="clubsList" style="margin-top: 10px"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">
+              <h3>Add club</h3>
+            </div>
+            <div class="form-row">
+              <label class="field"
+                >Name <input id="newClubName" placeholder="e.g. 60°"
+              /></label>
+              <label class="field"
+                >Carry yd
+                <input
+                  id="newClubYards"
+                  type="number"
+                  inputmode="numeric"
+                  placeholder="80"
+              /></label>
+            </div>
+            <button class="primary-btn" id="addClubBtn">Add club</button>
+          </div>
+        </section>
+
+        <!-- SHOT CALC -->
+        <section id="shotScreen" class="screen">
+          <div class="card">
+            <div class="card-title">
+              <h2>Shot Calc</h2>
+              <span class="chip">Manual</span>
+            </div>
+            <div class="hint">
+              Enter the number you know and Caddy adds the plays-like math.
+              Leave fields blank to pull the latest live
+              target/weather/elevation; bearing is the shot direction (north =
+              0°).
+            </div>
+            <div class="form-row" style="margin-top: 13px">
+              <label class="field"
+                >Horizontal yards
+                <input
+                  id="manualYards"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="165"
+              /></label>
+              <label class="field"
+                >Optional club
+                <select id="manualClub"></select>
+              </label>
+            </div>
+            <div class="form-row">
+              <label class="field"
+                >Shot bearing °
+                <input
+                  id="manualBearing"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="0"
+              /></label>
+              <label class="field"
+                >Elevation change ft
+                <input
+                  id="manualElevDiff"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="0"
+              /></label>
+            </div>
+            <div class="form-row">
+              <label class="field"
+                >Course altitude ft
+                <input
+                  id="manualAltitude"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="0"
+              /></label>
+              <label class="field"
+                >Temp °F
+                <input
+                  id="manualTemp"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="70"
+              /></label>
+            </div>
+            <div class="form-row">
+              <label class="field"
+                >Humidity %
+                <input
+                  id="manualRh"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="50"
+              /></label>
+              <label class="field"
+                >Wind mph
+                <input
+                  id="manualWindSpeed"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="0"
+              /></label>
+            </div>
+            <div class="form-row">
+              <label class="field"
+                >Wind from °
+                <input
+                  id="manualWindDir"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="0"
+              /></label>
+              <label class="field" style="justify-content: end"
+                ><button class="ghost-btn" id="prefillBtn" type="button">
+                  Use live data
+                </button></label
+              >
+            </div>
+            <button class="primary-btn" id="manualCalcBtn">
+              Calculate plays-like
+            </button>
+          </div>
+          <div class="card rec-card">
+            <div class="rec-main" id="manualRec">Enter a shot</div>
+            <div class="rec-sub" id="manualRecSub">
+              Manual recommendation appears here.
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">
+              <h3>Breakdown</h3>
+            </div>
+            <div class="breakdown" id="manualBreakdown">
+              <div class="empty">No manual calculation yet.</div>
+            </div>
+            <div class="hint" style="margin-top: 8px">
+              Lie is assumed neutral/fairway (0 yd) — no reliable free
+              auto-detection exists.
+            </div>
+          </div>
+        </section>
+
+        <!-- ROUND -->
+        <section id="roundScreen" class="screen">
+          <div class="card" id="roundSessionCard">
+            <div class="round-hole-strip" id="roundHoleStrip" hidden>
+              <div class="round-hole-strip-top">
+                <span id="roundCourseName">Casual Round</span>
+                <strong id="roundScoreSummary">E through 0</strong>
+              </div>
+
+              <div class="round-hole-strip-main">
+                <strong id="roundHoleNumber">Hole 1</strong>
+                <span id="roundHoleMeta">Par 4</span>
+              </div>
+            </div>
+            <div class="card-title">
+              <h2>Round mode</h2>
+              <span class="chip" id="roundStatusChip">Not started</span>
+            </div>
+            <div class="hint" id="roundShotHint">
+              Start a round to track your shots. Caddy measures each shot's
+              distance from GPS and learns how far you really hit each club.
+            </div>
+            <div
+              class="metric"
+              id="roundShotReadout"
+              style="margin-top: 12px; display: none"
+            ></div>
+            <button
+              class="primary-btn"
+              id="roundActionBtn"
+              type="button"
+              style="width: 100%; margin-top: 12px"
+            >
+              Start round
+            </button>
+            <div
+              class="grid-3"
+              id="roundSubActions"
+              style="margin-top: 8px; display: none"
+            >
+              <button class="ghost-btn" id="roundPrevHoleBtn" type="button">
+                Previous
+              </button>
+
+              <button class="ghost-btn" id="roundDiscardBtn" type="button">
+                Discard shot
+              </button>
+
+              <button class="ghost-btn" id="roundNextHoleBtn" type="button">
+                Next
+              </button>
+            </div>
+            <button
+              class="danger-btn"
+              id="roundEndBtn"
+              type="button"
+              style="width: 100%; margin-top: 8px; display: none"
+            >
+              End round
+            </button>
+            <div id="roundShotList" style="margin-top: 12px"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">
+              <h2>Scorecard</h2>
+              <button class="danger-btn" id="clearRoundBtn">Clear</button>
+            </div>
+            <div class="hint">
+              Track score, putts, fairways (FIR) and greens in regulation (GIR)
+              for 18 holes. Saved locally.
+            </div>
+          </div>
+          <div class="card">
+            <div
+              class="round-row"
+              style="font-size: 12px; color: var(--muted); font-weight: 850"
+            >
+              <div>Hole</div>
+              <div>Score</div>
+              <div>Putts</div>
+              <div>FIR</div>
+              <div>GIR</div>
+            </div>
+            <div id="roundRows"></div>
+          </div>
+        </section>
+
+        <!-- STATS -->
+        <section id="statsScreen" class="screen">
+          <div class="card">
+            <div class="card-title">
+              <h2>Stats</h2>
+              <span class="chip">Local</span>
+            </div>
+            <div class="grid-2">
+              <div class="metric">
+                <div class="stat-big" id="statScore">—</div>
+                <div class="l">Total / avg score</div>
+              </div>
+              <div class="metric">
+                <div class="stat-big" id="statPutts">—</div>
+                <div class="l">Total / avg putts</div>
+              </div>
+              <div class="metric">
+                <div class="stat-big" id="statFir">—</div>
+                <div class="l">FIR %</div>
+              </div>
+              <div class="metric">
+                <div class="stat-big" id="statGir">—</div>
+                <div class="l">GIR %</div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">
+              <h3>This round &amp; history</h3>
+            </div>
+            <div class="breakdown" id="statsBreakdown"></div>
+            <button
+              class="ghost-btn"
+              id="saveRoundBtn"
+              style="margin-top: 12px"
+            >
+              Save round to history
+            </button>
+          </div>
+          <div class="card compact">
+            <div class="card-title">
+              <h3>PWA status</h3>
+            </div>
+            <div class="hint" id="pwaStatus">
+              Checking install/offline support…
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <nav class="bottom-tabs" aria-label="Caddy tabs">
+        <button class="tab-btn active" data-tab="range">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M12 21s7-6.1 7-12a7 7 0 1 0-14 0c0 5.9 7 12 7 12Z"
+              stroke="currentColor"
+            />
+            <path
+              d="M12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
+              stroke="currentColor"
+            /></svg
+          >Range
+        </button>
+        <button class="tab-btn" data-tab="clubs">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M7 3v11a4 4 0 0 0 8 0V3"
+              stroke="currentColor"
+              stroke-linecap="round"
+            />
+            <path
+              d="M15 6h3a3 3 0 0 1 0 6h-3M7 21h10"
+              stroke="currentColor"
+              stroke-linecap="round"
+            /></svg
+          >Clubs
+        </button>
+        <button class="tab-btn" data-tab="shot">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M4 19c7-1 12-6 16-14"
+              stroke="currentColor"
+              stroke-linecap="round"
+            />
+            <path
+              d="M14 5h6v6"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M6 19h.01"
+              stroke="currentColor"
+              stroke-linecap="round"
+            /></svg
+          >Shot
+        </button>
+        <button class="tab-btn" data-tab="round">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M6 3v18" stroke="currentColor" stroke-linecap="round" />
+            <path
+              d="M6 4h10l-1 4 1 4H6"
+              stroke="currentColor"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M5 21h8"
+              stroke="currentColor"
+              stroke-linecap="round"
+            /></svg
+          >Round
+        </button>
+        <button class="tab-btn" data-tab="stats">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M5 20V10M12 20V4M19 20v-7"
+              stroke="currentColor"
+              stroke-linecap="round"
+            />
+            <path
+              d="M3 20h18"
+              stroke="currentColor"
+              stroke-linecap="round"
+            /></svg
+          >Stats
+        </button>
+      </nav>
+    </div>
+    <!-- Round setup sheet -->
+    <div class="modal-scrim" id="roundSetupScrim"></div>
+
+    <section
+      class="round-setup-sheet glass"
+      id="roundSetupSheet"
+      aria-label="Start round setup"
+      aria-hidden="true"
+    >
+      <div class="sheet-handle" style="margin: 6px auto 12px"></div>
+
+      <div class="round-setup-head">
+        <div>
+          <h2>Start a round</h2>
+          <p>
+            Choose a saved course, find a nearby course, or create one manually.
+          </p>
+        </div>
+
+        <button
+          class="icon-btn"
+          id="roundSetupCloseBtn"
+          type="button"
+          aria-label="Close round setup"
+        >
+          ×
+        </button>
+      </div>
+
+      <label class="field">
+        Saved course
+        <select id="roundSetupCourseSelect">
+          <option value="">New casual round</option>
+        </select>
+      </label>
+
+      <div class="course-recognition" id="courseRecognition">
+        <div class="course-recognition-head">
+          <div>
+            <strong>Nearby courses</strong>
+            <span id="nearbyCourseStatus"> Use GPS to look nearby. </span>
+          </div>
+
+          <button class="ghost-btn" id="findNearbyCoursesBtn" type="button">
+            Find nearby
+          </button>
+          <button
+            class="ghost-btn"
+            id="refreshOsmBtn"
+            type="button"
+            hidden
+            style="margin-left: 6px"
+          >
+            Refresh from OSM
+          </button>
+        </div>
+
+        <div class="nearby-course-list" id="nearbyCourseList"></div>
+      </div>
+
+      <div class="form-row" style="margin-top: 12px">
+        <label class="field">
+          Course name
+          <input
+            id="roundSetupCourseName"
+            type="text"
+            maxlength="80"
+            placeholder="e.g. Pine Valley Golf Club"
+          />
+        </label>
+
+        <label class="field">
+          Tee box
+          <input
+            id="roundSetupTeeName"
+            type="text"
+            maxlength="40"
+            placeholder="e.g. Blue tees"
+          />
+        </label>
+      </div>
+
+      <label class="field">
+        Start on hole
+        <select id="roundSetupStartHole"></select>
+      </label>
+
+      <div class="round-setup-title-row">
+        <div>
+          <strong>Course scorecard</strong>
+          <span>Set par and optional tee yardage for each hole.</span>
+        </div>
+      </div>
+      <div class="round-setup-holes" id="roundSetupPars"></div>
+
+      <label class="toggle round-save-course-toggle">
+        <input id="roundSetupSaveCourse" type="checkbox" checked />
+        <span class="switch"></span>
+        <span>Save this course on this device</span>
+      </label>
+
+      <button
+        class="primary-btn"
+        id="roundSetupStartBtn"
+        type="button"
+        style="width: 100%; margin-top: 16px"
+      >
+        Start Round
+      </button>
+    </section>
+    <div class="modal-scrim" id="roundScoreScrim"></div>
+
+    <section
+      class="round-score-sheet glass"
+      id="roundScoreSheet"
+      aria-label="Score current hole"
+      aria-hidden="true"
+    >
+      <div class="sheet-handle" style="margin: 6px auto 12px"></div>
+
+      <div class="round-score-head">
+        <div>
+          <h2 id="roundScoreTitle">Score Hole 1</h2>
+          <p id="roundScoreMeta">Par 4</p>
+        </div>
+
+        <button
+          class="icon-btn"
+          id="roundScoreCloseBtn"
+          type="button"
+          aria-label="Close score entry"
+        >
+          ×
+        </button>
+      </div>
+
+      <div class="round-score-current">
+        <span>Score</span>
+        <strong id="roundScoreValue">4</strong>
+      </div>
+
+      <div class="round-score-stepper">
+        <button
+          class="round-score-step"
+          id="roundScoreMinusBtn"
+          type="button"
+          aria-label="Lower score"
+        >
+          −
+        </button>
+
+        <button
+          class="round-score-step"
+          id="roundScorePlusBtn"
+          type="button"
+          aria-label="Raise score"
+        >
+          +
+        </button>
+      </div>
+
+      <div class="round-score-section">
+        <div class="round-score-label">Putts</div>
+
+        <div class="round-score-options" id="roundPuttsOptions">
+          <button data-putts="0" type="button">0</button>
+          <button data-putts="1" type="button">1</button>
+          <button data-putts="2" type="button">2</button>
+          <button data-putts="3" type="button">3</button>
+          <button data-putts="4" type="button">4+</button>
+        </div>
+      </div>
+
+      <div class="round-score-section">
+        <div class="round-score-label">Fairway</div>
+
+        <div class="round-score-options" id="roundFirOptions">
+          <button data-fir="Y" type="button">Hit</button>
+          <button data-fir="N" type="button">Miss</button>
+          <button data-fir="NA" type="button">N/A</button>
+        </div>
+      </div>
+
+      <div class="round-score-section">
+        <div class="round-score-label">Green in regulation</div>
+
+        <div class="round-score-options" id="roundGirOptions">
+          <button data-gir="Y" type="button">GIR</button>
+          <button data-gir="N" type="button">Missed</button>
+        </div>
+      </div>
+
+      <div class="round-score-actions">
+        <button class="ghost-btn" id="roundScoreSaveBtn" type="button">
+          Save hole
+        </button>
+
+        <button class="primary-btn" id="roundScoreSaveNextBtn" type="button">
+          Save &amp; Next
+        </button>
+      </div>
+    </section>
+    <!-- Settings sheet -->
+    <div class="modal-scrim" id="settingsScrim"></div>
+    <section
+      class="settings-sheet glass"
+      id="settingsSheet"
+      aria-label="Settings"
+      aria-hidden="true"
+    >
+      <div class="sheet-handle" style="margin: 6px auto 12px"></div>
+      <h2 style="margin: 0 0 4px; letter-spacing: -0.03em">Settings</h2>
+      <div class="settings-row">
+        <div>
+          <div class="lbl">Pro Mode</div>
+          <div class="desc">Show the full plays-like physics breakdown.</div>
+        </div>
+        <label class="toggle" title="Pro Mode"
+          ><input id="proToggleSheet" type="checkbox" /><span
+            class="switch"
+          ></span
+        ></label>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="lbl">Dark appearance</div>
+          <div class="desc">
+            Switches the app chrome. Map style is set separately on the map.
+          </div>
+        </div>
+        <label class="toggle" title="Dark mode"
+          ><input id="darkToggleSheet" type="checkbox" /><span
+            class="switch"
+          ></span
+        ></label>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="lbl">Show welcome screen again</div>
+          <div class="desc">Replay the Get Started intro next launch.</div>
+        </div>
+        <button class="ghost-btn" id="replayOnboardBtn" type="button">
+          Replay
+        </button>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="lbl">Shot data</div>
+          <div class="desc" id="shotDataDesc">
+            Distances Caddy has learned from your tracked shots.
+          </div>
+        </div>
+        <button class="danger-btn" id="resetShotDataBtn" type="button">
+          Reset
+        </button>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="lbl">Precise Location help</div>
+          <div class="desc">
+            For best yardages on iPhone: Settings ▸ Privacy &amp; Security ▸
+            Location Services ▸ Safari Websites (or this app) ▸ While Using ▸
+            Precise Location → ON.
+          </div>
+        </div>
+      </div>
+      <button
+        class="primary-btn"
+        id="settingsDoneBtn"
+        style="width: 100%; margin-top: 14px"
+      >
+        Done
+      </button>
+    </section>
+
+    <script src="./leaflet.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
