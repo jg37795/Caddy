@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.10.0'; // short aim/bearing chips, map wind pill, landing-zone dispersion fix, cleaned round HUD
+  const APP_VERSION = '1.11.0'; // sheet peek redesign, segmented F/M/B control, wind compass + pill placement
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -128,6 +128,7 @@
     rangeNotice: $('rangeNotice'),
     weatherStatus: $('weatherStatus'),
     windMetric: $('windMetric'),
+    windCompass: $('windCompass'),
     windSubMetric: $('windSubMetric'),
     tempMetric: $('tempMetric'),
     elevMetric: $('elevMetric'),
@@ -7753,6 +7754,7 @@ out geom;`;
   function updateWeatherUI() {
     const w = getWeatherOrNeutral(), e = getElevationOrNeutral();
     const windArrow = $('windArrow');
+    const windCompass = $('windCompass');
     if (state.context.weather && w.windMph >= 1) {
       const gust = Number.isFinite(w.gustMph) && w.gustMph > w.windMph + 2
         ? `–${Math.round(w.gustMph)}` : '';
@@ -7760,9 +7762,11 @@ out geom;`;
       const towardDeg = (w.windFromDeg + 180) % 360;
       els.windMetric.textContent = `${fmt(w.windMph)}${gust} mph`;
       els.windSubMetric.textContent = `from ${bearingToCompass(w.windFromDeg)}`;
-      if (windArrow) {
-        windArrow.hidden = false;
-        windArrow.style.transform = `rotate(${towardDeg}deg)`;
+      if (windCompass) {
+        windCompass.hidden = false;
+        if (windArrow) {
+          windArrow.style.transform = `rotate(${towardDeg}deg)`;
+        }
       }
       // Map wind pill: same arrow + speed/direction, visible without opening
       // the sheet. Same rotation math as the sheet arrow so the two can
@@ -7780,7 +7784,7 @@ out geom;`;
     } else {
       els.windMetric.textContent = state.context.weather ? `${fmt(w.windMph)} mph` : 'Neutral';
       els.windSubMetric.textContent = '';
-      if (windArrow) windArrow.hidden = true;
+      if (windCompass) windCompass.hidden = true;
       if (els.windPill) els.windPill.hidden = true;
     }
     els.tempMetric.textContent = state.context.weather

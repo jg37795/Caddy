@@ -811,6 +811,15 @@ body.dark .range-wrap:not(.is-sat) .brand-mark {
   gap: 10px;
 }
 
+/* Wind pill + recenter FAB share a row so the pill never collides with
+   the open sheet. */
+.top-right-row2 {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .top-cluster {
   display: flex;
   align-items: center;
@@ -2089,10 +2098,29 @@ body.dark .sheet-handle {
 
 .sheet-peek {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
   padding: 0 2px;
+}
+
+.sheet-yards {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sheet-chip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.sheet-chip-row .aim-chip,
+.sheet-chip-row .bearing-chip {
+  margin-top: 0;
+  margin-left: 0;
 }
 
 .sheet-scroll {
@@ -2168,13 +2196,64 @@ body[data-dragging='1'] .fcb-block {
 
 .fcb-actions {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 7px;
   padding: 0 4px 8px;
 }
 
+/* iOS-style segmented control for marking green edges. */
+.fcb-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  margin: 0 4px 8px;
+  padding: 3px;
+  border-radius: 14px;
+  background: rgba(127, 127, 127, 0.14);
+}
+
+body.dark .fcb-seg {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.fcb-seg-btn {
+  min-height: 40px;
+  border: 0;
+  border-radius: 11px;
+  padding: 8px 6px;
+  background: transparent;
+  color: var(--glass-text);
+  font-weight: 850;
+  font-size: 12.5px;
+  transition: background 0.22s ease, color 0.22s ease,
+    transform 0.15s var(--spring-snappy);
+}
+
+.fcb-seg-btn:active {
+  transform: scale(0.96);
+}
+
+/* Armed segment fills with the matching dot color (Front emerald,
+   Middle green, Back amber). */
+.fcb-seg-btn.armed {
+  box-shadow: 0 2px 8px rgba(20, 45, 30, 0.22);
+}
+
+#setFrontBtn.armed {
+  background: #34d399;
+  color: #06281c;
+}
+
+#setCenterBtn.armed {
+  background: var(--green);
+  color: #fff;
+}
+
+#setBackBtn.armed {
+  background: #f59e0b;
+  color: #2a1c02;
+}
+
 #restoreGreenBtn {
-  grid-column: span 2;
   background: rgba(15, 122, 67, 0.09);
   color: var(--green);
   border: 1px dashed rgba(15, 122, 67, 0.3);
@@ -2276,43 +2355,85 @@ body.dark .aim-chip.layup {
 }
 
 /* ===== Wind pill on the map ===== */
-/* Small glass indicator under the recenter FAB: rotating arrow + speed/dir.
-   Same math as the sheet's wind arrow, so the two always agree. */
+/* Compact glass indicator beside the recenter FAB: compass with a fixed
+   N tick and a rotating arrow + speed/direction. Same rotation math as the
+   sheet's wind compass, so the two always agree. */
 .wind-pill {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 12px;
+  gap: 8px;
+  padding: 7px 12px 7px 9px;
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 800;
   letter-spacing: -0.01em;
   white-space: nowrap;
   pointer-events: none;
-  max-width: 220px;
+  max-width: 176px;
+  transition: opacity 0.3s ease;
 }
 
 .wind-pill[hidden] {
   display: none;
 }
 
-.wind-pill-arrow {
-  display: inline-block;
-  font-size: 13px;
-  line-height: 1;
-  color: #2e8bff;
+/* Ride the sheet like the zoom control: gone once the sheet is fully
+   open (the sheet's own Wind metric takes over there). */
+body[data-detent='full']:not([data-dragging='1']) .wind-pill {
+  opacity: 0;
+  pointer-events: none;
+}
+
+body[data-dragging='1'] .wind-pill {
+  transition: none !important;
+  opacity: calc(1 - var(--detail-reveal, 0));
+}
+
+.wind-pill-compass {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
+  color: #0a7dff;
+}
+
+.wind-pill-compass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.4;
+}
+
+.wind-pill-compass .wind-pill-arrow {
+  width: 14px;
+  height: 14px;
+  transform-origin: 50% 50%;
   transition: transform 0.45s var(--spring);
   will-change: transform;
 }
 
-body.dark .wind-pill-arrow {
+.wind-pill-n {
+  position: absolute;
+  top: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 6.5px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+body.dark .wind-pill-compass {
   color: #7cc4ff;
 }
 
-.is-sat .wind-pill-arrow {
+.is-sat .wind-pill-compass {
   color: #7cc4ff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
 .wind-pill-text {
@@ -2320,6 +2441,7 @@ body.dark .wind-pill-arrow {
   text-overflow: ellipsis;
 }
 
+/* Restore / Clear: quiet secondary row under the segmented control. */
 .fcb-btn {
   border-radius: 13px;
   padding: 10px 8px;
@@ -2344,66 +2466,6 @@ body.dark .fcb-btn.clear {
 
 .fcb-btn:active {
   transform: scale(0.95);
-}
-
-.fcb-btn.armed {
-  background: var(--green);
-  color: #fff;
-  border-color: var(--green);
-}
-
-/* Set Front / Set Back tinted to match their dot colors */
-#setFrontBtn {
-  background: rgba(52, 211, 153, 0.16);
-  color: #0c8a5c;
-  border-color: rgba(52, 211, 153, 0.4);
-}
-
-body.dark #setFrontBtn {
-  background: rgba(52, 211, 153, 0.18);
-  color: #56e08c;
-}
-
-#setFrontBtn.armed {
-  background: #34d399;
-  color: #06281c;
-  border-color: #34d399;
-}
-
-#setCenterBtn {
-  background: var(--green);
-  color: #fff;
-  border-color: var(--green);
-}
-
-body.dark #setCenterBtn {
-  background: var(--green-2);
-  color: #fff;
-  border-color: var(--green-2);
-}
-
-#setCenterBtn.armed {
-  background: var(--green-2);
-  color: #fff;
-  border-color: var(--green-2);
-  box-shadow: 0 0 0 3px rgba(24, 164, 91, 0.35);
-}
-
-#setBackBtn {
-  background: rgba(245, 158, 11, 0.16);
-  color: #b9740a;
-  border-color: rgba(245, 158, 11, 0.4);
-}
-
-body.dark #setBackBtn {
-  background: rgba(245, 158, 11, 0.18);
-  color: #f5b14a;
-}
-
-#setBackBtn.armed {
-  background: #f59e0b;
-  color: #2a1c02;
-  border-color: #f59e0b;
 }
 
 .fcb-btn.clear {
@@ -2432,10 +2494,10 @@ body[data-dragging='1'] .detail-block {
 }
 
 .big-number {
-  font-size: clamp(48px, 13vw, 72px);
+  font-size: clamp(40px, 11vw, 56px);
   font-weight: 900;
-  line-height: 0.88;
-  letter-spacing: -0.07em;
+  line-height: 0.92;
+  letter-spacing: -0.06em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2447,22 +2509,53 @@ body[data-dragging='1'] .detail-block {
   margin-top: 5px;
 }
 
+/* Plays-like readout: a proper metric tile next to the big number so it
+   reads as a deliberate card instead of floating text. */
 .plays-like {
-  text-align: right;
-  min-width: 96px;
+  flex: 0 0 auto;
+  min-width: 92px;
+  text-align: center;
+  padding: 10px 12px 11px;
+  border-radius: 18px;
+  background: rgba(15, 122, 67, 0.08);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
-.plays-like .num {
+.plays-like-kicker {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.plays-like-num {
   font-size: 32px;
   font-weight: 900;
   letter-spacing: -0.06em;
+  line-height: 1;
   color: var(--green);
   font-variant-numeric: tabular-nums;
+  margin-top: 4px;
 }
 
-body.dark .plays-like .num,
-.is-sat .plays-like .num {
+body.dark .plays-like-num,
+.is-sat .plays-like-num {
   color: #37e07f;
+}
+
+.plays-like-unit {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin-top: 4px;
+}
+
+body.dark .plays-like {
+  background: rgba(24, 164, 91, 0.14);
 }
 
 .grid-2 {
@@ -2494,17 +2587,57 @@ body.dark .plays-like .num,
 
 .wind-metric-v {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
 }
 
-.wind-arrow {
-  display: inline-block;
-  font-size: 15px;
-  line-height: 1;
+/* Wind compass: rotating arrow + fixed N tick, so direction is readable
+   at a glance. Matches the map pill exactly. */
+.wind-compass {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
   color: var(--blue);
+}
+
+.wind-compass[hidden] {
+  display: none;
+}
+
+.wind-compass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.35;
+}
+
+.wind-compass .wind-arrow {
+  width: 14px;
+  height: 14px;
   transform-origin: 50% 50%;
   transition: transform 0.45s var(--spring);
+  will-change: transform;
+}
+
+.wind-compass-n {
+  position: absolute;
+  top: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 6.5px;
+  font-weight: 900;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+body.dark .wind-compass {
+  color: #7cc4ff;
 }
 
 .metric .l {
@@ -3241,7 +3374,10 @@ path.dispersion-zone {
   .leaflet-bottom.leaflet-right,
   .settings-sheet,
   .fcb-block,
-  .onboard {
+  .onboard,
+  .wind-compass .wind-arrow,
+  .wind-pill-compass .wind-pill-arrow,
+  .bearing-chip-arrow {
     transition: none !important;
     animation: none !important;
   }
@@ -3277,6 +3413,15 @@ path.dispersion-zone {
 
   .hide-sm {
     display: none;
+  }
+
+  .brand-mark {
+    display: none;
+  }
+
+  .wind-pill {
+    max-width: 118px;
+    padding: 7px 10px 7px 8px;
   }
 
   .round-row {

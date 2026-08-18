@@ -184,25 +184,33 @@
                 </button>
               </div>
 
-              <button class="map-fab recenter-fab glass" id="recenterBtn" aria-label="Center map on me"
-                aria-pressed="false">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-                  <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2" />
-                  <path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2"
-                    stroke-linecap="round" />
-                  <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6" opacity="0.55" />
-                </svg>
-                <span class="lock-badge" id="lockBadge" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none">
-                    <rect x="4" y="10" width="16" height="11" rx="2.5" fill="currentColor" />
-                    <path d="M7.5 10V7a4.5 4.5 0 0 1 9 0v3" stroke="currentColor" stroke-width="2.6" fill="none" />
-                  </svg>
-                </span>
-              </button>
+              <div class="top-right-row2">
+                <div class="wind-pill glass" id="windPill" aria-label="Wind conditions" hidden>
+                  <span class="wind-pill-compass" aria-hidden="true">
+                    <svg class="wind-pill-arrow" id="windPillArrow" viewBox="0 0 24 24">
+                      <path d="M12 2l6.5 9H5.5z" fill="currentColor" />
+                      <path d="M12 11v9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+                    </svg>
+                    <span class="wind-pill-n">N</span>
+                  </span>
+                  <span class="wind-pill-text" id="windPillText">—</span>
+                </div>
 
-              <div class="wind-pill glass" id="windPill" aria-label="Wind conditions" hidden>
-                <span class="wind-pill-arrow" id="windPillArrow" aria-hidden="true">↑</span>
-                <span class="wind-pill-text" id="windPillText">—</span>
+                <button class="map-fab recenter-fab glass" id="recenterBtn" aria-label="Center map on me"
+                  aria-pressed="false">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+                    <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2" />
+                    <path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" />
+                    <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6" opacity="0.55" />
+                  </svg>
+                  <span class="lock-badge" id="lockBadge" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none">
+                      <rect x="4" y="10" width="16" height="11" rx="2.5" fill="currentColor" />
+                      <path d="M7.5 10V7a4.5 4.5 0 0 1 9 0v3" stroke="currentColor" stroke-width="2.6" fill="none" />
+                    </svg>
+                  </span>
+                </button>
               </div>
             </div>
           </div>
@@ -288,21 +296,23 @@
               aria-label="Expand yardage panel">
               <div class="sheet-handle"></div>
               <div class="sheet-peek">
-                <div>
+                <div class="sheet-yards">
                   <div class="big-number" id="rawYards" aria-live="polite">
                     —
                   </div>
                   <div class="big-label" id="rawLabel">Tap a target</div>
-                  <div class="aim-chip" id="aimChip" hidden></div>
-                  <div class="bearing-chip" id="bearingChip" hidden>
-                    <span class="bearing-chip-arrow" id="bearingChipArrow" aria-hidden="true">↑</span>
-                    <span id="bearingChipText">—</span>
+                  <div class="sheet-chip-row">
+                    <div class="aim-chip" id="aimChip" hidden></div>
+                    <div class="bearing-chip" id="bearingChip" hidden>
+                      <span class="bearing-chip-arrow" id="bearingChipArrow" aria-hidden="true">↑</span>
+                      <span id="bearingChipText">—</span>
+                    </div>
                   </div>
                 </div>
                 <div class="plays-like">
-                  <div class="mini">plays like</div>
-                  <div class="num" id="playsLikeYards">—</div>
-                  <div class="mini">yards</div>
+                  <div class="plays-like-kicker">plays like</div>
+                  <div class="plays-like-num" id="playsLikeYards">—</div>
+                  <div class="plays-like-unit">yards</div>
                 </div>
               </div>
             </div>
@@ -323,16 +333,18 @@
                     <div class="fcb-v" id="fcbBack">—</div>
                   </div>
                 </div>
+                <div class="fcb-seg" role="group" aria-label="Mark green edges">
+                  <button class="fcb-seg-btn" id="setFrontBtn" type="button">
+                    Front
+                  </button>
+                  <button class="fcb-seg-btn" id="setCenterBtn" type="button">
+                    Middle
+                  </button>
+                  <button class="fcb-seg-btn" id="setBackBtn" type="button">
+                    Back
+                  </button>
+                </div>
                 <div class="fcb-actions" id="fcbActions">
-                  <button class="fcb-btn" id="setFrontBtn" type="button">
-                    Set Front
-                  </button>
-                  <button class="fcb-btn" id="setCenterBtn" type="button">
-                    Set Middle
-                  </button>
-                  <button class="fcb-btn" id="setBackBtn" type="button">
-                    Set Back
-                  </button>
                   <button class="fcb-btn" id="restoreGreenBtn" type="button" disabled>
                     Restore Green
                   </button>
@@ -403,7 +415,13 @@
                     <div class="metric">
                       <div class="v wind-metric-v">
                         <span id="windMetric">—</span>
-                        <span class="wind-arrow" id="windArrow" aria-hidden="true" hidden>↑</span>
+                        <span class="wind-compass" id="windCompass" aria-hidden="true" hidden>
+                          <svg class="wind-arrow" id="windArrow" viewBox="0 0 24 24">
+                            <path d="M12 2l6.5 9H5.5z" fill="currentColor" />
+                            <path d="M12 11v9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+                          </svg>
+                          <span class="wind-compass-n">N</span>
+                        </span>
                       </div>
                       <div class="l">Wind</div>
                       <div class="sub" id="windSubMetric"></div>
