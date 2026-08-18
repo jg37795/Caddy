@@ -1158,6 +1158,7 @@ body[data-dragging='1'] .gps-chip {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-variant-numeric: tabular-nums;
 }
 
 .round-map-hole {
@@ -2196,20 +2197,49 @@ body.dark #restoreGreenBtn {
   border-color: rgba(99, 232, 154, 0.3);
 }
 
-.aim-chip {
+.aim-chip,
+.bearing-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   margin-top: 8px;
   padding: 4px 11px;
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 850;
   letter-spacing: -0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
-.aim-chip[hidden] {
+.bearing-chip {
+  margin-left: 6px;
+  background: rgba(127, 127, 127, 0.14);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.aim-chip[hidden],
+.bearing-chip[hidden] {
   display: none;
+}
+
+/* Color dot: codes the mode without requiring a full sentence. */
+.aim-chip::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.bearing-chip-arrow {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1;
+  transition: transform 0.45s var(--spring);
+  will-change: transform;
 }
 
 .aim-chip.middle {
@@ -2243,6 +2273,51 @@ body.dark .aim-chip.pin {
 body.dark .aim-chip.layup {
   color: #f5b14a;
   border-color: rgba(245, 177, 74, 0.3);
+}
+
+/* ===== Wind pill on the map ===== */
+/* Small glass indicator under the recenter FAB: rotating arrow + speed/dir.
+   Same math as the sheet's wind arrow, so the two always agree. */
+.wind-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  max-width: 220px;
+}
+
+.wind-pill[hidden] {
+  display: none;
+}
+
+.wind-pill-arrow {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  color: #2e8bff;
+  flex: 0 0 auto;
+  transition: transform 0.45s var(--spring);
+  will-change: transform;
+}
+
+body.dark .wind-pill-arrow {
+  color: #7cc4ff;
+}
+
+.is-sat .wind-pill-arrow {
+  color: #7cc4ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.wind-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fcb-btn {
@@ -3065,6 +3140,11 @@ body[data-detent='full']:not([data-dragging='1']) .leaflet-bottom.leaflet-right 
 
 .leaflet-overlay-pane path.aim-core {
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+}
+
+/* Dispersion landing zone: subtle shadow so the ring reads on satellite. */
+path.dispersion-zone {
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));
 }
 
 .stat-big {

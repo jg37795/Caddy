@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.9.8'; // FCB/target sync fix, pill collision fix, dispersion zone, verdict pin, scorecard tones
+  const APP_VERSION = '1.10.0'; // short aim/bearing chips, map wind pill, landing-zone dispersion fix, cleaned round HUD
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -118,6 +118,12 @@
     rawYards: $('rawYards'),
     rawLabel: $('rawLabel'),
     aimChip: $('aimChip'),
+    bearingChip: $('bearingChip'),
+    bearingChipArrow: $('bearingChipArrow'),
+    bearingChipText: $('bearingChipText'),
+    windPill: $('windPill'),
+    windPillArrow: $('windPillArrow'),
+    windPillText: $('windPillText'),
     playsLikeYards: $('playsLikeYards'),
     rangeNotice: $('rangeNotice'),
     weatherStatus: $('weatherStatus'),
@@ -1217,6 +1223,8 @@
       els.rawYards.textContent = '—';
       els.rawLabel.textContent = 'Tap second point';
       els.playsLikeYards.textContent = '—';
+      if (els.aimChip) els.aimChip.hidden = true;
+      if (els.bearingChip) els.bearingChip.hidden = true;
       return;
     }
     const a = state.twoTapA,
@@ -1236,6 +1244,8 @@
     els.rawYards.textContent = fmt(yd);
     els.rawLabel.textContent = 'yards between taps';
     els.playsLikeYards.textContent = fmt(yd);
+    if (els.aimChip) els.aimChip.hidden = true;
+    if (els.bearingChip) els.bearingChip.hidden = true;
     const rec = recommendClub(yd);
     els.clubRecommendation.textContent = rec.main;
     els.clubRecommendationSub.textContent =
@@ -1379,11 +1389,14 @@
     }
   }
 
+  // Verdict colors tint the ring EDGE only. The fill/base stay style-neutral
+  // (white on satellite, soft blue on the course map) so the map never
+  // drowns in green.
   function dispersionZoneColor(verdict) {
     if (verdict === 'go') return '#34d399';
     if (verdict === 'manage') return '#f5b14a';
     if (verdict === 'bail') return '#ff6b6b';
-    return '#2dd47f';
+    return null; // caller falls back to the style-appropriate base color
   }
 
   // A 1σ landing ellipse: semi-major = distance sigma along the shot line,
@@ -1405,6 +1418,28 @@
       pts.push([ll.lat, ll.lng]);
     }
     return pts;
+  }
+
+  // Exact landing distance, in yards, of a club's STOCK carry under the
+  // current conditions — anchors the dispersion zone when the tapped target
+  // is out of reach so the ring shows where the ball can actually land.
+  function clubLandingYd(club, bearingDeg) {
+    if (!club || !(club.yards > 0)) return 0;
+    const w = getWeatherOrNeutral();
+    const e = getElevationOrNeutral();
+    const env = buildEnv({
+      bearingDeg: norm(num(bearingDeg, 0)),
+      elevDiffFt: e.targetFt - e.userFt,
+      courseAltitudeFt: (e.targetFt + e.userFt) / 2,
+      tempF: w.tempF,
+      rh: w.rh,
+      windMph: w.windMph,
+      windFromDeg: w.windFromDeg,
+      pressureHpa: w.pressureHpa,
+      shearAlpha: w.shearAlpha,
+      latDeg: state.loc ? state.loc.lat : STD_LAT,
+    });
+    return Math.max(1, carryUnder(club.yards, env));
   }
 
   function renderDispersionZone(bearingDeg, club) {
@@ -1431,15 +1466,40 @@
       return;
     }
 
-    const color = dispersionZoneColor(state.adviceVerdict || 'neutral');
-    const pts = ellipsePoints(state.target, bearingDeg, sigD, sigL);
+    // Out of reach? Draw the club's REAL landing zone along the shot line
+    // instead of a hollow circle around a target it can never cover. The
+    // same 1.08× reach threshold as the "Lay up" recommendation keeps the
+    // ring and the advice consistent.
+    let center = state.target;
+    let outOfRange = false;
+    const calc = state.lastCalc;
+    if (
+      calc &&
+      Number.isFinite(calc.horizontalYd) &&
+      Number.isFinite(calc.playsLikeYd) &&
+      calc.playsLikeYd > club.yards * 1.08
+    ) {
+      const landingYd = clubLandingYd(club, bearingDeg);
+      center = geodesicDirect(state.loc, bearingDeg, landingYd * YD_TO_M);
+      outOfRange = true;
+    }
+
+    // Edge may tint with the verdict; the body stays style-neutral.
+    const verdictColor = dispersionZoneColor(state.adviceVerdict || 'neutral');
+    const img = isImagery();
+    const base = img ? '#ffffff' : '#1677ff';
+    const stroke = verdictColor && !outOfRange ? verdictColor : base;
+
+    const pts = ellipsePoints(center, bearingDeg, sigD, sigL);
     const opts = {
       pane: 'coursePane',
-      color,
+      className: 'dispersion-zone',
+      color: stroke,
       weight: 1.5,
-      opacity: 0.6,
-      fillColor: color,
-      fillOpacity: 0.14,
+      opacity: outOfRange ? 0.5 : 0.85,
+      dashArray: outOfRange ? '3 6' : '6 7',
+      fillColor: img ? '#ffffff' : '#1677ff',
+      fillOpacity: outOfRange ? 0.07 : 0.12,
       interactive: false,
     };
 
@@ -1943,6 +2003,8 @@
   // marked green middle: Middle / Pin / Layup / past-middle.
   // Reads the SAME greenCenterOffset() the big label uses, so "yards to
   // middle" can never differ between the label and the chip.
+  // The "Aim:" prefix is gone — the chip color and position carry the meaning,
+  // which keeps it scannable from a cart or a glance.
   function setAimChip() {
     if (!els.aimChip) return;
     if (!state.target) {
@@ -1955,7 +2017,7 @@
     if (!off) {
       // No marked green middle: the tap is simply the pin.
       els.aimChip.className = 'aim-chip pin';
-      els.aimChip.textContent = 'Aim: Pin';
+      els.aimChip.textContent = 'Pin';
       els.aimChip.hidden = false;
       return;
     }
@@ -1972,18 +2034,18 @@
         // Along the middle's distance but clearly beside it: a pin on the
         // edge of the green, so show the offset.
         cls = 'pin';
-        html = `Aim: Pin · middle ${Math.round(lateralAbs)} yd ${off.lateralYd > 0 ? 'right' : 'left'
+        html = `Pin · ${Math.round(lateralAbs)} yd ${off.lateralYd > 0 ? 'right' : 'left'
           }`;
       } else {
         cls = 'middle';
-        html = 'Aim: Middle';
+        html = 'Middle';
       }
     } else if (off.state === 'short') {
       cls = 'layup';
-      html = `Aim: Layup · ${Math.round(off.yards)} yd to middle`;
+      html = `Layup · ${Math.round(off.yards)} to middle`;
     } else {
       cls = 'layup';
-      html = `Aim: ${Math.round(off.yards)} yd past middle`;
+      html = `${Math.round(off.yards)} past middle`;
     }
 
     els.aimChip.className = 'aim-chip ' + cls;
@@ -2362,7 +2424,7 @@
 
     const holeMeta = [
       `Par ${hole.par || 4}`,
-      hole.yards ? `${hole.yards} yd (card)` : null,
+      hole.yards ? `${hole.yards} yd` : null,
       course?.teeName || null,
     ]
       .filter(Boolean)
@@ -2554,7 +2616,7 @@
     els.roundMapHole.textContent = [
       `Hole ${getCurrentHoleNumber()}`,
       `Par ${hole.par || 4}`,
-      hole.yards ? `${hole.yards} yd (card)` : null,
+      hole.yards ? `${hole.yards} yd` : null,
     ]
       .filter(Boolean)
       .join(' · ');
@@ -3962,7 +4024,7 @@ out geom;`;
 
     els.roundScoreMeta.textContent = [
       `Par ${hole.par || 4}`,
-      hole.yards ? `${hole.yards} yd (card)` : null,
+      hole.yards ? `${hole.yards} yd` : null,
     ]
       .filter(Boolean)
       .join(' · ');
@@ -7694,18 +7756,32 @@ out geom;`;
     if (state.context.weather && w.windMph >= 1) {
       const gust = Number.isFinite(w.gustMph) && w.gustMph > w.windMph + 2
         ? `–${Math.round(w.gustMph)}` : '';
+      // Arrow points where the wind is blowing TOWARD.
+      const towardDeg = (w.windFromDeg + 180) % 360;
       els.windMetric.textContent = `${fmt(w.windMph)}${gust} mph`;
       els.windSubMetric.textContent = `from ${bearingToCompass(w.windFromDeg)}`;
       if (windArrow) {
-        // Arrow points where the wind is blowing TOWARD.
-        const towardDeg = (w.windFromDeg + 180) % 360;
         windArrow.hidden = false;
         windArrow.style.transform = `rotate(${towardDeg}deg)`;
+      }
+      // Map wind pill: same arrow + speed/direction, visible without opening
+      // the sheet. Same rotation math as the sheet arrow so the two can
+      // never disagree.
+      if (els.windPill) {
+        if (els.windPillArrow) {
+          els.windPillArrow.style.transform = `rotate(${towardDeg}deg)`;
+        }
+        if (els.windPillText) {
+          els.windPillText.textContent =
+            `${Math.round(w.windMph)}${gust} mph · from ${bearingToCompass(w.windFromDeg)}`;
+        }
+        els.windPill.hidden = false;
       }
     } else {
       els.windMetric.textContent = state.context.weather ? `${fmt(w.windMph)} mph` : 'Neutral';
       els.windSubMetric.textContent = '';
       if (windArrow) windArrow.hidden = true;
+      if (els.windPill) els.windPill.hidden = true;
     }
     els.tempMetric.textContent = state.context.weather
       ? `${fmt(w.tempF)}° / ${fmt(w.rh)}%` : `${STD_TEMP_F}° / ${STD_RH}%`;
@@ -8256,6 +8332,7 @@ out geom;`;
       els.rawYards.textContent = '—';
       els.rawLabel.textContent = 'Tap a target';
       if (els.aimChip) els.aimChip.hidden = true;
+      if (els.bearingChip) els.bearingChip.hidden = true;
       els.playsLikeYards.textContent = '—';
       els.clubRecommendation.textContent = 'No target selected';
       els.clubRecommendationSub.textContent = 'Tap a point on the map for club guidance.';
@@ -8283,12 +8360,18 @@ out geom;`;
     state.lastCalc = calc;
 
     els.rawYards.textContent = fmt(horizontalYd);
-    let label = `actual yds · aim ${bearingToCompass(bearing)} (${fmt(bearing)}°)`;
-    if (state.greenCenter && state.target) {
-      const lo = leftoverToGreen(state.loc, state.target, state.greenCenter);
-      if (lo) label = `actual yds · ${formatLeftover(lo)} · aim ${bearingToCompass(bearing)}`;
+    // Short, static label — the aim and bearing chips carry the detail so
+    // the big number stays scannable at a glance.
+    els.rawLabel.textContent = 'actual yds';
+    if (els.bearingChip) {
+      if (els.bearingChipArrow) {
+        els.bearingChipArrow.style.transform = `rotate(${Math.round(bearing)}deg)`;
+      }
+      if (els.bearingChipText) {
+        els.bearingChipText.textContent = `${bearingToCompass(bearing)} · ${Math.round(bearing)}°`;
+      }
+      els.bearingChip.hidden = false;
     }
-    els.rawLabel.textContent = label;
     setAimChip();
     els.playsLikeYards.textContent = fmt(calc.playsLikeYd);
 

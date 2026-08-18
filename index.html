@@ -199,6 +199,11 @@
                   </svg>
                 </span>
               </button>
+
+              <div class="wind-pill glass" id="windPill" aria-label="Wind conditions" hidden>
+                <span class="wind-pill-arrow" id="windPillArrow" aria-hidden="true">↑</span>
+                <span class="wind-pill-text" id="windPillText">—</span>
+              </div>
             </div>
           </div>
 
@@ -289,6 +294,10 @@
                   </div>
                   <div class="big-label" id="rawLabel">Tap a target</div>
                   <div class="aim-chip" id="aimChip" hidden></div>
+                  <div class="bearing-chip" id="bearingChip" hidden>
+                    <span class="bearing-chip-arrow" id="bearingChipArrow" aria-hidden="true">↑</span>
+                    <span id="bearingChipText">—</span>
+                  </div>
                 </div>
                 <div class="plays-like">
                   <div class="mini">plays like</div>
@@ -423,10 +432,10 @@
                     <b>Single-tap</b> the map to set your aim target.
                     <b>Set Front</b> / <b>Set Middle</b> / <b>Set Back</b>,
                     then tap the green edges to mark reference yardages. Your
-                    aim target and the green middle stay separate — a small
-                    chip above the number tells you which one you are looking
-                    at, and a dashed line links them on the map when they
-                    differ. <b>Restore Green</b> re-applies an imported
+                    aim target and the green middle stay separate — small
+                    chips under the number tell you what the target is and
+                    which way you are aiming, and a dashed line links them on
+                    the map when they differ. <b>Restore Green</b> re-applies an imported
                     course's green edges; <b>Clear Green</b> removes them.
                     Plays-like folds in elevation, wind, temp, altitude &amp;
                     humidity.
