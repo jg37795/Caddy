@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.9.7';
+  const APP_VERSION = '1.9.8'; // FCB/target sync fix, pill collision fix, dispersion zone, verdict pin, scorecard tones
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -215,6 +215,7 @@
       mapLayer: '',
       gpsEnabled: false,
       mode: 'golf',
+      dispersionZone: true,
     }),
     nearbyCourses: [],
     nearbyCourseLoading: false,
@@ -766,6 +767,10 @@
     els.proToggle.checked = !!state.prefs.pro;
     els.proToggleSheet.checked = !!state.prefs.pro;
     els.darkToggleSheet.checked = !!state.prefs.dark;
+    const dispersionToggle = $('dispersionToggle');
+    if (dispersionToggle) {
+      dispersionToggle.checked = state.prefs.dispersionZone !== false;
+    }
     els.proBreakdownWrap.style.display = state.prefs.pro ? 'block' : 'none';
     els.themeColorMeta.setAttribute(
       'content',
@@ -959,6 +964,16 @@
       const p = state.map.getPane('shotLinePane');
       p.style.zIndex = 410;
       p.style.pointerEvents = 'none'; // never intercept map taps
+    }
+    // --- course pane: where the dispersion zone lands, below markers ---
+    // Required by renderDispersionZone(): a layer targeting a pane that was
+    // never created throws "Cannot read properties of undefined" when it
+    // is first added to the map.
+    if (!state.map.getPane('coursePane')) {
+      state.map.createPane('coursePane');
+      const p = state.map.getPane('coursePane');
+      p.style.zIndex = 390;
+      p.style.pointerEvents = 'none';
     }
     const topUI = document.querySelector('.range-top-ui');
     if (topUI && window.L && L.DomEvent) {
@@ -1350,6 +1365,100 @@
       }).addTo(state.map);
     else state.markers.greenConnector.setLatLngs(pts);
   }
+
+  // ── Target-pin verdict tint + recommended-club dispersion zone ──
+  function tintTargetPin(verdict) {
+    const m = state.markers.target;
+    if (!m) return;
+    const el = m.getElement ? m.getElement() : m._icon;
+    const pin = el && el.querySelector('.target-pin');
+    if (!pin) return;
+    pin.classList.remove('v-go', 'v-manage', 'v-bail');
+    if (verdict === 'go' || verdict === 'manage' || verdict === 'bail') {
+      pin.classList.add('v-' + verdict);
+    }
+  }
+
+  function dispersionZoneColor(verdict) {
+    if (verdict === 'go') return '#34d399';
+    if (verdict === 'manage') return '#f5b14a';
+    if (verdict === 'bail') return '#ff6b6b';
+    return '#2dd47f';
+  }
+
+  // A 1σ landing ellipse: semi-major = distance sigma along the shot line,
+  // semi-minor = lateral sigma across it.
+  function ellipsePoints(center, bearingDeg, majorYd, minorYd, steps = 48) {
+    const fr = enuFrame(center);
+    const sinB = Math.sin(d2r(bearingDeg));
+    const cosB = Math.cos(d2r(bearingDeg));
+    const majorM = majorYd * YD_TO_M;
+    const minorM = minorYd * YD_TO_M;
+    const pts = [];
+    for (let i = 0; i < steps; i++) {
+      const t = (2 * Math.PI * i) / steps;
+      const a = Math.cos(t) * majorM;
+      const b = Math.sin(t) * minorM;
+      const e = a * sinB - b * cosB;
+      const n = a * cosB + b * sinB;
+      const ll = fromENU(fr, e, n);
+      pts.push([ll.lat, ll.lng]);
+    }
+    return pts;
+  }
+
+  function renderDispersionZone(bearingDeg, club) {
+    if (
+      !state.mapReady ||
+      !state.map ||
+      !state.loc ||
+      !state.target ||
+      !club
+    ) {
+      clearDispersionZone();
+      return;
+    }
+
+    if (state.prefs.dispersionZone === false) {
+      clearDispersionZone();
+      return;
+    }
+
+    const sigD = clubSigmaDistYd(club);
+    const sigL = clubSigmaLatYd(club);
+    if (!(sigD > 1)) {
+      clearDispersionZone();
+      return;
+    }
+
+    const color = dispersionZoneColor(state.adviceVerdict || 'neutral');
+    const pts = ellipsePoints(state.target, bearingDeg, sigD, sigL);
+    const opts = {
+      pane: 'coursePane',
+      color,
+      weight: 1.5,
+      opacity: 0.6,
+      fillColor: color,
+      fillOpacity: 0.14,
+      interactive: false,
+    };
+
+    if (state.layers.dispersion) {
+      state.layers.dispersion.setLatLngs(pts).setStyle(opts);
+    } else {
+      state.layers.dispersion = L.polygon(pts, opts).addTo(state.map);
+    }
+  }
+
+  function clearDispersionZone() {
+    if (state.layers.dispersion && state.map) {
+      try {
+        state.map.removeLayer(state.layers.dispersion);
+      } catch { }
+    }
+    state.layers.dispersion = null;
+  }
+
   function restyleShotLines() {
     const img = isImagery();
     if (state.markers.line) {
@@ -1535,6 +1644,7 @@
       return;
     }
     els.advicePill.hidden = false;
+    positionBottomPills();
     const n = state.adviceTips.length;
 
     // Always a lightbulb; the badge carries the dynamic tip count.
@@ -1830,44 +1940,52 @@
 
 
   // One-line explanation of what the aim target actually IS relative to the
-  // marked green middle: Middle / Pin / Layup / past-middle / off-line.
+  // marked green middle: Middle / Pin / Layup / past-middle.
+  // Reads the SAME greenCenterOffset() the big label uses, so "yards to
+  // middle" can never differ between the label and the chip.
   function setAimChip() {
     if (!els.aimChip) return;
     if (!state.target) {
       els.aimChip.hidden = true;
       return;
     }
-    const gap =
-      state.greenCenter && state.target
-        ? haversineMeters(state.target, state.greenCenter) * M_TO_YD
-        : null;
-    let cls = 'pin';
-    let html = 'Aim: Pin';
-    if (gap != null) {
-      if (gap < 4) {
+
+    const off = greenCenterOffset();
+
+    if (!off) {
+      // No marked green middle: the tap is simply the pin.
+      els.aimChip.className = 'aim-chip pin';
+      els.aimChip.textContent = 'Aim: Pin';
+      els.aimChip.hidden = false;
+      return;
+    }
+
+    const lateralAbs = Number.isFinite(off.lateralYd)
+      ? Math.abs(off.lateralYd)
+      : 0;
+
+    let cls;
+    let html;
+
+    if (off.state === 'on') {
+      if (lateralAbs >= 8) {
+        // Along the middle's distance but clearly beside it: a pin on the
+        // edge of the green, so show the offset.
+        cls = 'pin';
+        html = `Aim: Pin · middle ${Math.round(lateralAbs)} yd ${off.lateralYd > 0 ? 'right' : 'left'
+          }`;
+      } else {
         cls = 'middle';
         html = 'Aim: Middle';
-      } else if (state.loc) {
-        const shotDist = haversineMeters(state.loc, state.target) * M_TO_YD;
-        const remaining =
-          alongTrackYd(state.loc, state.target, state.greenCenter) - shotDist;
-        const lateral = crossTrackYd(state.loc, state.target, state.greenCenter);
-        cls = 'layup';
-        if (Math.abs(lateral) >= 8 && Math.abs(remaining) < 6) {
-          html = `Aim: Pin · middle ${Math.round(Math.abs(lateral))} yd ${lateral > 0 ? 'right' : 'left'
-            }`;
-        } else if (remaining > 3) {
-          html = `Aim: Layup · ${Math.round(remaining)} yd to middle`;
-        } else if (remaining < -3) {
-          html = `Aim: ${Math.round(Math.abs(remaining))} yd past middle`;
-        } else {
-          html = `Aim: ${Math.round(gap)} yd from middle`;
-        }
-      } else {
-        cls = 'layup';
-        html = `Aim: ${Math.round(gap)} yd from middle`;
       }
+    } else if (off.state === 'short') {
+      cls = 'layup';
+      html = `Aim: Layup · ${Math.round(off.yards)} yd to middle`;
+    } else {
+      cls = 'layup';
+      html = `Aim: ${Math.round(off.yards)} yd past middle`;
     }
+
     els.aimChip.className = 'aim-chip ' + cls;
     els.aimChip.textContent = html;
     els.aimChip.hidden = false;
@@ -1881,6 +1999,9 @@
         .map(
           (c) =>
             `<button class="club-chip${state.prefs.selectedClubId === c.id ? ' active' : ''
+            }${state.lastRecClubId === c.id && state.prefs.selectedClubId !== c.id
+              ? ' recommended'
+              : ''
             }" data-id="${escapeHtml(c.id)}">${escapeHtml(c.name)}</button>`
         )
         .join('');
@@ -1988,9 +2109,20 @@
     });
   }
 
+  // Birdie red / bogey blue — the same convention every premium golf app uses.
+  function scoreToneClass(score, par) {
+    const s = Number(score);
+    const p = clamp(Math.round(num(par, 4)), 3, 6);
+    if (!Number.isFinite(s) || s <= 0) return '';
+    if (s < p) return ' under';
+    if (s > p) return ' over';
+    return '';
+  }
+
   function renderRound() {
     const course = getCurrentCourse();
     const scoreRows = getScorecardRows();
+
 
     els.roundRows.innerHTML = scoreRows
       .map(
@@ -2002,7 +2134,10 @@
               P${course?.holes?.[i]?.par || 4}
             </div>
           </div>
-          <input class="round-score" type="number" inputmode="numeric" value="${escapeHtml(
+          <input class="round-score${scoreToneClass(
+          r.score,
+          course?.holes?.[i]?.par || 4
+        )}" type="number" inputmode="numeric" value="${escapeHtml(
           r.score
         )}" aria-label="Hole ${i + 1} score" />
           <input class="round-putts" type="number" inputmode="numeric" value="${escapeHtml(
@@ -2032,6 +2167,16 @@
           fir: row.querySelector('.round-fir').value,
           gir: row.querySelector('.round-gir').value,
         };
+
+        // Restyle the score cell live (birdie red / bogey blue).
+        const scoreInput = row.querySelector('.round-score');
+        scoreInput.className =
+          'round-score' +
+          scoreToneClass(
+            scoreInput.value,
+            getCurrentCourse()?.holes?.[i]?.par || 4
+          );
+
         syncRoundScorecard();
         renderStats();
         renderRoundHoleHeader();
@@ -2217,7 +2362,7 @@
 
     const holeMeta = [
       `Par ${hole.par || 4}`,
-      hole.yards ? `${hole.yards} yd` : null,
+      hole.yards ? `${hole.yards} yd (card)` : null,
       course?.teeName || null,
     ]
       .filter(Boolean)
@@ -2409,7 +2554,7 @@
     els.roundMapHole.textContent = [
       `Hole ${getCurrentHoleNumber()}`,
       `Par ${hole.par || 4}`,
-      hole.yards ? `${hole.yards} yd` : null,
+      hole.yards ? `${hole.yards} yd (card)` : null,
     ]
       .filter(Boolean)
       .join(' · ');
@@ -2531,7 +2676,9 @@
 
   function renderRoundShotList() {
     const rs = state.roundSession;
-    if (!rs || !rs.shots.length) {
+    // Legacy sessions (saved before shot tracking shipped) may have no
+    // `shots` array at all — guard before touching .length.
+    if (!rs || !Array.isArray(rs.shots) || !rs.shots.length) {
       els.roundShotList.innerHTML = '';
       return;
     }
@@ -3596,30 +3743,13 @@ out geom;`;
     out center tags;
   `;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
     try {
-      const response = await fetch(
-        'https://overpass-api.de/api/interpreter',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'text/plain;charset=UTF-8',
-          },
-          body: query,
-          signal: controller.signal,
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Overpass returned ${response.status}`);
-      }
-
-      const data = await response.json();
+      // Route through the mirror-failover transport instead of one raw
+      // request against the most rate-limited endpoint.
+      const data = await overpassFetch(query, { timeoutMs: 15000 });
       const seen = new Set();
 
-      const courses = (data.elements || [])
+      const courses = (Array.isArray(data) ? data : [])
         .map((item) => {
           const name = String(item.tags?.name || '').trim();
           const point = item.center || item;
@@ -3680,8 +3810,6 @@ out geom;`;
             : 'Nearby course search is unavailable right now. Enter the course manually.';
       }
     } finally {
-      clearTimeout(timeoutId);
-
       state.nearbyCourseLoading = false;
       state.nearbySearchRequested = false;
 
@@ -3834,7 +3962,7 @@ out geom;`;
 
     els.roundScoreMeta.textContent = [
       `Par ${hole.par || 4}`,
-      hole.yards ? `${hole.yards} yd` : null,
+      hole.yards ? `${hole.yards} yd (card)` : null,
     ]
       .filter(Boolean)
       .join(' · ');
@@ -4234,6 +4362,16 @@ out geom;`;
     els.darkToggleSheet.addEventListener('change', () =>
       setDark(els.darkToggleSheet.checked)
     );
+    const dispersionToggle = $('dispersionToggle');
+    if (dispersionToggle) {
+      dispersionToggle.addEventListener('change', () => {
+        state.prefs.dispersionZone = dispersionToggle.checked;
+        save('caddy:prefs', state.prefs);
+        if (state.target && state.loc) calculateRange();
+        else clearDispersionZone();
+        haptic(5);
+      });
+    }
     if (els.replayOnboardBtn) {
       els.replayOnboardBtn.addEventListener('click', () => {
         close();
@@ -4548,7 +4686,7 @@ out geom;`;
     const mapR = mapEl.getBoundingClientRect();
     const shR = sheetEl.getBoundingClientRect();
     const covered = mapR.bottom - shR.top;
-    return clamp(covered, 0, mapR.height - 120);
+    return clamp(covered, 0, Math.max(0, mapR.height - 120));
   }
   // Keep the user pinned at the screen pixel captured when locking.
   function holdLockedView(latlng, animate) {
@@ -4644,6 +4782,10 @@ out geom;`;
     );
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
+  // Reflect the follow mode onto the recenter FAB. Called by stopGPS(),
+  // initMap(), recenterOnUser() and lockOnUser() — this definition is
+  // required, otherwise every GPS start/stop crashes with
+  // "syncFollowFab is not defined".
   function syncFollowFab() {
     const b = els.recenterBtn,
       m = state.followMode;
@@ -4657,6 +4799,41 @@ out geom;`;
         ? 'Center on my location — hold to lock'
         : 'Locked to your position — tap or pan to release'
     );
+  }
+
+  // The GPS pill is centred and its width changes with the accuracy text
+  // ("GPS ±8 yd · settled" vs "Last GPS · ±999 yd"). The advice pill used a
+  // fixed `right: calc(50% + 84px)` that the wider states overlapped. Anchor
+  // it to the *measured* edge of the GPS pill instead so the two can never
+  // touch, at any text length or zoom level.
+  function positionBottomPills() {
+    const chip = els.gpsChip,
+      pill = els.advicePill;
+    if (!chip || !pill) return;
+    if (pill.hidden || chip.hidden) return;
+
+    const half = chip.offsetWidth / 2;
+    const gap = 10;
+    const pillWidth = pill.offsetWidth || 44;
+    const vw = window.innerWidth;
+
+    // Room for the pill to the right of the chip, inside the viewport?
+    const rightRoom = vw / 2 - half - gap - pillWidth - 12;
+    if (rightRoom >= 4) {
+      pill.style.left = `calc(50% + ${Math.ceil(half) + gap}px)`;
+      pill.style.right = 'auto';
+    } else {
+      // Very narrow screens: dock it against the right edge instead.
+      pill.style.left = 'auto';
+      pill.style.right = '12px';
+    }
+  }
+
+  let _bottomPillsObserver = null;
+  function watchBottomPills() {
+    if (_bottomPillsObserver || !window.ResizeObserver) return;
+    _bottomPillsObserver = new ResizeObserver(() => positionBottomPills());
+    _bottomPillsObserver.observe(els.gpsChip);
   }
 
   // Tap: idle <-> follow. (No re-zoom when turning OFF.)
@@ -4857,6 +5034,10 @@ out geom;`;
         : emptyRound();
     }
 
+    if (!Array.isArray(state.roundSession.shots)) {
+      state.roundSession.shots = [];
+    }
+
     state.roundSession.hole = clamp(
       Math.round(
         num(
@@ -4916,6 +5097,11 @@ out geom;`;
 
     applyMode();
     renderClubs();
+
+    // Keep the advice pill clear of the variable-width GPS pill.
+    watchBottomPills();
+    positionBottomPills();
+    window.addEventListener('resize', () => positionBottomPills());
 
     migrateRoundSession();
 
@@ -6478,6 +6664,8 @@ out geom;`;
       dot.classList.add('good');
       els.gpsText.textContent = `GPS ±${fmt(accYd)} yd${suffix}`;
     }
+    // The pill width changed — keep the advice pill clear of it.
+    positionBottomPills();
   }
   // ============================================================
   //  BLOCK 7 — SHOT LOG + BAYESIAN DISPERSION MODEL
@@ -7189,30 +7377,78 @@ out geom;`;
   const GREEN_WIDTH_MAX_YD = 55;     // ceiling on modelled green width, yd — very large double green
 
   /**
-   * SIGNATURE PRESERVED: leftoverToGreen(user, aim, green) -> { yards, state }
-   * state ∈ 'short' | 'over' | 'on'.
-   * Now uses the signed along-track projection of the green centre onto the aim line,
-   * with the overshoot threshold scaled by actual GPS uncertainty rather than a fixed 3 yd.
+   * SIGNATURE PRESERVED: leftoverToGreen(user, aim, green)
+   * -> { yards, state, lateralYd }
+   *
+   * `yards` is the ALONG-TRACK offset between the aim point and the green
+   * middle (projected onto your shot line) — NOT the straight-line separation.
+   *
+   * The old version used the crow-flies distance while the aim chip used the
+   * along-line projection, so the label ("52 yd past middle") and the chip
+   * ("Aim: 50 yd past middle") disagreed whenever the middle sat even slightly
+   * beside your aim line. Every surface now reads this one function and can
+   * never disagree again.
    */
   function leftoverToGreen(user, aim, green) {
     if (!user || !aim || !green) return null;
-    const aimToGreen = haversineMeters(aim, green) * M_TO_YD;
-    if (aimToGreen < LEFTOVER_HIDE_YD) return { yards: 0, state: 'on' };
-    // Project the green centre onto the user->aim line. Positive = beyond the aim point.
-    const alongGreen = alongTrackYd(user, aim, green);
-    const userToAim = haversineMeters(user, aim) * M_TO_YD;
-    const beyond = userToAim - alongGreen;   // >0 means the aim point sits past the green centre
+
+    const aimToGreenYd = haversineMeters(aim, green) * M_TO_YD;
+    if (aimToGreenYd < LEFTOVER_HIDE_YD)
+      return { yards: 0, lateralYd: 0, state: 'on' };
+
+    const userToAimYd = haversineMeters(user, aim) * M_TO_YD;
+    const alongGreen = alongTrackYd(user, aim, green); // yd along the shot line
+    const lateralGreen = crossTrackYd(user, aim, green); // + = right of the line
+    const beyondYd = alongGreen - userToAimYd; // + = aim is SHORT of the middle
+
     // Threshold = 1σ of the differential GPS error, floored at the legacy tolerance.
-    const sigYd = state.loc && Number.isFinite(state.loc.accuracy)
-      ? (state.loc.accuracy * GPS_ACC_TO_SIGMA) * M_TO_YD : OVERSHOOT_TOL_YD;
+    const sigYd =
+      state.loc && Number.isFinite(state.loc.accuracy)
+        ? state.loc.accuracy * GPS_ACC_TO_SIGMA * M_TO_YD
+        : OVERSHOOT_TOL_YD;
     const tol = Math.max(OVERSHOOT_TOL_YD, sigYd);
-    return { yards: aimToGreen, state: beyond > tol ? 'over' : 'short' };
+
+    const stateName =
+      beyondYd > tol ? 'short' : beyondYd < -tol ? 'over' : 'on';
+
+    return {
+      yards: Math.abs(beyondYd),
+      lateralYd: lateralGreen,
+      state: stateName,
+    };
+  }
+
+  // Canonical "aim target vs green middle" readout. Every surface that prints
+  // a "yd past/to middle" number must go through this so they always agree.
+  function greenCenterOffset() {
+    if (!state.loc || !state.target || !state.greenCenter) return null;
+    return leftoverToGreen(state.loc, state.target, state.greenCenter);
   }
 
   function formatLeftover(lo) {
-    if (!lo || lo.state === 'on') return 'at middle';
+    if (!lo) return 'at middle';
+
+    if (lo.state === 'on') {
+      // "On" along the line but beside it: say the lateral offset, since a
+      // bare "at middle" would be misleading.
+      if (Number.isFinite(lo.lateralYd) && Math.abs(lo.lateralYd) >= 8) {
+        return `middle ${Math.round(Math.abs(lo.lateralYd))} yd ${lo.lateralYd > 0 ? 'right' : 'left'
+          }`;
+      }
+      return 'at middle';
+    }
+
     const y = Math.round(lo.yards);
-    return lo.state === 'over' ? `${y} yd past middle` : `${y} yd to middle`;
+    let text =
+      lo.state === 'over' ? `${y} yd past middle` : `${y} yd to middle`;
+
+    // If the middle is meaningfully beside the line, say so — otherwise the
+    // along-line number implies the middle sits right on your line.
+    if (Number.isFinite(lo.lateralYd) && Math.abs(lo.lateralYd) >= 8) {
+      text += ` (middle ${Math.round(Math.abs(lo.lateralYd))} yd ${lo.lateralYd > 0 ? 'right' : 'left'
+        })`;
+    }
+    return text;
   }
 
   /**
@@ -7290,87 +7526,35 @@ out geom;`;
   }
 
   function targetToGreenTip() {
-    if (
-      !state.loc ||
-      !state.target ||
-      !state.greenCenter ||
-      !Number.isFinite(state.loc.lat) ||
-      !Number.isFinite(state.loc.lng) ||
-      !Number.isFinite(state.target.lat) ||
-      !Number.isFinite(state.target.lng) ||
-      !Number.isFinite(state.greenCenter.lat) ||
-      !Number.isFinite(state.greenCenter.lng)
-    ) {
-      return null;
-    }
-
-    const userToTargetYd =
-      haversineMeters(state.loc, state.target) * M_TO_YD;
-
-    const greenAlongShotLineYd = alongTrackYd(
-      state.loc,
-      state.target,
-      state.greenCenter
-    );
-
-    if (
-      !Number.isFinite(userToTargetYd) ||
-      !Number.isFinite(greenAlongShotLineYd)
-    ) {
-      return null;
-    }
-
-    /*
-     * Positive means the green center is beyond the selected target.
-     * Negative means the selected target is beyond the green center.
-     */
-    const remainingAlongYd = greenAlongShotLineYd - userToTargetYd;
-
-    const targetToCenterYd =
-      haversineMeters(state.target, state.greenCenter) * M_TO_YD;
-
-    if (
-      !Number.isFinite(remainingAlongYd) ||
-      !Number.isFinite(targetToCenterYd) ||
-      targetToCenterYd < 4
-    ) {
-      return null;
-    }
-
-    const lateralOffsetYd = crossTrackYd(
-      state.loc,
-      state.target,
-      state.greenCenter
-    );
+    // Reads the SAME value the big label prints (greenCenterOffset), so the
+    // "yd past/to middle" figures can never differ between surfaces again.
+    const off = greenCenterOffset();
+    if (!off || off.state === 'on') return null;
 
     const lateralText =
-      Math.abs(lateralOffsetYd) >= 8
+      Number.isFinite(off.lateralYd) && Math.abs(off.lateralYd) >= 8
         ? ` Green center is also about ${Math.round(
-          Math.abs(lateralOffsetYd)
-        )} yd ${lateralOffsetYd > 0 ? 'right' : 'left'} of your target line.`
+          Math.abs(off.lateralYd)
+        )} yd ${off.lateralYd > 0 ? 'right' : 'left'} of your target line.`
         : '';
 
-    if (remainingAlongYd > 3) {
+    if (off.state === 'short') {
       return (
         `This is a layup target: it leaves about ${Math.round(
-          remainingAlongYd
+          off.yards
         )} yd to green center.` +
         ` Club choice is based on the selected target, not the green center.` +
         lateralText
       );
     }
 
-    if (remainingAlongYd < -3) {
-      return (
-        `Your selected target is about ${Math.round(
-          Math.abs(remainingAlongYd)
-        )} yd beyond green center.` +
-        ` Move the target back onto the green unless that is intentional.` +
-        lateralText
-      );
-    }
-
-    return null;
+    return (
+      `Your selected target is about ${Math.round(
+        off.yards
+      )} yd beyond green center.` +
+      ` Move the target back onto the green unless that is intentional.` +
+      lateralText
+    );
   }
   // ============================================================
   //  BLOCK 10 — WEATHER / ELEVATION CONTEXT
@@ -7506,14 +7690,22 @@ out geom;`;
 
   function updateWeatherUI() {
     const w = getWeatherOrNeutral(), e = getElevationOrNeutral();
+    const windArrow = $('windArrow');
     if (state.context.weather && w.windMph >= 1) {
       const gust = Number.isFinite(w.gustMph) && w.gustMph > w.windMph + 2
         ? `–${Math.round(w.gustMph)}` : '';
       els.windMetric.textContent = `${fmt(w.windMph)}${gust} mph`;
       els.windSubMetric.textContent = `from ${bearingToCompass(w.windFromDeg)}`;
+      if (windArrow) {
+        // Arrow points where the wind is blowing TOWARD.
+        const towardDeg = (w.windFromDeg + 180) % 360;
+        windArrow.hidden = false;
+        windArrow.style.transform = `rotate(${towardDeg}deg)`;
+      }
     } else {
       els.windMetric.textContent = state.context.weather ? `${fmt(w.windMph)} mph` : 'Neutral';
       els.windSubMetric.textContent = '';
+      if (windArrow) windArrow.hidden = true;
     }
     els.tempMetric.textContent = state.context.weather
       ? `${fmt(w.tempF)}° / ${fmt(w.rh)}%` : `${STD_TEMP_F}° / ${STD_RH}%`;
@@ -7824,6 +8016,7 @@ out geom;`;
     if (!doDiscard && p.clubId && !wayOffLine)
       counted = logShot(p.clubId, distanceYd, baseline, lateralYd, gpsAccMeters());
 
+    if (!Array.isArray(rs.shots)) rs.shots = [];
     rs.shots.push({
       clubId: p.clubId, startPt: p.startPt, endPt,
       distanceYd: Math.round(distanceYd),
@@ -8069,6 +8262,8 @@ out geom;`;
       renderCaddyTips([]);
       updateAdvice([], 'neutral');
       renderFcb();
+      clearDispersionZone();
+      tintTargetPin('neutral');
       return;
     }
     const w = getWeatherOrNeutral(), e = getElevationOrNeutral();
@@ -8230,6 +8425,10 @@ out geom;`;
     renderBreakdown(calc, els.rangeBreakdown);
     els.rangeStamp.textContent = stampText();
     renderClubChips(calc.playsLikeYd);
+
+    // Pin tint + landing spread for the recommended club (verdict-aware).
+    tintTargetPin(useGreenStrategy ? verdict : 'neutral');
+    renderDispersionZone(bearing, recClub);
   }
 
   // SIGNATURE PRESERVED: renderBreakdown(calc, el)
@@ -8438,11 +8637,16 @@ out geom;`;
 
   /* ================= Overpass transport: mirrors + timeout + cache ================= */
 
+  // kumi.systems is gone (its redirect can turn a POST into a GET landing
+  // page) and api.de rate-limits browsers hard, so friendlier mirrors lead.
   const OVERPASS_ENDPOINTS = [
-    'https://overpass.kumi.systems/api/interpreter',   // strong hardware, no registration
-    'https://overpass.private.coffee/api/interpreter', // no rate limits
-    'https://overpass-api.de/api/interpreter',         // official — LAST resort, rate-limited
+    'https://overpass.private.coffee/api/interpreter',
+    'https://overpass.osm.jp/api/interpreter',
+    'https://overpass-api.de/api/interpreter',
   ];
+  // Fire the next mirror if the current one hasn't answered within this
+  // window and let whichever finishes first win.
+  const OVERPASS_HEDGE_MS = 1800;
   const OSM_CACHE_PREFIX = 'osm:v2:';                  // v2 == invalidates the old buggy data
   const OSM_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
   const OSM_CACHE_MAX_ENTRIES = 20;
@@ -8490,12 +8694,43 @@ out geom;`;
   }
 
   /**
-   * Sequential mirror failover. Retries only transient statuses.
-   * NOTE: the client abort (45s) is deliberately LONGER than the query's
-   * [timeout:40] so a server-side query-cost failure surfaces as a real
-   * Overpass error rather than an opaque AbortError.
-   * Returns an Array of elements, with a non-enumerable-ish `.meta` tacked on.
+   * Hedged mirror failover. Mirrors start sequentially; the next launches
+   * after OVERPASS_HEDGE_MS even if the current one is still working, and
+   * whichever answers first wins. GET with `data=` is accepted by all
+   * mirrors and avoids the redirect problems of the old POST form.
+   * Returns an Array of elements with a non-enumerable `.meta` on it.
    */
+  function overpassOnce(endpoint, encodedQuery, timeoutMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const separator = endpoint.includes('?') ? '&' : '?';
+
+    return fetch(`${endpoint}${separator}data=${encodedQuery}`, {
+      method: 'GET',
+      mode: 'cors',
+      signal: ctrl.signal,
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    })
+      .then(async (response) => {
+        if (response.status === 429 || response.status === 504) {
+          throw new Error(`Overpass is busy (${response.status}).`);
+        }
+        if (!response.ok) {
+          throw new Error(`Overpass HTTP ${response.status}.`);
+        }
+        const text = await response.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          throw new Error(
+            'Overpass returned an invalid response. Please try again.'
+          );
+        }
+      })
+      .finally(() => clearTimeout(timer));
+  }
+
   async function overpassFetch(query, opts = {}) {
     const {
       timeoutMs = 45000,
@@ -8511,57 +8746,64 @@ out geom;`;
       }
     }
 
-    let lastErr = null;
+    const encodedQuery = encodeURIComponent(query.trim());
 
-    for (const base of OVERPASS_ENDPOINTS) {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-        try {
-          const res = await fetch(base, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'data=' + encodeURIComponent(query),
-            signal: ctrl.signal,
-          });
-          clearTimeout(timer);
+    return new Promise((resolve, reject) => {
+      const total = OVERPASS_ENDPOINTS.length;
+      let nextIndex = 0;
+      let failures = 0;
+      let settled = false;
+      let hedgeTimer = null;
+      let lastError = null;
 
-          if (res.status === 429) {
-            const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
-            lastErr = new Error(`${base} HTTP 429`);
-            await osmSleep(Math.min(Math.max(ra * 1000, 900 * (attempt + 1)), 8000));
-            continue; // retry same mirror
-          }
-          if (res.status >= 500) {
-            lastErr = new Error(`${base} HTTP ${res.status}`);
-            break; // gateway timeout etc. -> next mirror
-          }
-          if (!res.ok) {
-            lastErr = new Error(`${base} HTTP ${res.status}`);
-            break;
-          }
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(hedgeTimer);
+        fn(value);
+      };
 
-          const json = await res.json();
-          const elements = Array.isArray(json.elements) ? json.elements : [];
-          elements.meta = {
-            endpoint: base,
-            cached: false,
-            remark: json.remark || null,
-          };
-          if (cacheKey && elements.length) {
-            osmCacheSet(cacheKey, elements, cacheTtlMs);
-          }
-          return elements;
-        } catch (err) {
-          clearTimeout(timer);
-          lastErr = err;
-          if (err.name !== 'AbortError') await osmSleep(400);
-          break; // timeout / network -> next mirror
+      const launchNext = () => {
+        if (settled || nextIndex >= total) return;
+        const endpoint = OVERPASS_ENDPOINTS[nextIndex++];
+
+        clearTimeout(hedgeTimer);
+        if (nextIndex < total) {
+          hedgeTimer = setTimeout(launchNext, OVERPASS_HEDGE_MS);
         }
-      }
-    }
 
-    throw lastErr || new Error('All Overpass endpoints failed');
+        overpassOnce(endpoint, encodedQuery, timeoutMs).then(
+          (json) => {
+            const elements = Array.isArray(json.elements)
+              ? json.elements
+              : [];
+            elements.meta = {
+              endpoint,
+              cached: false,
+              remark: json.remark || null,
+            };
+            if (cacheKey && elements.length) {
+              osmCacheSet(cacheKey, elements, cacheTtlMs);
+            }
+            finish(resolve, elements);
+          },
+          (error) => {
+            lastError = error;
+            failures += 1;
+            console.warn(`Overpass failed at ${endpoint}`, error);
+            if (nextIndex < total) launchNext();
+            else if (failures >= total) {
+              finish(
+                reject,
+                lastError || new Error('All Overpass endpoints failed')
+              );
+            }
+          }
+        );
+      };
+
+      launchNext();
+    });
   }
 
   /* ================= OSM geometry helpers (planar, lng convention) ================= */

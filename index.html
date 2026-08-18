@@ -392,7 +392,10 @@
                   <div class="chip-row" id="clubChips"></div>
                   <div class="grid-3" style="margin-top: 6px">
                     <div class="metric">
-                      <div class="v" id="windMetric">—</div>
+                      <div class="v wind-metric-v">
+                        <span id="windMetric">—</span>
+                        <span class="wind-arrow" id="windArrow" aria-hidden="true" hidden>↑</span>
+                      </div>
                       <div class="l">Wind</div>
                       <div class="sub" id="windSubMetric"></div>
                     </div>
@@ -850,6 +853,16 @@
         </div>
       </div>
       <label class="toggle" title="Dark mode"><input id="darkToggleSheet" type="checkbox" /><span
+          class="switch"></span></label>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="lbl">Dispersion zone</div>
+        <div class="desc">
+          Shows where the recommended club's shots actually land on the map.
+        </div>
+      </div>
+      <label class="toggle" title="Dispersion zone"><input id="dispersionToggle" type="checkbox" /><span
           class="switch"></span></label>
     </div>
     <div class="settings-row">

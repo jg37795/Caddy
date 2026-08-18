@@ -1005,7 +1005,6 @@ body[data-mode='range'] #roundMapHud {
 }
 
 /* GPS pill — rides the sheet via the shared --ui-lift transform */
-/* GPS pill — rides the sheet via the shared --ui-lift transform */
 .gps-chip {
   position: absolute;
   z-index: 600;
@@ -1018,9 +1017,18 @@ body[data-mode='range'] #roundMapHud {
   display: inline-flex;
   align-items: center;
   gap: 9px;
+  white-space: nowrap;
+  max-width: calc(100vw - 24px);
   transform: translateX(-50%) translateY(calc(-1 * var(--ui-lift, 160px)));
   transition: transform 0.42s var(--spring);
   will-change: transform;
+}
+
+#gpsText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 body[data-dragging='1'] .gps-chip {
@@ -1772,8 +1780,10 @@ body.dark .round-club-opt {
 .advice-pill {
   position: absolute;
   z-index: 602;
-  /* Compact circular button, left of the centered GPS pill. */
-  right: calc(50% + 84px);
+  /* JS re-anchors this to the GPS pill's measured edge so the two never
+     overlap, no matter how long the accuracy text gets. */
+  right: auto;
+  left: calc(50% + 84px);
   bottom: 0;
   width: 44px;
   height: 44px;
@@ -1803,11 +1813,6 @@ body[data-dragging='1'] .advice-pill {
 body[data-detent='full']:not([data-dragging='1']) .advice-pill {
   opacity: 0;
   pointer-events: none;
-}
-
-.advice-pill-ic {
-  font-size: 19px;
-  line-height: 1;
 }
 
 /* Verdict ring around the bulb */
@@ -1873,19 +1878,6 @@ body[data-detent='full']:not([data-dragging='1']) .advice-pill {
   .advice-pill.v-bail .advice-pill-count {
     animation: none;
   }
-}
-
-/* Verdict-tinted dot via the icon swap; border accent for go/manage/bail */
-.advice-pill.v-go {
-  box-shadow: inset 3px 0 0 #34d399, var(--glass-shadow);
-}
-
-.advice-pill.v-manage {
-  box-shadow: inset 3px 0 0 #f5b14a, var(--glass-shadow);
-}
-
-.advice-pill.v-bail {
-  box-shadow: inset 3px 0 0 #ff6b6b, var(--glass-shadow);
 }
 
 .advice-pop-scrim {
@@ -2425,6 +2417,21 @@ body.dark .plays-like .num,
   font-variant-numeric: tabular-nums;
 }
 
+.wind-metric-v {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.wind-arrow {
+  display: inline-block;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--blue);
+  transform-origin: 50% 50%;
+  transition: transform 0.45s var(--spring);
+}
+
 .metric .l {
   color: var(--muted);
   font-size: 12px;
@@ -2798,6 +2805,17 @@ body.dark .plays-like .num,
   border-bottom: 0;
 }
 
+/* Scorecard coloring: birdie red, bogey blue — classic golf convention. */
+.round-score.under {
+  color: #d63939;
+  font-weight: 900;
+}
+
+.round-score.over {
+  color: #1677ff;
+  font-weight: 900;
+}
+
 .small-btn {
   border-radius: 12px;
   background: var(--green-3);
@@ -2859,6 +2877,12 @@ body.dark .plays-like .num,
   background: var(--green);
   color: #fff;
   border-color: var(--green);
+}
+
+/* Subtle ring around the club the caddy is actually recommending. */
+.club-chip.recommended {
+  border-color: var(--green-2);
+  box-shadow: 0 0 0 2px rgba(24, 164, 91, 0.25);
 }
 
 .notice {
@@ -2990,6 +3014,19 @@ body[data-detent='full']:not([data-dragging='1']) .leaflet-bottom.leaflet-right 
   position: absolute;
   left: 4.5px;
   top: 4.5px;
+}
+
+/* Verdict tint: the aim pin recolors with the go / manage / bail verdict. */
+.target-pin.v-go {
+  background: #34d399;
+}
+
+.target-pin.v-manage {
+  background: #f5b14a;
+}
+
+.target-pin.v-bail {
+  background: #ff6b6b;
 }
 
 .two-tap-pin {
