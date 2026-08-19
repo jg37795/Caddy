@@ -1151,6 +1151,7 @@ body[data-dragging='1'] .gps-chip {
   padding: 7px 8px;
   border-radius: 14px;
   color: var(--glass-text);
+  overflow: hidden;
 }
 
 .round-map-hud[hidden] {
@@ -1167,12 +1168,18 @@ body[data-dragging='1'] .gps-chip {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex-wrap: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
 .round-map-hole {
   margin: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
   font-size: 12px;
   font-weight: 900;
   letter-spacing: -0.02em;
@@ -2018,6 +2025,156 @@ body[data-detent='full']:not([data-dragging='1']) .advice-pill {
   font-weight: 650;
 }
 
+/* ===== Wind detail popover (tap the wind pill) ===== */
+.wind-pop-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 660;
+  background: rgba(0, 0, 0, 0.14);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.wind-pop-scrim[hidden] {
+  display: none;
+}
+
+.wind-pop-scrim.open {
+  opacity: 1;
+}
+
+.wind-pop {
+  position: absolute;
+  z-index: 700;
+  top: calc(var(--safe-top) + 112px);
+  right: calc(var(--safe-right) + 12px);
+  width: min(88vw, 320px);
+  border-radius: 20px;
+  padding: 13px 15px 14px;
+  transform: translateY(-6px) scale(0.97);
+  transform-origin: top right;
+  opacity: 0;
+  transition: transform 0.32s var(--spring), opacity 0.22s ease;
+  will-change: transform, opacity;
+}
+
+.wind-pop[hidden] {
+  display: none;
+}
+
+.wind-pop.open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.wind-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.wind-pop-title {
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.wind-pop-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(127, 127, 127, 0.16);
+  color: inherit;
+}
+
+.wind-pop-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.wind-pop-rose {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+  color: #0a7dff;
+}
+
+body.dark .wind-pop-rose,
+.is-sat .wind-pop-rose {
+  color: #7cc4ff;
+}
+
+.wind-pop-rose-svg,
+.wind-pop-needle {
+  position: absolute;
+  inset: 0;
+  width: 72px;
+  height: 72px;
+}
+
+.wind-pop-needle {
+  transform-origin: 50% 50%;
+  transition: transform 0.45s var(--spring);
+  will-change: transform;
+}
+
+.wind-pop-n {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8.5px;
+  font-weight: 900;
+  line-height: 1;
+  opacity: 0.95;
+}
+
+.wind-pop-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wind-pop-speed {
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.wind-pop-dir {
+  font-size: 12.5px;
+  font-weight: 800;
+  opacity: 0.75;
+}
+
+.wind-pop-shot {
+  margin-top: 11px;
+  padding: 10px 12px;
+  border-radius: 13px;
+  background: linear-gradient(145deg,
+      rgba(15, 122, 67, 0.95),
+      rgba(24, 164, 91, 0.88));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.wind-pop-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 750;
+  opacity: 0.65;
+}
+
 @media (prefers-reduced-motion: reduce) {
 
   .advice-pill,
@@ -2190,6 +2347,22 @@ body[data-dragging='1'] .fcb-block {
   margin-top: 1px;
 }
 
+.fcb .fcb-pl {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--green);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+body.dark .fcb .fcb-pl,
+.is-sat .fcb .fcb-pl {
+  color: #37e07f;
+}
+
 .fcb.center {
   background: rgba(15, 122, 67, 0.16);
 }
@@ -2282,8 +2455,6 @@ body.dark #restoreGreenBtn {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
-  padding: 4px 11px;
-  border-radius: 999px;
   font-size: 11.5px;
   font-weight: 850;
   letter-spacing: -0.01em;
@@ -2293,8 +2464,23 @@ body.dark #restoreGreenBtn {
 
 .bearing-chip {
   margin-left: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
   background: rgba(127, 127, 127, 0.14);
   color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+/* Two-line aim chip: bold head + explicit caption so the number under
+   "actual yds" is never ambiguous again. */
+.aim-chip {
+  position: relative;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 5px 12px 5px 22px;
+  border-radius: 13px;
+  background: var(--card-solid);
   border: 1px solid var(--line);
 }
 
@@ -2306,11 +2492,28 @@ body.dark #restoreGreenBtn {
 /* Color dot: codes the mode without requiring a full sentence. */
 .aim-chip::before {
   content: '';
+  position: absolute;
+  left: 9px;
+  top: 50%;
   width: 7px;
   height: 7px;
+  margin-top: -3.5px;
   border-radius: 50%;
   background: currentColor;
-  flex: 0 0 auto;
+}
+
+.aim-chip b {
+  font-size: 11.5px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.aim-chip span {
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.15;
+  opacity: 0.78;
 }
 
 .bearing-chip-arrow {
@@ -2339,6 +2542,12 @@ body.dark #restoreGreenBtn {
   border: 1px solid rgba(211, 135, 19, 0.28);
 }
 
+.aim-chip.over {
+  background: rgba(214, 69, 69, 0.13);
+  color: var(--danger);
+  border: 1px solid rgba(214, 69, 69, 0.26);
+}
+
 body.dark .aim-chip.middle {
   color: #63e89a;
   border-color: rgba(99, 232, 154, 0.3);
@@ -2352,6 +2561,11 @@ body.dark .aim-chip.pin {
 body.dark .aim-chip.layup {
   color: #f5b14a;
   border-color: rgba(245, 177, 74, 0.3);
+}
+
+body.dark .aim-chip.over {
+  color: #ff8f8f;
+  border-color: rgba(255, 143, 143, 0.3);
 }
 
 /* ===== Wind pill on the map ===== */
@@ -2368,9 +2582,14 @@ body.dark .aim-chip.layup {
   font-weight: 800;
   letter-spacing: -0.01em;
   white-space: nowrap;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   max-width: 176px;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.15s var(--spring-snappy);
+}
+
+.wind-pill:active {
+  transform: scale(0.96);
 }
 
 .wind-pill[hidden] {
@@ -2394,24 +2613,24 @@ body[data-dragging='1'] .wind-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   flex: 0 0 auto;
   color: #0a7dff;
 }
 
-.wind-pill-compass::before {
-  content: '';
+.wind-pill-compass .wind-pill-rose {
   position: absolute;
   inset: 0;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  opacity: 0.4;
+  width: 26px;
+  height: 26px;
 }
 
 .wind-pill-compass .wind-pill-arrow {
-  width: 14px;
-  height: 14px;
+  position: absolute;
+  inset: 0;
+  width: 26px;
+  height: 26px;
   transform-origin: 50% 50%;
   transition: transform 0.45s var(--spring);
   will-change: transform;
@@ -2419,12 +2638,13 @@ body[data-dragging='1'] .wind-pill {
 
 .wind-pill-n {
   position: absolute;
-  top: 1px;
+  top: 0;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 6.5px;
+  font-size: 7px;
   font-weight: 900;
   line-height: 1;
+  opacity: 0.9;
 }
 
 body.dark .wind-pill-compass {
@@ -2608,18 +2828,18 @@ body.dark .plays-like {
   display: none;
 }
 
-.wind-compass::before {
-  content: '';
+.wind-compass .wind-rose {
   position: absolute;
   inset: 0;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  opacity: 0.35;
+  width: 24px;
+  height: 24px;
 }
 
 .wind-compass .wind-arrow {
-  width: 14px;
-  height: 14px;
+  position: absolute;
+  inset: 0;
+  width: 24px;
+  height: 24px;
   transform-origin: 50% 50%;
   transition: transform 0.45s var(--spring);
   will-change: transform;
@@ -2627,7 +2847,7 @@ body.dark .plays-like {
 
 .wind-compass-n {
   position: absolute;
-  top: 1px;
+  top: 0;
   left: 50%;
   transform: translateX(-50%);
   font-size: 6.5px;
@@ -3255,6 +3475,95 @@ body[data-detent='full']:not([data-dragging='1']) .leaflet-bottom.leaflet-right 
   box-shadow: 0 0 0 4px rgba(15, 122, 67, 0.25), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* Live-shot start flag (draggable while a shot is pending). */
+.start-flag {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.45));
+  cursor: grab;
+}
+
+.start-flag:active {
+  cursor: grabbing;
+}
+
+.start-flag svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.start-flag::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: #f5a623;
+  box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.28);
+}
+
+/* Yardage label riding the live shot line. */
+.pending-line-label {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(245, 166, 35, 0.96);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  letter-spacing: -0.01em;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+}
+
+/* "Reset start" undo chip under the round FAB. */
+.round-reset-start {
+  pointer-events: auto;
+  border-radius: 999px;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #7a4b0a;
+  background: rgba(245, 166, 35, 0.92);
+  transition: transform 0.15s var(--spring-snappy), opacity 0.3s ease;
+}
+
+.round-reset-start:active {
+  transform: scale(0.94);
+}
+
+.round-reset-start[hidden] {
+  display: none;
+}
+
+/* Rangefinder distance rings (50/100/150/200 yd). */
+.ring-label {
+  padding: 2px 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #0c1410;
+  font-size: 9.5px;
+  font-weight: 900;
+  text-align: center;
+  letter-spacing: -0.01em;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+body.dark .ring-label {
+  background: rgba(16, 22, 19, 0.88);
+  color: #edf7ef;
+}
+
 .fb-dot {
   width: 15px;
   height: 15px;
@@ -3377,6 +3686,9 @@ path.dispersion-zone {
   .onboard,
   .wind-compass .wind-arrow,
   .wind-pill-compass .wind-pill-arrow,
+  .wind-pop,
+  .wind-pop-scrim,
+  .wind-pop-needle,
   .bearing-chip-arrow {
     transition: none !important;
     animation: none !important;

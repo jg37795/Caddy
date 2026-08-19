@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.11.0'; // sheet peek redesign, segmented F/M/B control, wind compass + pill placement
+  const APP_VERSION = '1.12.0'; // wind rose + popover, distance rings, live shot line, draggable shot start
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -122,8 +122,15 @@
     bearingChipArrow: $('bearingChipArrow'),
     bearingChipText: $('bearingChipText'),
     windPill: $('windPill'),
-    windPillArrow: $('windPillArrow'),
     windPillText: $('windPillText'),
+    windPop: $('windPop'),
+    windPopScrim: $('windPopScrim'),
+    windPopClose: $('windPopClose'),
+    windPopSpeed: $('windPopSpeed'),
+    windPopDir: $('windPopDir'),
+    windPopShot: $('windPopShot'),
+    windPopMeta: $('windPopMeta'),
+    roundResetStart: $('roundResetStart'),
     playsLikeYards: $('playsLikeYards'),
     rangeNotice: $('rangeNotice'),
     weatherStatus: $('weatherStatus'),
@@ -223,6 +230,7 @@
       gpsEnabled: false,
       mode: 'golf',
       dispersionZone: true,
+      rangeRings: true,
     }),
     nearbyCourses: [],
     nearbyCourseLoading: false,
@@ -778,6 +786,10 @@
     if (dispersionToggle) {
       dispersionToggle.checked = state.prefs.dispersionZone !== false;
     }
+    const rangeRingsToggle = $('rangeRingsToggle');
+    if (rangeRingsToggle) {
+      rangeRingsToggle.checked = state.prefs.rangeRings !== false;
+    }
     els.proBreakdownWrap.style.display = state.prefs.pro ? 'block' : 'none';
     els.themeColorMeta.setAttribute(
       'content',
@@ -892,6 +904,9 @@
     els.topSubtitle.textContent = titles[tab] || 'Personal golf caddy';
     if (tab === 'range') {
       initMap();
+      closeWindPop();
+      renderPendingShot();
+      renderRangeRings();
       setTimeout(() => {
         if (state.map) {
           state.map.invalidateSize();
@@ -958,6 +973,7 @@
     state.map.on('click', (e) =>
       handleMapTap({ lat: e.latlng.lat, lng: e.latlng.lng })
     );
+    state.map.on('zoomend', () => renderRangeRings());
     state.map.on('dragstart', () => {
       if (state.followMode !== FollowMode.IDLE) {
         state.followMode = FollowMode.IDLE;
@@ -1156,12 +1172,14 @@
       state.markers.accuracy.setStyle({ color: col, fillColor: col });
     }
     updateLine();
+    renderRangeRings();
   }
 
   let ignoreNextClick = false;
 
   function handleMapTap(latlng) {
     initMap();
+    closeWindPop();
     if (ignoreNextClick) {
       ignoreNextClick = false;
       return;
@@ -1909,6 +1927,7 @@
 
     if (els.advicePill) {
       els.advicePill.addEventListener('click', () => {
+        closeWindPop();
         if (els.advicePop.hidden) openAdvice();
         else closeAdvice();
       });
@@ -1936,22 +1955,38 @@
   }
   function renderFcb() {
     if (!state.loc) {
-      els.fcbFront.textContent = '—';
-      els.fcbCenter.textContent = '—';
-      els.fcbBack.textContent = '—';
+      els.fcbFront.innerHTML = '—';
+      els.fcbCenter.innerHTML = '—';
+      els.fcbBack.innerHTML = '—';
       return;
     }
+
+    // Plays-like sub-label under each edge number when conditions move it
+    // by 2+ yd — the raw yardage always stays the primary readout.
+    const playsSub = (pt, raw) => {
+      if (!pt || !(raw > 0)) return '';
+      const pl = playsLikeFor(raw, initialBearingDeg(state.loc, pt));
+      if (Math.abs(pl - raw) >= 2)
+        return `<span class="fcb-pl">plays ${pl}</span>`;
+      return '';
+    };
+
     // Middle = the marked green middle ONLY. Never fall back to the aim target —
     // mixing the two concepts is what made "Center" confusing.
     const centerRef = state.greenCenter;
-    els.fcbCenter.textContent = centerRef
+    const centerRaw = centerRef
       ? Math.round(haversineMeters(state.loc, centerRef) * M_TO_YD)
-      : '—';
+      : null;
+    els.fcbCenter.innerHTML =
+      centerRaw === null
+        ? '—'
+        : `${centerRaw}${playsSub(centerRef, centerRaw)}`;
+
     if (state.frontPt) {
       const fy = Math.round(
         haversineMeters(state.loc, state.frontPt) * M_TO_YD
       );
-      els.fcbFront.textContent = fy;
+      els.fcbFront.innerHTML = `${fy}${playsSub(state.frontPt, fy)}`;
       if (!state.markers.frontMarker)
         state.markers.frontMarker = L.marker(
           [state.frontPt.lat, state.frontPt.lng],
@@ -1967,7 +2002,7 @@
           state.frontPt.lng,
         ]);
     } else {
-      els.fcbFront.textContent = '—';
+      els.fcbFront.innerHTML = '—';
       if (state.markers.frontMarker) {
         try {
           state.map.removeLayer(state.markers.frontMarker);
@@ -1977,7 +2012,7 @@
     }
     if (state.backPt) {
       const by = Math.round(haversineMeters(state.loc, state.backPt) * M_TO_YD);
-      els.fcbBack.textContent = by;
+      els.fcbBack.innerHTML = `${by}${playsSub(state.backPt, by)}`;
       if (!state.markers.backMarker)
         state.markers.backMarker = L.marker(
           [state.backPt.lat, state.backPt.lng],
@@ -1989,7 +2024,7 @@
           state.backPt.lng,
         ]);
     } else {
-      els.fcbBack.textContent = '—';
+      els.fcbBack.innerHTML = '—';
       if (state.markers.backMarker) {
         try {
           state.map.removeLayer(state.markers.backMarker);
@@ -2016,9 +2051,9 @@
     const off = greenCenterOffset();
 
     if (!off) {
-      // No marked green middle: the tap is simply the pin.
+      // No marked green middle: the tap is simply the pin target.
       els.aimChip.className = 'aim-chip pin';
-      els.aimChip.textContent = 'Pin';
+      els.aimChip.innerHTML = '<b>Pin target</b><span>no green middle marked</span>';
       els.aimChip.hidden = false;
       return;
     }
@@ -2028,29 +2063,31 @@
       : 0;
 
     let cls;
-    let html;
+    let head;
+    let caption;
 
     if (off.state === 'on') {
       if (lateralAbs >= 8) {
-        // Along the middle's distance but clearly beside it: a pin on the
-        // edge of the green, so show the offset.
         cls = 'pin';
-        html = `Pin · ${Math.round(lateralAbs)} yd ${off.lateralYd > 0 ? 'right' : 'left'
-          }`;
+        head = 'Pin';
+        caption = `${Math.round(lateralAbs)} yd ${off.lateralYd > 0 ? 'right' : 'left'} of middle`;
       } else {
         cls = 'middle';
-        html = 'Middle';
+        head = 'Middle of green';
+        caption = 'on your line';
       }
     } else if (off.state === 'short') {
       cls = 'layup';
-      html = `Layup · ${Math.round(off.yards)} to middle`;
+      head = 'Layup target';
+      caption = `leaves ${Math.round(off.yards)} yd to middle`;
     } else {
-      cls = 'layup';
-      html = `${Math.round(off.yards)} past middle`;
+      cls = 'over';
+      head = `${Math.round(off.yards)} yd beyond middle`;
+      caption = 'move target onto the green';
     }
 
     els.aimChip.className = 'aim-chip ' + cls;
-    els.aimChip.textContent = html;
+    els.aimChip.innerHTML = `<b>${head}</b><span>${caption}</span>`;
     els.aimChip.hidden = false;
   }
   function renderClubChips(playsYd) {
@@ -2325,7 +2362,8 @@
     rs.pending = {
       clubId,
       startPt: { lat: state.loc.lat, lng: state.loc.lng },
-      startAcc: gpsAccMeters(),        // ← ADD THIS LINE
+      origStartPt: { lat: state.loc.lat, lng: state.loc.lng },
+      startAcc: gpsAccMeters(),
       intendedBearing,
       ts: Date.now(),
     };
@@ -2333,7 +2371,7 @@
     saveRoundSession();
     renderRoundShotUI();
     setNotice(
-      'Shot started. Walk to your ball, then tap Finish shot.',
+      'Shot started. Drag the flag pin to fine-tune your start spot, then walk to your ball and tap Finish shot.',
       'greenish'
     );
     haptic(8);
@@ -2594,7 +2632,24 @@
     renderRoundShotList();
     renderRoundFab();
     renderRoundMapHud();
+    renderPendingShot();
   }
+  let _roundHudResizeBound = false;
+  // Cap the live-round HUD so it can never cover the wind pill / recenter
+  // cluster in the top-right corner, on any screen size.
+  function constrainRoundHud() {
+    const hud = els.roundMapHud;
+    if (!hud) return;
+    const rightCol = document.querySelector('.top-right-col');
+    const rightW = rightCol ? rightCol.offsetWidth : 0;
+    const available = window.innerWidth - rightW - 12 - 8 - 12;
+    hud.style.maxWidth = `${Math.max(150, Math.round(available))}px`;
+    if (!_roundHudResizeBound) {
+      _roundHudResizeBound = true;
+      window.addEventListener('resize', constrainRoundHud);
+    }
+  }
+
   function renderRoundMapHud() {
     if (!els.roundMapHud) return;
 
@@ -2615,7 +2670,7 @@
     els.roundMapCourse.textContent = course?.name || 'Casual Round';
 
     els.roundMapHole.textContent = [
-      `Hole ${getCurrentHoleNumber()}`,
+      `H${getCurrentHoleNumber()}`,
       `Par ${hole.par || 4}`,
       hole.yards ? `${hole.yards} yd` : null,
     ]
@@ -2643,6 +2698,8 @@
       els.roundMapScoreBtn.disabled = pending;
       els.roundMapScoreBtn.style.opacity = pending ? '0.5' : '1';
     }
+
+    constrainRoundHud();
   }
 
   // The on-map round action FAB. Mirrors the Round-tab state machine so
@@ -4023,7 +4080,9 @@ out geom;`;
 
     els.roundScoreTitle.textContent = `Score Hole ${draft.hole}`;
 
+    const course = getCurrentCourse();
     els.roundScoreMeta.textContent = [
+      course?.name || 'Casual Round',
       `Par ${hole.par || 4}`,
       hole.yards ? `${hole.yards} yd` : null,
     ]
@@ -4432,6 +4491,15 @@ out geom;`;
         save('caddy:prefs', state.prefs);
         if (state.target && state.loc) calculateRange();
         else clearDispersionZone();
+        haptic(5);
+      });
+    }
+    const rangeRingsToggle = $('rangeRingsToggle');
+    if (rangeRingsToggle) {
+      rangeRingsToggle.addEventListener('change', () => {
+        state.prefs.rangeRings = rangeRingsToggle.checked;
+        save('caddy:prefs', state.prefs);
+        renderRangeRings();
         haptic(5);
       });
     }
@@ -7764,16 +7832,18 @@ out geom;`;
       els.windSubMetric.textContent = `from ${bearingToCompass(w.windFromDeg)}`;
       if (windCompass) {
         windCompass.hidden = false;
-        if (windArrow) {
-          windArrow.style.transform = `rotate(${towardDeg}deg)`;
+        const sheetNeedle = $('windNeedle');
+        if (sheetNeedle) {
+          sheetNeedle.style.transform = `rotate(${towardDeg}deg)`;
         }
       }
       // Map wind pill: same arrow + speed/direction, visible without opening
       // the sheet. Same rotation math as the sheet arrow so the two can
       // never disagree.
       if (els.windPill) {
-        if (els.windPillArrow) {
-          els.windPillArrow.style.transform = `rotate(${towardDeg}deg)`;
+        const pillNeedle = $('windPillNeedle');
+        if (pillNeedle) {
+          pillNeedle.style.transform = `rotate(${towardDeg}deg)`;
         }
         if (els.windPillText) {
           els.windPillText.textContent =
@@ -7809,6 +7879,9 @@ out geom;`;
     if (!state.context.offlineWeather && !state.context.offlineElevation &&
       state.context.weather) bits.push('Live');
     els.weatherStatus.textContent = bits.join(' · ');
+
+    // Keep the wind detail popover live while it is open.
+    if (windPopIsOpen()) renderWindPop();
   }
 
   function stampText() {
@@ -8123,6 +8196,7 @@ out geom;`;
     } else
       setNotice(`${Math.round(distanceYd)} yd recorded (outside normal range — excluded from club stats).`, 'greenish');
 
+    renderPendingShot();
     haptic(10);
     if (state.target && state.loc) calculateRange();
   }
@@ -9078,5 +9152,280 @@ out geom;`;
       return _isImagery();
     };
   })();
+  /* ============================================================
+     PREMIUM MAP UI — wind detail popover, distance rings, live
+     shot line, and the draggable shot-start flag.
+  ============================================================ */
+
+  /* ---------- Wind detail popover ---------- */
+  function windPopIsOpen() {
+    return !!els.windPop && !els.windPop.hidden;
+  }
+  function renderWindPop() {
+    if (!els.windPop || !els.windPopSpeed) return;
+    const w = getWeatherOrNeutral();
+    const hasLive = !!state.context.weather;
+    const towardDeg = (w.windFromDeg + 180) % 360;
+    const needle = $('windPopNeedle');
+    if (needle) needle.style.transform = `rotate(${towardDeg}deg)`;
+    els.windPopSpeed.textContent = hasLive ? `${fmt(w.windMph)} mph` : '—';
+    els.windPopDir.textContent = hasLive
+      ? `from ${bearingToCompass(w.windFromDeg)}`
+      : 'no live wind';
+
+    let shot;
+    if (hasLive && w.windMph >= 1 && state.lastCalc) {
+      const c = state.lastCalc;
+      const h = c.headwindMph;
+      const x = c.crosswindMph;
+      if (Math.abs(h) >= Math.abs(x)) {
+        const amt = Math.round(Math.abs(c.windAdjYd));
+        shot = h >= 0
+          ? `~${amt} yd into you on this line.`
+          : `~${amt} yd helping on this line.`;
+      } else if (Math.abs(c.aimYd) > 0) {
+        shot = `~${Math.round(Math.abs(x))} mph across from the ${x > 0 ? 'right' : 'left'} — start it ${Math.abs(c.aimYd)} yd ${c.aimYd > 0 ? 'right' : 'left'}.`;
+      } else {
+        shot = `~${Math.round(Math.abs(x))} mph across — aim correction is minimal.`;
+      }
+    } else if (!hasLive) {
+      shot = 'No live wind — using standard conditions.';
+    } else {
+      shot = 'Calm conditions — play the number.';
+    }
+    els.windPopShot.textContent = hasLive || state.lastCalc
+      ? `This shot: ${shot}`
+      : 'Select a target to see what the wind does to this shot.';
+
+    const bits = [];
+    if (hasLive && Number.isFinite(w.gustMph) && w.gustMph > w.windMph + 2)
+      bits.push(`gusts to ${Math.round(w.gustMph)} mph`);
+    if (state.context.weatherTs)
+      bits.push(`as of ${new Date(state.context.weatherTs).toLocaleTimeString()}`);
+    else
+      bits.push('standard conditions');
+    if (state.context.offlineWeather) bits.push('cached');
+    els.windPopMeta.textContent = bits.join(' · ');
+  }
+  function openWindPop() {
+    if (!els.windPop) return;
+    renderWindPop();
+    els.windPopScrim.hidden = false;
+    els.windPop.hidden = false;
+    requestAnimationFrame(() => {
+      els.windPopScrim.classList.add('open');
+      els.windPop.classList.add('open');
+    });
+    closeAdvice();
+    haptic(6);
+  }
+  function closeWindPop() {
+    if (!els.windPop || els.windPop.hidden) return;
+    els.windPopScrim.classList.remove('open');
+    els.windPop.classList.remove('open');
+    setTimeout(() => {
+      if (!els.windPop.classList.contains('open')) {
+        els.windPop.hidden = true;
+        els.windPopScrim.hidden = true;
+      }
+    }, reduceMotion ? 0 : 240);
+  }
+  function initWindPop() {
+    if (!els.windPill) return;
+    els.windPill.addEventListener('click', () => {
+      if (windPopIsOpen()) closeWindPop();
+      else openWindPop();
+    });
+    els.windPill.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (windPopIsOpen()) closeWindPop();
+        else openWindPop();
+      }
+    });
+    if (els.windPopClose) els.windPopClose.addEventListener('click', closeWindPop);
+    if (els.windPopScrim) els.windPopScrim.addEventListener('click', closeWindPop);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && windPopIsOpen()) closeWindPop();
+    });
+  }
+
+  /* ---------- Rangefinder distance rings ---------- */
+  const RANGE_RINGS_YD = [50, 100, 150, 200];
+  const RANGE_RINGS_MIN_ZOOM = 16;
+  function ringLabelIcon(text) {
+    return L.divIcon({
+      className: '',
+      html: `<div class="ring-label">${text}</div>`,
+      iconSize: [34, 16],
+      iconAnchor: [17, 8],
+    });
+  }
+  function renderRangeRings() {
+    clearRangeRings();
+    if (!state.mapReady || !state.loc || state.prefs.rangeRings === false)
+      return;
+    if (state.map.getZoom() < RANGE_RINGS_MIN_ZOOM) return;
+    const img = isImagery();
+    const color = img ? '#ffffff' : '#1677ff';
+    const group = L.layerGroup();
+    for (const yd of RANGE_RINGS_YD) {
+      const ring = L.circle([state.loc.lat, state.loc.lng], {
+        radius: yd * YD_TO_M,
+        color,
+        weight: 1.4,
+        opacity: 0.5,
+        dashArray: '3 8',
+        fill: false,
+        interactive: false,
+        pane: 'coursePane',
+      });
+      const lp = geodesicDirect(state.loc, 45, yd * YD_TO_M);
+      const label = L.marker([lp.lat, lp.lng], {
+        icon: ringLabelIcon(String(yd)),
+        interactive: false,
+        zIndexOffset: 700,
+      });
+      group.addLayer(ring).addLayer(label);
+    }
+    group.addTo(state.map);
+    state.layers.rangeRings = group;
+  }
+  function clearRangeRings() {
+    if (state.layers.rangeRings && state.map) {
+      try {
+        state.map.removeLayer(state.layers.rangeRings);
+      } catch { }
+    }
+    state.layers.rangeRings = null;
+  }
+
+  /* ---------- Live shot line + draggable start flag ---------- */
+  const START_DRAG_MIN_YD = 2;
+  function startFlagIcon() {
+    return L.divIcon({
+      className: '',
+      html: `<div class="start-flag"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21V4.5" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/><path d="M12 4.5h8.5l-3 3.2 3 3.2H12z" fill="#f5a623" stroke="#ffffff" stroke-width="1.1" stroke-linejoin="round"/></svg></div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 22],
+    });
+  }
+  function pendingStartMovedYd() {
+    const p = state.roundSession && state.roundSession.pending;
+    if (!p || !p.origStartPt) return 0;
+    return haversineMeters(p.origStartPt, p.startPt) * M_TO_YD;
+  }
+  function syncResetStartChip() {
+    if (!els.roundResetStart) return;
+    els.roundResetStart.hidden = pendingStartMovedYd() < START_DRAG_MIN_YD;
+  }
+  function pendingLineLabelIcon(text) {
+    return L.divIcon({
+      className: '',
+      html: `<div class="pending-line-label">${text}</div>`,
+      iconSize: [56, 26],
+      iconAnchor: [28, 13],
+    });
+  }
+  function updatePendingLine() {
+    const p = state.roundSession && state.roundSession.pending;
+    const ok = !!(p && state.mapReady && state.map && state.loc);
+    if (!ok) {
+      ['pendingLine', 'pendingLabel'].forEach((k) => {
+        if (state.markers[k] && state.map) {
+          try { state.map.removeLayer(state.markers[k]); } catch { }
+        }
+        state.markers[k] = null;
+      });
+      return;
+    }
+    const pts = [
+      [p.startPt.lat, p.startPt.lng],
+      [state.loc.lat, state.loc.lng],
+    ];
+    if (!state.markers.pendingLine)
+      state.markers.pendingLine = L.polyline(pts, {
+        pane: 'shotLinePane',
+        color: '#f5a623',
+        weight: 4,
+        opacity: 0.9,
+        lineCap: 'round',
+        interactive: false,
+      }).addTo(state.map);
+    else state.markers.pendingLine.setLatLngs(pts);
+
+    const d = haversineMeters(p.startPt, state.loc) * M_TO_YD;
+    const mid = midpointGeodesic(p.startPt, state.loc);
+    const icon = pendingLineLabelIcon(`${Math.round(d)} yd`);
+    if (!state.markers.pendingLabel)
+      state.markers.pendingLabel = L.marker([mid.lat, mid.lng], {
+        icon,
+        interactive: false,
+        zIndexOffset: 880,
+      }).addTo(state.map);
+    else {
+      state.markers.pendingLabel.setLatLng([mid.lat, mid.lng]);
+      state.markers.pendingLabel.setIcon(icon);
+    }
+    if (els.roundLiveV && !els.roundLive.hidden)
+      els.roundLiveV.textContent = Math.round(d);
+  }
+  function renderPendingShot() {
+    const p = state.roundSession && state.roundSession.pending;
+    if (!p || !state.mapReady || !state.map) {
+      clearPendingShot();
+      return;
+    }
+    if (!p.origStartPt)
+      p.origStartPt = { lat: p.startPt.lat, lng: p.startPt.lng };
+
+    if (!state.markers.startFlag) {
+      state.markers.startFlag = L.marker([p.startPt.lat, p.startPt.lng], {
+        icon: startFlagIcon(),
+        draggable: true,
+        zIndexOffset: 860,
+      }).addTo(state.map);
+      state.markers.startFlag.on('drag', () => {
+        const ll = state.markers.startFlag.getLatLng();
+        p.startPt = { lat: ll.lat, lng: ll.lng };
+        updatePendingLine();
+      });
+      state.markers.startFlag.on('dragend', () => {
+        const ll = state.markers.startFlag.getLatLng();
+        p.startPt = { lat: ll.lat, lng: ll.lng };
+        saveRoundSession();
+        updatePendingLine();
+        syncResetStartChip();
+        haptic(6);
+      });
+    } else {
+      state.markers.startFlag.setLatLng([p.startPt.lat, p.startPt.lng]);
+    }
+    updatePendingLine();
+    syncResetStartChip();
+  }
+  function clearPendingShot() {
+    ['pendingLine', 'pendingLabel', 'startFlag'].forEach((k) => {
+      if (state.markers[k] && state.map) {
+        try { state.map.removeLayer(state.markers[k]); } catch { }
+      }
+      state.markers[k] = null;
+    });
+    if (els.roundResetStart) els.roundResetStart.hidden = true;
+  }
+  function resetPendingStart() {
+    const p = state.roundSession && state.roundSession.pending;
+    if (!p || !p.origStartPt) return;
+    p.startPt = { lat: p.origStartPt.lat, lng: p.origStartPt.lng };
+    saveRoundSession();
+    renderPendingShot();
+    haptic(8);
+  }
+
+  /* ---------- Wire everything up ---------- */
+  initWindPop();
+  if (els.roundResetStart)
+    els.roundResetStart.addEventListener('click', resetPendingStart);
+
   bootstrap();
 })();

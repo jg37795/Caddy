@@ -185,11 +185,23 @@
               </div>
 
               <div class="top-right-row2">
-                <div class="wind-pill glass" id="windPill" aria-label="Wind conditions" hidden>
+                <div class="wind-pill glass" id="windPill" role="button" tabindex="0" aria-label="Wind conditions"
+                  hidden>
                   <span class="wind-pill-compass" aria-hidden="true">
-                    <svg class="wind-pill-arrow" id="windPillArrow" viewBox="0 0 24 24">
-                      <path d="M12 2l6.5 9H5.5z" fill="currentColor" />
-                      <path d="M12 11v9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+                    <svg class="wind-pill-rose" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="10.6" stroke="currentColor" stroke-width="1" stroke-opacity="0.3" />
+                      <circle cx="12" cy="12" r="7.2" stroke="currentColor" stroke-width="1" stroke-opacity="0.16" />
+                      <path d="M12 19.7v2.9" stroke="currentColor" stroke-width="1.4" stroke-opacity="0.4"
+                        stroke-linecap="round" />
+                      <path d="M1.4 12h2.9M19.7 12h2.9" stroke="currentColor" stroke-width="1.2" stroke-opacity="0.4"
+                        stroke-linecap="round" />
+                      <path d="M4.5 4.5l1.4 1.4M19.5 4.5l-1.4 1.4M4.5 19.5l1.4-1.4M19.5 19.5l-1.4-1.4"
+                        stroke="currentColor" stroke-width="1" stroke-opacity="0.22" stroke-linecap="round" />
+                    </svg>
+                    <svg class="wind-pill-arrow" id="windPillNeedle" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 2.2l5.8 8.6H6.2z" fill="currentColor" />
+                      <path d="M12 10.8v8.6" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"
+                        stroke-opacity="0.55" />
                     </svg>
                     <span class="wind-pill-n">N</span>
                   </span>
@@ -256,6 +268,9 @@
               <span class="round-live-v" id="roundLiveV">—</span>
               <span class="round-live-l" id="roundLiveL">yd from start</span>
             </div>
+            <button class="round-reset-start glass" id="roundResetStart" type="button" hidden>
+              ↺ Reset start
+            </button>
             <div class="round-club-pop glass" id="roundClubPop" hidden></div>
             <div class="round-fab-row">
               <button class="round-fab" id="roundFab" type="button" aria-live="polite">
@@ -289,6 +304,44 @@
               </button>
             </div>
             <div class="advice-pop-body" id="advicePopBody"></div>
+          </div>
+
+          <div class="wind-pop-scrim" id="windPopScrim" hidden></div>
+          <div class="wind-pop glass" id="windPop" role="dialog" aria-label="Wind details" hidden>
+            <div class="wind-pop-head">
+              <span class="wind-pop-title">Wind</span>
+              <button class="wind-pop-close" id="windPopClose" type="button" aria-label="Close">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div class="wind-pop-main">
+              <div class="wind-pop-rose">
+                <svg class="wind-pop-rose-svg" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10.6" stroke="currentColor" stroke-width="1" stroke-opacity="0.3" />
+                  <circle cx="12" cy="12" r="7.2" stroke="currentColor" stroke-width="1" stroke-opacity="0.16" />
+                  <path d="M12 19.7v2.9" stroke="currentColor" stroke-width="1.4" stroke-opacity="0.4"
+                    stroke-linecap="round" />
+                  <path d="M1.4 12h2.9M19.7 12h2.9" stroke="currentColor" stroke-width="1.2" stroke-opacity="0.4"
+                    stroke-linecap="round" />
+                  <path d="M4.5 4.5l1.4 1.4M19.5 4.5l-1.4 1.4M4.5 19.5l1.4-1.4M19.5 19.5l-1.4-1.4" stroke="currentColor"
+                    stroke-width="1" stroke-opacity="0.22" stroke-linecap="round" />
+                </svg>
+                <svg class="wind-pop-needle" id="windPopNeedle" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2.2l5.8 8.6H6.2z" fill="currentColor" />
+                  <path d="M12 10.8v8.6" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"
+                    stroke-opacity="0.55" />
+                </svg>
+                <span class="wind-pop-n">N</span>
+              </div>
+              <div class="wind-pop-readout">
+                <div class="wind-pop-speed" id="windPopSpeed">—</div>
+                <div class="wind-pop-dir" id="windPopDir">no live wind</div>
+              </div>
+            </div>
+            <div class="wind-pop-shot" id="windPopShot">—</div>
+            <div class="wind-pop-meta" id="windPopMeta">—</div>
           </div>
 
           <section class="sheet glass" id="sheet" aria-label="Yardage details">
@@ -416,9 +469,22 @@
                       <div class="v wind-metric-v">
                         <span id="windMetric">—</span>
                         <span class="wind-compass" id="windCompass" aria-hidden="true" hidden>
-                          <svg class="wind-arrow" id="windArrow" viewBox="0 0 24 24">
-                            <path d="M12 2l6.5 9H5.5z" fill="currentColor" />
-                            <path d="M12 11v9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+                          <svg class="wind-rose" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="12" r="10.4" stroke="currentColor" stroke-width="1"
+                              stroke-opacity="0.3" />
+                            <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="1"
+                              stroke-opacity="0.16" />
+                            <path d="M12 19.7v2.9" stroke="currentColor" stroke-width="1.4" stroke-opacity="0.4"
+                              stroke-linecap="round" />
+                            <path d="M1.4 12h2.9M19.7 12h2.9" stroke="currentColor" stroke-width="1.2"
+                              stroke-opacity="0.4" stroke-linecap="round" />
+                            <path d="M4.5 4.5l1.4 1.4M19.5 4.5l-1.4 1.4M4.5 19.5l1.4-1.4M19.5 19.5l-1.4-1.4"
+                              stroke="currentColor" stroke-width="1" stroke-opacity="0.22" stroke-linecap="round" />
+                          </svg>
+                          <svg class="wind-arrow" id="windNeedle" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2.2l5.8 8.6H6.2z" fill="currentColor" />
+                            <path d="M12 10.8v8.6" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"
+                              stroke-opacity="0.55" />
                           </svg>
                           <span class="wind-compass-n">N</span>
                         </span>
@@ -448,15 +514,19 @@
                   <summary>How it works</summary>
                   <div class="hint" style="margin-top: 8px">
                     <b>Single-tap</b> the map to set your aim target.
-                    <b>Set Front</b> / <b>Set Middle</b> / <b>Set Back</b>,
-                    then tap the green edges to mark reference yardages. Your
-                    aim target and the green middle stay separate — small
-                    chips under the number tell you what the target is and
-                    which way you are aiming, and a dashed line links them on
-                    the map when they differ. <b>Restore Green</b> re-applies an imported
-                    course's green edges; <b>Clear Green</b> removes them.
-                    Plays-like folds in elevation, wind, temp, altitude &amp;
-                    humidity.
+                    <b>Set Front / Middle / Back</b>, then tap the green to
+                    mark its edges. The chip under the big number always
+                    says what your target is — <b>Middle of green</b>,
+                    <b>Pin</b> with its offset from the middle, or
+                    <b>Layup target</b>, where the number is the yards that
+                    point leaves to the middle along your shot line.
+                    <b>Restore Green</b> re-applies an imported course's
+                    edges; <b>Clear Green</b> removes them. Tap the
+                    <b>wind pill</b> (top right) for full wind detail and
+                    what it does to this shot. During a round, drag the
+                    <b>flag pin</b> to fine-tune where your shot started
+                    before tapping Finish. Plays-like folds in elevation,
+                    wind, temp, altitude &amp; humidity.
                   </div>
                 </details>
               </div>
@@ -890,6 +960,16 @@
         </div>
       </div>
       <label class="toggle" title="Dispersion zone"><input id="dispersionToggle" type="checkbox" /><span
+          class="switch"></span></label>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="lbl">Distance rings</div>
+        <div class="desc">
+          Shows 50 / 100 / 150 / 200 yd rings around you when zoomed in.
+        </div>
+      </div>
+      <label class="toggle" title="Distance rings"><input id="rangeRingsToggle" type="checkbox" /><span
           class="switch"></span></label>
     </div>
     <div class="settings-row">
