@@ -63,6 +63,14 @@ body.dark {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Author styles were beating the UA [hidden] rule (author origin wins
+   ties), so overlays like the onboarding sheet stayed visible even when
+   JS set hidden="true". Restore the contract: hidden ALWAYS means
+   invisible, regardless of display/flex/grid on the element. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -1198,6 +1206,23 @@ body[data-dragging='1'] .gps-chip {
   font-variant-numeric: tabular-nums;
 }
 
+/* Live to-par coloring (birdie red / bogey blue convention). */
+.to-par-under {
+  color: #d63939;
+}
+
+.to-par-over {
+  color: #1677ff;
+}
+
+body.dark .to-par-under {
+  color: #ff8f8f;
+}
+
+body.dark .to-par-over {
+  color: #6cb2ff;
+}
+
 .round-map-actions {
   display: inline-flex;
   align-items: center;
@@ -1206,7 +1231,7 @@ body[data-dragging='1'] .gps-chip {
 }
 
 .round-map-score-btn {
-  min-height: 28px;
+  min-height: 25px;
   padding: 0 9px;
   border-radius: 9px;
   background: var(--green);
@@ -1253,6 +1278,8 @@ body[data-mode='range'] #roundMapHud {
   left: 0;
   right: 0;
   bottom: 0;
+  /* vh fallback for browsers without dynamic-viewport units */
+  max-height: min(88vh, 760px);
   max-height: min(88dvh, 760px);
   overflow-y: auto;
   overscroll-behavior-y: contain;
@@ -1407,16 +1434,7 @@ body[data-mode='range'] #roundMapHud {
   }
 }
 
-.round-map-score-btn {
-  min-height: 25px;
-  padding: 0 9px;
-  border-radius: 9px;
-  background: var(--green);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 900;
-}
-
+/* (duplicate .round-map-score-btn block removed — merged above) */
 .round-map-score-btn:disabled {
   opacity: 0.45;
 }
@@ -1427,6 +1445,8 @@ body[data-mode='range'] #roundMapHud {
   left: 0;
   right: 0;
   bottom: 0;
+  /* vh fallback for browsers without dynamic-viewport units */
+  max-height: min(82vh, 680px);
   max-height: min(82dvh, 680px);
   overflow-y: auto;
   overscroll-behavior-y: contain;
@@ -2210,6 +2230,8 @@ body.dark .wind-pop-rose,
   bottom: var(--tab-total);
   z-index: 550;
   border-radius: 24px 24px 0 0;
+  /* vh fallback for browsers without dynamic-viewport units */
+  height: min(78vh, 660px);
   height: min(78dvh, 660px);
   transform: translateY(var(--sheet-y, calc(100% - var(--sheet-peek))));
   will-change: transform;
@@ -2365,6 +2387,33 @@ body.dark .fcb .fcb-pl,
 
 .fcb.center {
   background: rgba(15, 122, 67, 0.16);
+}
+
+/* --- Tap-to-aim green references -------------------------------------
+   A tile becomes tappable once its point exists; tapping snaps your aim
+   target to Front / Middle / Back. The tile you're currently aimed at
+   gets an inset ring. */
+.fcb.clickable {
+  cursor: pointer;
+  transition: transform 0.15s var(--spring-snappy), background 0.18s ease;
+}
+
+.fcb.clickable:active {
+  transform: scale(0.96);
+}
+
+.fcb.clickable.is-aim {
+  box-shadow: inset 0 0 0 2px var(--green-2);
+}
+
+@media (hover: hover) {
+  .fcb.clickable:hover {
+    background: rgba(15, 122, 67, 0.15);
+  }
+}
+
+body.dark .fcb.clickable:hover {
+  background: rgba(24, 164, 91, 0.22);
 }
 
 .fcb-actions {

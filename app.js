@@ -236,6 +236,7 @@
     nearbyCourseLoading: false,
     nearbyCourseLoadingScorecard: false,
     nearbySearchRequested: false,
+    nearbySearchError: null,
     selectedNearbyCourse: null,
     selectedCourseTemplate: null,
     courseProfiles: load(COURSE_PROFILES_KEY, []),
@@ -1566,7 +1567,7 @@
     }
   }
   function setNotice(text, kind = 'greenish') {
-    if (!els.rangeNotice) return;  // ← ADD
+    if (!els.rangeNotice) return;
     els.rangeNotice.className = 'notice ' + kind;
     els.rangeNotice.textContent = text;
   }
@@ -1954,10 +1955,26 @@
     });
   }
   function renderFcb() {
+    // Tiles become tappable when their green reference exists; tapping
+    // snaps the aim target there. The currently-aimed-at tile gets a ring.
+    const markTile = (el, pt) => {
+      const clickable = !!pt;
+      el.classList.toggle('clickable', clickable);
+      const isAim =
+        clickable &&
+        !!state.target &&
+        haversineMeters(state.target, pt) * M_TO_YD < 1.5;
+      el.classList.toggle('is-aim', isAim);
+      el.onclick = clickable ? () => aimAtGreenRef(pt) : null;
+    };
+
     if (!state.loc) {
       els.fcbFront.innerHTML = '—';
       els.fcbCenter.innerHTML = '—';
       els.fcbBack.innerHTML = '—';
+      markTile(els.fcbFront, null);
+      markTile(els.fcbCenter, null);
+      markTile(els.fcbBack, null);
       return;
     }
 
@@ -1981,6 +1998,7 @@
       centerRaw === null
         ? '—'
         : `${centerRaw}${playsSub(centerRef, centerRaw)}`;
+    markTile(els.fcbCenter, centerRef);
 
     if (state.frontPt) {
       const fy = Math.round(
@@ -2010,6 +2028,8 @@
         state.markers.frontMarker = null;
       }
     }
+    markTile(els.fcbFront, state.frontPt);
+
     if (state.backPt) {
       const by = Math.round(haversineMeters(state.loc, state.backPt) * M_TO_YD);
       els.fcbBack.innerHTML = `${by}${playsSub(state.backPt, by)}`;
@@ -2032,6 +2052,27 @@
         state.markers.backMarker = null;
       }
     }
+    markTile(els.fcbBack, state.backPt);
+  }
+
+  // Snap the aim target onto a marked green reference (Front/Middle/Back).
+  function aimAtGreenRef(pt) {
+    if (!pt || !state.mapReady) return;
+    state.target = { lat: pt.lat, lng: pt.lng };
+    state.twoTapA = null;
+    state.twoTapComplete = false;
+    clearTwoTapMarkers();
+    if (!state.markers.target)
+      state.markers.target = L.marker([pt.lat, pt.lng], {
+        icon: targetIcon(),
+        zIndexOffset: 850,
+      }).addTo(state.map);
+    else state.markers.target.setLatLng([pt.lat, pt.lng]);
+    save('caddy:lastTarget', state.target);
+    updateLine();
+    calculateRange();
+    scheduleContextUpdate();
+    haptic(8);
   }
 
 
@@ -2314,6 +2355,33 @@
   const ROUND_MIN_SHOT_YD = 8; // below this it's a putt/tap — ignore
   const ROUND_GPS_OK_M = 15; // need a fix at least this good to capture
 
+  // ---- Screen Wake Lock -------------------------------------------------
+  // Keeps the display on while a shot is in flight so the Finish button is
+  // right there when you reach your ball. Silently no-ops where unsupported.
+  let wakeLockSentinel = null;
+  async function requestWakeLock() {
+    try {
+      if (navigator.wakeLock && !wakeLockSentinel) {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => {
+          wakeLockSentinel = null;
+        });
+      }
+    } catch { /* unsupported or denied — non-fatal */ }
+  }
+  function releaseWakeLock() {
+    try {
+      if (wakeLockSentinel) {
+        wakeLockSentinel.release();
+        wakeLockSentinel = null;
+      }
+    } catch { }
+  }
+  document.addEventListener('visibilitychange', () => {
+    // Re-acquire after returning to the foreground if a shot is still live.
+    if (!document.hidden && roundStatus() === 'pending') requestWakeLock();
+  });
+
 
   function startRound() {
     // Course setup is available.
@@ -2336,6 +2404,7 @@
     state.holeGeoKey = null;
     saveRoundSession();
     renderRoundShotUI();
+    releaseWakeLock();
     haptic(8);
   }
 
@@ -2370,6 +2439,7 @@
     rs.status = 'pending';
     saveRoundSession();
     renderRoundShotUI();
+    requestWakeLock();
     setNotice(
       'Shot started. Drag the flag pin to fine-tune your start spot, then walk to your ball and tap Finish shot.',
       'greenish'
@@ -2682,9 +2752,19 @@
         ? `${formatToPar(score.toPar)}`
         : 'E';
 
+    // Birdie-red / bogey-blue on the live to-par readout, matching the
+    // scorecard convention.
+    els.roundMapScore.classList.remove('to-par-under', 'to-par-over');
+    if (score.holesPlayed && score.toPar < 0)
+      els.roundMapScore.classList.add('to-par-under');
+    else if (score.holesPlayed && score.toPar > 0)
+      els.roundMapScore.classList.add('to-par-over');
+
     els.roundMapStatus.textContent = pending
       ? 'Shot in flight'
-      : 'Ready for next shot';
+      : score.holesPlayed
+        ? `Ready · thru ${score.holesPlayed}`
+        : 'Ready for next shot';
 
     if (els.roundMapPrevBtn) {
       els.roundMapPrevBtn.disabled = pending || rs.hole <= 1;
@@ -2828,6 +2908,7 @@
   function openRoundSetup() {
     state.selectedNearbyCourse = null;
     state.selectedCourseTemplate = null;
+    state.nearbySearchError = null;
 
     if (!els.roundSetupSheet || !els.roundSetupScrim) return;
 
@@ -3058,6 +3139,10 @@
 
     state.roundSession = emptyRoundSession(normalizedCourse, startHole);
 
+    // Force hole geometry to re-apply even if the new round starts on the
+    // same course/hole as the previous one.
+    state.holeGeoKey = null;
+
     // Keep legacy scorecard consumers working while course-aware round data
     // remains stored inside the active round session.
     state.round = state.roundSession.scorecard;
@@ -3180,7 +3265,10 @@
     }
 
     if (!courses.length) {
+      // Surface the real failure reason (timeout/offline) instead of the
+      // misleading "nothing found" copy when a search errored out.
       els.nearbyCourseStatus.textContent =
+        state.nearbySearchError ||
         'No mapped courses found nearby. You can still create one manually.';
       els.nearbyCourseList.innerHTML = '';
       return;
@@ -3745,6 +3833,7 @@ out geom;`;
       els.roundSetupSaveCourse.checked = true;
 
       renderRoundSetupHoles(course.holes);
+      renderTeeSetPicker(course);
 
       els.nearbyCourseStatus.textContent =
         `Selected ${course.name}. Saved scorecard loaded.`;
@@ -3844,6 +3933,7 @@ out geom;`;
       now - cache.ts < NEARBY_COURSES_TTL
     ) {
       state.nearbyCourses = cache.courses;
+      state.nearbySearchError = null;
       state.nearbySearchRequested = false;
       renderNearbyCourses();
       return;
@@ -3911,6 +4001,7 @@ out geom;`;
         .slice(0, 8);
 
       state.nearbyCourses = courses;
+      state.nearbySearchError = null;
 
       save(NEARBY_COURSES_CACHE_KEY, {
         ts: now,
@@ -3922,12 +4013,13 @@ out geom;`;
       console.warn('Nearby course recognition failed:', error);
 
       state.nearbyCourses = [];
+      state.nearbySearchError =
+        error.name === 'AbortError'
+          ? 'Nearby course search timed out. Try again.'
+          : 'Nearby course search is unavailable right now. Enter the course manually.';
 
       if (els.nearbyCourseStatus) {
-        els.nearbyCourseStatus.textContent =
-          error.name === 'AbortError'
-            ? 'Nearby course search timed out. Try again.'
-            : 'Nearby course search is unavailable right now. Enter the course manually.';
+        els.nearbyCourseStatus.textContent = state.nearbySearchError;
       }
     } finally {
       state.nearbyCourseLoading = false;
@@ -3976,6 +4068,7 @@ out geom;`;
         els.roundSetupSaveCourse.checked = false;
 
         renderRoundSetupHoles(defaultCourseHoles());
+        renderTeeSetPicker(null);
         renderNearbyCourses();
         return;
       }
@@ -3995,6 +4088,7 @@ out geom;`;
       els.roundSetupSaveCourse.checked = true;
 
       renderRoundSetupHoles(course.holes);
+      renderTeeSetPicker(course);
 
       if (course.location) {
         els.nearbyCourseStatus.textContent =
@@ -4277,8 +4371,13 @@ out geom;`;
 
           const value = Number(button.dataset.putts);
 
+          // Toggle: tapping the active putts count clears it, matching the
+          // FIR / GIR buttons.
           state.roundScoreDraft.putts =
-            value === 4 ? 4 : value;
+            state.roundScoreDraft.putts !== '' &&
+              Number(state.roundScoreDraft.putts) === value
+              ? ''
+              : value;
 
           renderRoundScoreSheet();
           haptic(4);
@@ -4701,12 +4800,19 @@ out geom;`;
       }
       if (haptics) haptic(8);
     }
+    let measureRetries = 0;
     function measure() {
       const h = sheet.offsetHeight;
-      if (!h || !drag.offsetHeight) {
+      // The sheet lives in the Range screen; on other tabs it collapses to
+      // 0px. Retry a bounded number of times (for layout settling) instead
+      // of spinning rAF forever while hidden.
+      if ((!h || !drag.offsetHeight) && measureRetries < 30) {
+        measureRetries++;
         requestAnimationFrame(measure);
         return;
       }
+      measureRetries = 0;
+      if (!h || !drag.offsetHeight) return;
       H = h;
       maxY = Math.max(0, H - headerH());
       measureFcbHeight();
@@ -4766,7 +4872,7 @@ out geom;`;
         document.body.removeAttribute('data-dragging');
         sheet.style.removeProperty('--fcb-reveal');
         sheet.style.removeProperty('--detail-reveal');
-        wrap.style.removeProperty('--detail-reveal');  // ← ADD
+        wrap.style.removeProperty('--detail-reveal');
         cycleUp();
         return;
       }
@@ -8182,6 +8288,7 @@ out geom;`;
     rs.status = 'active';
     saveRoundSession();
     renderRoundShotUI();
+    releaseWakeLock();
 
     if (belowNoise && !discard)
       setNotice(`Only ${Math.round(distanceYd)} yd — inside GPS noise (±${fmt(sigYd)} yd). Logged as non-counting.`, 'greenish');
