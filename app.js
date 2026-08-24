@@ -224,6 +224,16 @@
     restoreBtn: $('restoreBtn'),
     restoreInput: $('restoreInput'),
     exportCsvBtn: $('exportCsvBtn'),
+    // Hole planner
+    planCourseSelect: $('planCourseSelect'),
+    planCourseChip: $('planCourseChip'),
+    planCourseCard: $('planCourseCard'),
+    planCourseName: $('planCourseName'),
+    planCourseMeta: $('planCourseMeta'),
+    planHoleList: $('planHoleList'),
+    planDetailCard: $('planDetailCard'),
+    planDetailTitle: $('planDetailTitle'),
+    planDetailBody: $('planDetailBody'),
   };
 
   const savedLoc = (() => {
@@ -951,7 +961,7 @@
     const titles = {
       range: 'Tap map for live yardage',
       clubs: 'Stock carry distances',
-      shot: 'Plays-like calculator',
+      shot: 'Plan your holes',
       round: 'Scorecard',
       stats: 'Local round stats',
     };
@@ -3679,6 +3689,8 @@
     }
 
     saveCourseProfiles();
+    // A freshly saved course becomes plannable immediately.
+    renderPlanner();
   }
 
   function beginRound(course, startHole) {
@@ -5475,6 +5487,7 @@ out geom;`;
     renderRound();
     renderStats();
     renderRoundShotUI();
+    renderPlanner();
     if (state.prefs.mode === 'range') renderPracticeSection();
   }
 
@@ -6241,6 +6254,7 @@ out geom;`;
 
     initAdvice();
     initModeToggle();
+    initPlanner();
 
     applyMode();
     renderClubs();
@@ -10235,6 +10249,372 @@ out geom;`;
       els.manualRecSub.textContent = sub;
       renderBreakdown(calc, els.manualBreakdown);
     });
+  }
+  // ============================================================
+  //  BLOCK 16b — HOLE PLANNER (prep mode)
+  //  Study any saved course offline: hole list + a written plan per hole.
+  //  Reads ONLY stored course geometry — no network, no GPS required, so
+  //  it works the night before at home.
+  // ============================================================
+
+  const PLAN_MAX_SEQ_CLUBS = 4;
+
+  // Courses available to the planner: the active round's course first,
+  // then every saved profile.
+  function planCourseOptions() {
+    const opts = [];
+    const active = state.roundSession ? getCurrentCourse() : null;
+    if (active) {
+      opts.push({
+        id: '@active',
+        name: `${active.name} · active round`,
+        course: active,
+      });
+    }
+    for (const c of state.courseProfiles || []) {
+      opts.push({
+        id: c.id,
+        name: `${c.name} · ${c.teeName || 'Default tees'}`,
+        course: normalizeCourse(c),
+      });
+    }
+    return opts;
+  }
+
+  function getPlannerCourse() {
+    const id = state.planCourseId;
+    if (!id) return null;
+    const hit = planCourseOptions().find((o) => o.id === id);
+    return hit ? hit.course : null;
+  }
+
+  // Yardage resolution: imported tee-set number wins; otherwise compute
+  // tee→green-center geometry. Returns a rounded number or null.
+  function planHoleYardage(hole) {
+    const typed = Number(hole.yards);
+    if (Number.isFinite(typed) && typed > 0) return Math.round(typed);
+    if (hole.teePoint && hole.greenCenter) {
+      const yd = haversineMeters(hole.teePoint, hole.greenCenter) * M_TO_YD;
+      if (yd > 40 && yd < 900) return Math.round(yd);
+    }
+    return null;
+  }
+
+  function renderPlanner() {
+    if (!els.planCourseSelect) return;
+    const opts = planCourseOptions();
+    const prev = state.planCourseId || '';
+    els.planCourseSelect.innerHTML =
+      `<option value="">Choose a course…</option>` +
+      opts
+        .map(
+          (o) =>
+            `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name)}</option>`
+        )
+        .join('');
+    if (prev && opts.some((o) => o.id === prev)) {
+      els.planCourseSelect.value = prev;
+      renderPlannerCourse();
+    } else {
+      state.planCourseId = '';
+      if (els.planCourseCard) els.planCourseCard.hidden = true;
+    }
+  }
+
+  function renderPlannerCourse() {
+    const course = getPlannerCourse();
+    if (!course || !els.planCourseCard) {
+      if (els.planCourseCard) els.planCourseCard.hidden = true;
+      return;
+    }
+    els.planCourseCard.hidden = false;
+
+    const n = Number(course.holesCount) === 9 ? 9 : 18;
+    const mapped = (course.holes || []).filter(
+      (h) => h.source === 'openstreetmap'
+    ).length;
+
+    if (els.planCourseChip)
+      els.planCourseChip.textContent = `${n} holes`;
+    els.planCourseName.textContent = course.name || 'Course';
+    els.planCourseMeta.textContent = [
+      course.teeName || null,
+      mapped ? `${mapped}/${n} mapped` : 'manual',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    els.planHoleList.innerHTML = (course.holes || [])
+      .slice(0, n)
+      .map((h) => {
+        const yd = planHoleYardage(h);
+        const par = h.par || inferParFromYards(yd);
+        const haz = Array.isArray(h.hazards) ? h.hazards.length : 0;
+        const line = [
+          par ? `Par ${par}` : 'Par —',
+          yd ? `${Math.round(yd)} yd` : null,
+          h.strokeIndex ? `SI ${h.strokeIndex}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        return `
+          <button class="plan-hole-row" type="button" data-hole="${h.number}">
+            <span class="plan-hole-num">${h.number}</span>
+            <span class="plan-hole-info">
+              <span class="plan-hole-line">${escapeHtml(line)}</span>
+              ${haz
+            ? `<span class="plan-hole-sub">${haz} hazard${haz === 1 ? '' : 's'
+            } marked</span>`
+            : ''
+          }
+            </span>
+            <span class="plan-hole-go">›</span>
+          </button>`;
+      })
+      .join('');
+
+    els.planHoleList
+      .querySelectorAll('.plan-hole-row')
+      .forEach((btn) => {
+        btn.addEventListener('click', () =>
+          openHolePlan(Number(btn.dataset.hole))
+        );
+      });
+
+    // A stale detail card from a previous course selection is misleading —
+    // collapse it whenever the course changes underneath.
+    if (els.planDetailCard) els.planDetailCard.hidden = true;
+  }
+
+  // Greedy club sequence from the long end of the bag, mirroring the
+  // on-course hole-brief logic, with an explicit finishing club.
+  function planClubSequence(totalYd) {
+    const yd = num(totalYd, 0);
+    if (!(yd > 0)) return null;
+    const desc = sortedClubsDesc();
+    const asc = sortedClubsAsc();
+    if (!desc.length) return null;
+
+    const seq = [];
+    let remain = yd;
+    for (const c of desc) {
+      if (remain <= c.yards * 1.08) break;
+      if (seq.length >= PLAN_MAX_SEQ_CLUBS) break;
+      seq.push(c.name);
+      remain -= c.yards;
+      if (remain <= 30) break;
+    }
+
+    // Shorter than the bag: express as a percentage of the shortest club.
+    if (!seq.length) {
+      const s = asc[0];
+      if (s && s.yards > 0 && yd < s.yards * 0.95) {
+        const pct = clamp(Math.round((yd / s.yards) * 100), 20, 95);
+        return { seq: [], finisherName: `${s.name} · ${pct}% swing` };
+      }
+    }
+
+    const finisher = sortedClubsAsc().find(
+      (c) => c.yards >= Math.max(20, remain)
+    );
+    const finisherName = finisher
+      ? finisher.name
+      : `${Math.round(Math.max(0, remain))} yd partial`;
+    return { seq, finisherName };
+  }
+
+  // Project stored hazards onto THIS hole's tee→green line so the plan can
+  // say "water right, ~180 yd out" instead of raw coordinates.
+  function planHazardsFor(hole) {
+    const list = Array.isArray(hole.hazards) ? hole.hazards : [];
+    const tee = hole.teePoint;
+    const green = hole.greenCenter;
+    return list.map((h) => {
+      const kind =
+        h.type === 'water'
+          ? 'Water'
+          : h.type === 'bunker'
+            ? 'Bunker'
+            : 'Hazard';
+      let sub = '';
+      if (
+        tee &&
+        green &&
+        h &&
+        Number.isFinite(h.lat) &&
+        Number.isFinite(h.lng)
+      ) {
+        const along = alongTrackYd(tee, green, h);
+        const cross = crossTrackYd(tee, green, h);
+        const side =
+          Math.abs(cross) < 8
+            ? 'on the line'
+            : cross > 0
+              ? 'right'
+              : 'left';
+        sub = `${side}, ~${Math.max(0, Math.round(along))} yd off the tee`;
+      }
+      return { type: h.type, label: kind, sub };
+    });
+  }
+
+  function planGreenInfo(hole) {
+    const tee = hole.teePoint;
+    if (!tee) return null;
+    const dist = (p) =>
+      p && Number.isFinite(p.lat)
+        ? Math.round(haversineMeters(tee, p) * M_TO_YD)
+        : null;
+    const front = dist(hole.front);
+    const center = dist(hole.greenCenter);
+    const back = dist(hole.back);
+    const depth =
+      front != null && back != null ? Math.abs(back - front) : null;
+    return { front, center, back, depth };
+  }
+
+  function planStrategy(depth, par, yd) {
+    const bits = [];
+    if (depth != null) {
+      if (depth >= 26)
+        bits.push(
+          `Deep green (~${Math.round(depth)} yd of room) — space to be aggressive; fire at the number.`
+        );
+      else if (depth <= 14)
+        bits.push(
+          `Shallow green (~${Math.round(depth)} yd) — distance control decides this hole, not line. Favour the middle.`
+        );
+      else
+        bits.push(
+          `Green depth ~${Math.round(depth)} yd — a standard target.`
+        );
+    } else {
+      bits.push('Green edges are not mapped — play to the middle.');
+    }
+    if (par === 5 && yd)
+      bits.push(
+        'Three-shotter at most bags — decide your layup number NOW, not off the second shot.'
+      );
+    if (par === 3) bits.push('One clean strike — commit fully to the yardage.');
+    return bits.join(' ');
+  }
+
+  function renderPlanDetail(course, hole) {
+    const yd = planHoleYardage(hole);
+    const par = hole.par || inferParFromYards(yd);
+    const metaBits = [];
+    if (par) metaBits.push(`Par ${par}`);
+    if (yd) metaBits.push(`${Math.round(yd)} yd`);
+    if (hole.strokeIndex) metaBits.push(`stroke index ${hole.strokeIndex}`);
+    if (yd && !(Number(hole.yards) > 0))
+      metaBits.push('estimated from geometry');
+
+    const seq = planClubSequence(yd);
+    const hazards = planHazardsFor(hole);
+    const green = planGreenInfo(hole);
+
+    let html = '';
+    html += `<div class="plan-meta">${
+      metaBits.length
+        ? metaBits.map(escapeHtml).join(' · ')
+        : 'Unmapped hole — add par/yards in round setup.'
+    }</div>`;
+
+    if (yd) {
+      if (seq) {
+        html +=
+          `<div class="plan-section">` +
+          `<div class="plan-section-title">Suggested sequence</div>` +
+          `<div class="plan-seq">${
+            seq.seq.length
+              ? escapeHtml(seq.seq.join(' → ')) + ' → '
+              : ''
+          }<b>${escapeHtml(seq.finisherName)}</b></div>` +
+          `</div>`;
+      } else {
+        html +=
+          `<div class="plan-section">` +
+          `<div class="plan-section-title">Suggested sequence</div>` +
+          `<div class="plan-seq plan-dim">Add carry distances in the Clubs tab to get a sequence.</div>` +
+          `</div>`;
+      }
+    }
+
+    if (hazards.length) {
+      html +=
+        `<div class="plan-section">` +
+        `<div class="plan-section-title">Hazards</div>` +
+        hazards
+          .map(
+            (hz) =>
+              `<div class="plan-hazard${
+                hz.type === 'water' ? ' water' : ''
+              }">` +
+              `<span class="plan-hazard-dot"></span>` +
+              `<span>${escapeHtml(hz.label)}</span>` +
+              (hz.sub
+                ? `<span class="plan-hazard-sub">${escapeHtml(hz.sub)}</span>`
+                : '') +
+              `</div>`
+          )
+          .join('') +
+        `</div>`;
+    } else {
+      html +=
+        `<div class="plan-section">` +
+        `<div class="plan-section-title">Hazards</div>` +
+        `<div class="plan-hazard plan-dim">None marked for this hole.</div>` +
+        `</div>`;
+    }
+
+    if (green && (green.front != null || green.center != null || green.back != null)) {
+      const tile = (k, v) =>
+        `<div class="plan-green-tile"><i>${k}</i>${
+          v != null ? v + ' yd' : '—'
+        }</div>`;
+      html +=
+        `<div class="plan-section">` +
+        `<div class="plan-section-title">Green · measured from the tee</div>` +
+        `<div class="plan-green-grid">` +
+        tile('Front', green.front) +
+        tile('Middle', green.center) +
+        tile('Back', green.back) +
+        `</div></div>`;
+    }
+
+    html += `<div class="plan-strategy">${escapeHtml(
+      planStrategy(green ? green.depth : null, par, yd)
+    )}</div>`;
+
+    return html;
+  }
+
+  function openHolePlan(number) {
+    const course = getPlannerCourse();
+    if (!course || !els.planDetailCard) return;
+    const hole = (course.holes || [])[number - 1];
+    if (!hole) return;
+
+    els.planDetailTitle.textContent = `Hole ${number}`;
+    els.planDetailBody.innerHTML = renderPlanDetail(course, hole);
+    els.planDetailCard.hidden = false;
+    try {
+      els.planDetailCard.scrollIntoView({
+        behavior: reduceMotion ? 'auto' : 'smooth',
+        block: 'nearest',
+      });
+    } catch { }
+    haptic(6);
+  }
+
+  function initPlanner() {
+    if (!els.planCourseSelect) return;
+    els.planCourseSelect.addEventListener('change', () => {
+      state.planCourseId = els.planCourseSelect.value || '';
+      renderPlannerCourse();
+      haptic(5);
+    });
+    renderPlanner();
   }
   // ============================================================
   //  BLOCK 17 — SELF-CHECK (dev only; safe to ship, costs nothing until called)

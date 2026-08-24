@@ -4307,3 +4307,203 @@ body.dark .seg-holes {
 body.dark .holes-opt.active {
   background: var(--green-2);
 }
+
+/* ===== Hole planner ===== */
+.plan-hole-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.plan-hole-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  background: var(--card-solid);
+  border: 1px solid var(--line);
+  color: var(--text);
+  text-align: left;
+  transition: transform 0.15s var(--spring-snappy);
+}
+
+.plan-hole-row:active {
+  transform: scale(0.98);
+}
+
+.plan-hole-num {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--green-3);
+  color: var(--green);
+  font-weight: 900;
+  font-size: 13px;
+}
+
+body.dark .plan-hole-num {
+  background: rgba(24, 164, 91, 0.18);
+  color: #63e89a;
+}
+
+.plan-hole-info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plan-hole-line {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-hole-sub {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.plan-hole-go {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 0.7;
+}
+
+.plan-detail-card .card-title h3 {
+  font-size: 19px;
+  letter-spacing: -0.03em;
+}
+
+.plan-meta {
+  font-size: 13px;
+  font-weight: 850;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.plan-section {
+  margin-bottom: 13px;
+}
+
+.plan-section-title {
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin-bottom: 6px;
+}
+
+.plan-seq {
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.plan-seq b {
+  font-weight: 900;
+  color: var(--green);
+}
+
+body.dark .plan-seq b {
+  color: #63e89a;
+}
+
+.plan-dim {
+  opacity: 0.65;
+}
+
+.plan-hazard {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: 13px;
+  font-weight: 750;
+  border-bottom: 1px solid var(--line);
+}
+
+.plan-hazard:last-child {
+  border-bottom: 0;
+}
+
+.plan-hazard-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+.plan-hazard.water .plan-hazard-dot {
+  background: #1677ff;
+}
+
+body.dark .plan-hazard.water .plan-hazard-dot {
+  background: #6cb2ff;
+}
+
+.plan-hazard-sub {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.plan-green-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.plan-green-tile {
+  border-radius: 13px;
+  padding: 9px 6px;
+  text-align: center;
+  background: rgba(15, 122, 67, 0.08);
+  border: 1px solid var(--line);
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+body.dark .plan-green-tile {
+  background: rgba(24, 164, 91, 0.14);
+}
+
+.plan-green-tile i {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+
+.plan-strategy {
+  border-radius: 14px;
+  padding: 11px 13px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  background: linear-gradient(145deg,
+      rgba(15, 122, 67, 0.95),
+      rgba(24, 164, 91, 0.88));
+  color: #fff;
+}

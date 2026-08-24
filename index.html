@@ -588,73 +588,115 @@
         </div>
       </section>
 
-      <!-- SHOT CALC -->
+      <!-- PLANNER (formerly Shot Calc — calculator lives below, collapsed) -->
       <section id="shotScreen" class="screen">
+        <!-- ===== HOLE PLANNER ===== -->
         <div class="card">
           <div class="card-title">
-            <h2>Shot Calc</h2>
-            <span class="chip">Manual</span>
+            <h2>Hole planner</h2>
+            <span class="chip" id="planCourseChip">Prep mode</span>
           </div>
-          <div class="hint">
-            Enter the number you know and Caddy adds the plays-like math.
-            Leave fields blank to pull the latest live
-            target/weather/elevation; bearing is the shot direction (north =
-            0°).
-          </div>
-          <div class="form-row" style="margin-top: 13px">
-            <label class="field">Horizontal yards
-              <input id="manualYards" type="number" inputmode="decimal" placeholder="165" /></label>
-            <label class="field">Optional club
-              <select id="manualClub"></select>
-            </label>
-          </div>
-          <div class="form-row">
-            <label class="field">Shot bearing °
-              <input id="manualBearing" type="number" inputmode="decimal" placeholder="0" /></label>
-            <label class="field">Elevation change ft
-              <input id="manualElevDiff" type="number" inputmode="decimal" placeholder="0" /></label>
-          </div>
-          <div class="form-row">
-            <label class="field">Course altitude ft
-              <input id="manualAltitude" type="number" inputmode="decimal" placeholder="0" /></label>
-            <label class="field">Temp °F
-              <input id="manualTemp" type="number" inputmode="decimal" placeholder="70" /></label>
-          </div>
-          <div class="form-row">
-            <label class="field">Humidity %
-              <input id="manualRh" type="number" inputmode="decimal" placeholder="50" /></label>
-            <label class="field">Wind mph
-              <input id="manualWindSpeed" type="number" inputmode="decimal" placeholder="0" /></label>
-          </div>
-          <div class="form-row">
-            <label class="field">Wind from °
-              <input id="manualWindDir" type="number" inputmode="decimal" placeholder="0" /></label>
-            <label class="field" style="justify-content: end"><button class="ghost-btn" id="prefillBtn" type="button">
-                Use live data
-              </button></label>
-          </div>
-          <button class="primary-btn" id="manualCalcBtn">
-            Calculate plays-like
-          </button>
-        </div>
-        <div class="card rec-card">
-          <div class="rec-main" id="manualRec">Enter a shot</div>
-          <div class="rec-sub" id="manualRecSub">
-            Manual recommendation appears here.
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title">
-            <h3>Breakdown</h3>
-          </div>
-          <div class="breakdown" id="manualBreakdown">
-            <div class="empty">No manual calculation yet.</div>
-          </div>
+          <label class="field">
+            Course
+            <select id="planCourseSelect">
+              <option value="">Choose a course…</option>
+            </select>
+          </label>
           <div class="hint" style="margin-top: 8px">
-            Lie is assumed neutral/fairway (0 yd) — no reliable free
-            auto-detection exists.
+            Study every hole before you play — suggested club sequences,
+            marked hazards and green shape, straight from your saved
+            courses. Fully offline.
           </div>
         </div>
+
+        <div id="planCourseCard" hidden>
+          <div class="card">
+            <div class="card-title">
+              <h3 id="planCourseName">Course</h3>
+              <span class="chip" id="planCourseMeta">—</span>
+            </div>
+            <div class="plan-hole-list" id="planHoleList"></div>
+          </div>
+
+          <div class="card plan-detail-card" id="planDetailCard" hidden>
+            <div class="card-title">
+              <h3 id="planDetailTitle">Hole</h3>
+            </div>
+            <div id="planDetailBody"></div>
+          </div>
+        </div>
+
+        <!-- ===== MANUAL CALCULATOR (preserved) ===== -->
+        <details class="howto" style="margin-top: 4px">
+          <summary>Manual plays-like calculator</summary>
+          <div style="margin-top: 10px">
+            <div class="card compact">
+              <div class="card-title">
+                <h3>Shot Calc</h3>
+                <span class="chip">Manual</span>
+              </div>
+              <div class="hint">
+                Enter the number you know and Caddy adds the plays-like math.
+                Leave fields blank to pull the latest live
+                target/weather/elevation; bearing is the shot direction (north =
+                0°).
+              </div>
+              <div class="form-row" style="margin-top: 13px">
+                <label class="field">Horizontal yards
+                  <input id="manualYards" type="number" inputmode="decimal" placeholder="165" /></label>
+                <label class="field">Optional club
+                  <select id="manualClub"></select>
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="field">Shot bearing °
+                  <input id="manualBearing" type="number" inputmode="decimal" placeholder="0" /></label>
+                <label class="field">Elevation change ft
+                  <input id="manualElevDiff" type="number" inputmode="decimal" placeholder="0" /></label>
+              </div>
+              <div class="form-row">
+                <label class="field">Course altitude ft
+                  <input id="manualAltitude" type="number" inputmode="decimal" placeholder="0" /></label>
+                <label class="field">Temp °F
+                  <input id="manualTemp" type="number" inputmode="decimal" placeholder="70" /></label>
+              </div>
+              <div class="form-row">
+                <label class="field">Humidity %
+                  <input id="manualRh" type="number" inputmode="decimal" placeholder="50" /></label>
+                <label class="field">Wind mph
+                  <input id="manualWindSpeed" type="number" inputmode="decimal" placeholder="0" /></label>
+              </div>
+              <div class="form-row">
+                <label class="field">Wind from °
+                  <input id="manualWindDir" type="number" inputmode="decimal" placeholder="0" /></label>
+                <label class="field" style="justify-content: end"><button class="ghost-btn" id="prefillBtn" type="button">
+                    Use live data
+                  </button></label>
+              </div>
+              <button class="primary-btn" id="manualCalcBtn">
+                Calculate plays-like
+              </button>
+            </div>
+            <div class="card rec-card">
+              <div class="rec-main" id="manualRec">Enter a shot</div>
+              <div class="rec-sub" id="manualRecSub">
+                Manual recommendation appears here.
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">
+                <h3>Breakdown</h3>
+              </div>
+              <div class="breakdown" id="manualBreakdown">
+                <div class="empty">No manual calculation yet.</div>
+              </div>
+              <div class="hint" style="margin-top: 8px">
+                Lie is assumed neutral/fairway (0 yd) — no reliable free
+                auto-detection exists.
+              </div>
+            </div>
+          </div>
+        </details>
       </section>
 
       <!-- ROUND -->
@@ -784,10 +826,10 @@
       </button>
       <button class="tab-btn" data-tab="shot">
         <svg viewBox="0 0 24 24" fill="none">
-          <path d="M4 19c7-1 12-6 16-14" stroke="currentColor" stroke-linecap="round" />
-          <path d="M14 5h6v6" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M6 19h.01" stroke="currentColor" stroke-linecap="round" />
-        </svg>Shot
+          <path d="M9 21V4l10 4-10 4" stroke="currentColor" stroke-linecap="round"
+            stroke-linejoin="round" />
+          <path d="M6 21h6" stroke="currentColor" stroke-linecap="round" />
+        </svg>Plan
       </button>
       <button class="tab-btn" data-tab="round">
         <svg viewBox="0 0 24 24" fill="none">

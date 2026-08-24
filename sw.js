@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.31'; // perf: pre-warmed trajectory model, GPS-recalc throttle, coarser elevation cache, relaxed solver tolerance
+const CACHE_VERSION = 'v1.0.32'; // feat: hole planner on the Plan tab (offline prep), manual calc collapsed beneath it
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
