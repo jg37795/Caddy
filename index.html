@@ -110,36 +110,6 @@
   </div>
 
   <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" aria-hidden="true">
-            <path fill="#ffffff" fill-rule="evenodd"
-              d="M12 3.9a5.15 5.15 0 1 1 0 10.3 5.15 5.15 0 0 1 0-10.3ZM10.2 6.55a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9Zm3.6 0a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM12 9.85a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM10.65 14.9h2.7c-.12.95-.42 1.85-.88 2.33-.26.28-.66.28-.92 0-.46-.48-.78-1.38-.9-2.33Z" />
-          </svg>
-        </div>
-        <div>
-          <h1>Caddy</h1>
-          <div class="sub" id="topSubtitle">
-            Personal golf caddy · all local
-          </div>
-        </div>
-      </div>
-      <div class="top-actions">
-        <label class="toggle" title="Pro Mode">
-          <input id="proToggle" type="checkbox" />
-          <span class="switch"></span>
-          <span class="hide-sm">Pro</span>
-        </label>
-        <button class="icon-btn" id="darkToggle" title="Dark mode" aria-label="Toggle dark mode">
-          <svg viewBox="0 0 24 24" width="21" height="21" fill="none">
-            <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z" stroke="currentColor" stroke-width="2"
-              stroke-linejoin="round" />
-          </svg>
-        </button>
-      </div>
-    </header>
-
     <main class="main">
       <!-- RANGE FINDER -->
       <section id="rangeScreen" class="screen active">
@@ -564,6 +534,7 @@
 
       <!-- CLUBS -->
       <section id="clubsScreen" class="screen">
+        <h1 class="large-title">Bag</h1>
         <div class="card">
           <div class="card-title">
             <h2>Clubs</h2>
@@ -592,6 +563,7 @@
 
       <!-- PLANNER (formerly Shot Calc — calculator lives below, collapsed) -->
       <section id="shotScreen" class="screen">
+        <h1 class="large-title">Prep</h1>
         <!-- ===== HOLE PLANNER ===== -->
         <div class="card">
           <div class="card-title">
@@ -703,6 +675,7 @@
 
       <!-- ROUND -->
       <section id="roundScreen" class="screen">
+        <h1 class="large-title">Round</h1>
         <div class="card" id="roundSessionCard">
           <div class="round-hole-strip" id="roundHoleStrip" hidden>
             <div class="round-hole-strip-top">
@@ -741,8 +714,8 @@
             </button>
             </div>
             <label class="field" id="roundTeePickerWrap" style="margin-top: 10px" hidden>
-            Tee set
-            <select id="roundTeePicker"></select>
+            Tee box
+            <div id="roundTeePicker" class="tee-chip-row"></div>
             </label>
             <button class="danger-btn" id="roundEndBtn" type="button" style="width: 100%; margin-top: 8px; display: none">
             End round
@@ -786,6 +759,7 @@
 
       <!-- STATS -->
       <section id="statsScreen" class="screen">
+        <h1 class="large-title">Stats</h1>
         <div class="card">
           <div class="card-title">
             <h2>Stats</h2>
@@ -933,8 +907,8 @@
 
     <div class="round-setup-head">
       <div>
-        <h2>Start a round</h2>
-        <p>Choose a saved course, find a nearby course, or create one manually.</p>
+        <h2>New round</h2>
+        <p>Pick a course, choose your tees, go.</p>
       </div>
 
       <button class="icon-btn" id="roundSetupCloseBtn" type="button" aria-label="Close round setup">
@@ -942,14 +916,62 @@
       </button>
     </div>
 
-    <label class="field">
+    <div class="setup-section-label">Course</div>
+    <div class="saved-course-list" id="savedCourseList"></div>
+
+    <label class="field" hidden>
       Saved course
       <select id="roundSetupCourseSelect">
         <option value="">New casual round</option>
       </select>
     </label>
 
-    <div class="course-recognition" id="courseRecognition">
+    <div class="form-row" style="margin-top: 14px">
+      <label class="field">
+        Course name
+        <input id="roundSetupCourseName" type="text" maxlength="80" placeholder="e.g. Pine Valley Golf Club" />
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label class="field" id="teeNameField">
+        Tee box
+        <input id="roundSetupTeeName" type="text" maxlength="40" placeholder="e.g. Blue tees" />
+      </label>
+
+      <label class="field" id="teeSetPickerWrap" hidden>
+        Tee box
+        <div id="teeSetPicker" class="tee-chip-row"></div>
+      </label>
+
+      <label class="field">
+        Start on hole
+        <select id="roundSetupStartHole"></select>
+      </label>
+    </div>
+
+    <div class="seg-holes" role="group" aria-label="Course length">
+      <button class="holes-opt active" id="setupEighteenBtn" type="button" aria-pressed="true">
+        18 holes
+      </button>
+      <button class="holes-opt" id="setupNineBtn" type="button" aria-pressed="false">
+        9 holes
+      </button>
+    </div>
+
+    <details id="scorecardEditor" style="margin-top: 12px">
+      <summary>Edit pars &amp; yardages</summary>
+      <div class="round-setup-title-row">
+        <div>
+          <strong>Course scorecard</strong>
+          <span>Set par and optional tee yardage for each hole.</span>
+        </div>
+      </div>
+      <div class="round-setup-holes" id="roundSetupPars"></div>
+    </details>
+
+    <details class="course-recognition" id="courseRecognition" style="margin-top: 10px">
+      <summary>Find a nearby course</summary>
       <div class="course-recognition-head">
         <div>
           <strong>Nearby courses</strong>
@@ -968,45 +990,7 @@
       </label>
 
       <div class="nearby-course-list" id="nearbyCourseList"></div>
-    </div>
-
-    <div class="form-row" style="margin-top: 12px">
-      <label class="field">
-        Course name
-        <input id="roundSetupCourseName" type="text" maxlength="80" placeholder="e.g. Pine Valley Golf Club" />
-      </label>
-
-      <label class="field">
-        Tee box
-        <input id="roundSetupTeeName" type="text" maxlength="40" placeholder="e.g. Blue tees" />
-      </label>
-    </div>
-
-    <div class="seg-holes" role="group" aria-label="Course length">
-      <button class="holes-opt active" id="setupEighteenBtn" type="button" aria-pressed="true">
-        18 holes
-      </button>
-      <button class="holes-opt" id="setupNineBtn" type="button" aria-pressed="false">
-        9 holes
-      </button>
-    </div>
-
-    <label class="field">
-      Start on hole
-      <select id="roundSetupStartHole"></select>
-    </label>
-
-    <div class="round-setup-title-row">
-      <div>
-        <strong>Course scorecard</strong>
-        <span>Set par and optional tee yardage for each hole.</span>
-      </div>
-    </div>
-    <label class="field" id="teeSetPickerWrap" hidden>
-      Tee set (imported)
-      <select id="teeSetPicker"></select>
-    </label>
-    <div class="round-setup-holes" id="roundSetupPars"></div>
+    </details>
 
     <label class="toggle round-save-course-toggle">
       <input id="roundSetupSaveCourse" type="checkbox" checked />
@@ -1152,14 +1136,19 @@
     </div>
     <div class="settings-row">
       <div>
-        <div class="lbl">Dark appearance</div>
+        <div class="lbl">Appearance</div>
         <div class="desc">
-          Per-session — Caddy always launches dark. Map style is set
-          separately on the map.
+          Auto follows your phone's light or dark setting.
         </div>
       </div>
-      <label class="toggle" title="Dark mode"><input id="darkToggleSheet" type="checkbox" /><span
-          class="switch"></span></label>
+      <div class="seg" id="themeSeg" role="radiogroup" aria-label="Appearance">
+        <button class="seg-opt" data-theme="light" type="button"
+          aria-checked="false">Light</button>
+        <button class="seg-opt active" data-theme="dark" type="button"
+          role="radio" aria-checked="true">Dark</button>
+        <button class="seg-opt" data-theme="auto" type="button"
+          role="radio" aria-checked="false">Auto</button>
+      </div>
     </div>
     <div class="settings-row">
       <div>

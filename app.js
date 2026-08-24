@@ -55,11 +55,7 @@
 
   const els = {
     manifestLink: $('manifestLink'),
-    topSubtitle: $('topSubtitle'),
-    proToggle: $('proToggle'),
-    darkToggle: $('darkToggle'),
     proToggleSheet: $('proToggleSheet'),
-    darkToggleSheet: $('darkToggleSheet'),
     settingsBtn: $('settingsBtn'),
     recenterBtn: $('recenterBtn'),
     settingsSheet: $('settingsSheet'),
@@ -272,7 +268,7 @@
 
   const state = {
     prefs: load('caddy:prefs', {
-      dark: true,
+      theme: 'dark',
       pro: false,
       selectedClubId: '',
       activeTab: 'range',
@@ -864,17 +860,32 @@
     }
   }
 
+  // ---- Theme: light / dark / auto (follows the OS) ----------------------
+  const THEME_MEDIA = window.matchMedia
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : null;
+  let systemDark = !!(THEME_MEDIA && THEME_MEDIA.matches);
+
+  function resolvedDark() {
+    if (!THEME_MEDIA) return true; // matchMedia unavailable → stay dark
+    const t =
+      state.prefs.theme === 'auto'
+        ? 'auto'
+        : state.prefs.theme === 'light'
+          ? 'light'
+          : 'dark';
+    return t === 'auto' ? systemDark : t === 'dark';
+  }
+
   function applyPrefs() {
-    document.body.classList.toggle('dark', !!state.prefs.dark);
-    document.documentElement.style.backgroundColor = state.prefs.dark
+    const dark = resolvedDark();
+    document.body.classList.toggle('dark', dark);
+    document.documentElement.style.backgroundColor = dark
       ? '#07100b'
       : '#f5f7f4';
-    document.documentElement.style.colorScheme = state.prefs.dark
-      ? 'dark'
-      : 'light';
-    els.proToggle.checked = !!state.prefs.pro;
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     els.proToggleSheet.checked = !!state.prefs.pro;
-    els.darkToggleSheet.checked = !!state.prefs.dark;
+    syncThemeSeg();
     const dispersionToggle = $('dispersionToggle');
     if (dispersionToggle) {
       dispersionToggle.checked = state.prefs.dispersionZone !== false;
@@ -882,7 +893,7 @@
     els.proBreakdownWrap.style.display = state.prefs.pro ? 'block' : 'none';
     els.themeColorMeta.setAttribute(
       'content',
-      state.prefs.dark ? '#07100b' : '#0f7a43'
+      dark ? '#07100b' : '#0f7a43'
     );
     save('caddy:prefs', state.prefs);
     if (state.sheet) requestAnimationFrame(() => state.sheet.measure());
@@ -892,10 +903,19 @@
     applyPrefs();
     if (state.lastCalc) renderBreakdown(state.lastCalc, els.rangeBreakdown);
   }
-  function setDark(on) {
-    state.prefs.dark = on;
+  function setTheme(theme) {
+    const t = ['light', 'dark', 'auto'].includes(theme) ? theme : 'dark';
+    state.prefs.theme = t;
     applyPrefs();
     haptic(5);
+  }
+  function syncThemeSeg() {
+    document.querySelectorAll('#themeSeg .seg-opt').forEach((b) => {
+      const on = b.dataset.theme === state.prefs.theme;
+      b.classList.toggle('active', on);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(on));
+    });
   }
   function applyMode() {
     const m = state.prefs.mode || 'golf';
@@ -984,13 +1004,16 @@
       .forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
     $(map[tab] || 'rangeScreen').classList.add('active');
     const titles = {
-      range: 'Tap map for live yardage',
-      round: 'Scorecard',
-      clubs: 'Your bag · stock carries',
-      shot: 'Course prep & planning',
-      stats: 'Local round stats',
+      range: 'Play',
+      round: 'Round',
+      clubs: 'Bag',
+      shot: 'Prep',
+      stats: 'Stats',
     };
-    els.topSubtitle.textContent = titles[tab] || 'Personal golf caddy';
+    const activeSection = $(map[tab] || 'rangeScreen');
+    const bigTitle =
+      activeSection && activeSection.querySelector('.large-title');
+    if (bigTitle) bigTitle.textContent = titles[tab] || '';
     if (tab === 'range') {
       initMap();
       closeWindPop();
@@ -3111,39 +3134,45 @@
     haptic(6);
   }
 
-  // Mid-round tee-set switcher: re-applies an imported tee set onto the
-  // LIVE round course (per-hole yardages, tee points, per-tee pars), then
-  // refreshes everything that displays them. Only rendered when the course
-  // actually carries 2+ imported tee sets.
+  // Mid-round tee-box chips: re-apply an imported tee set onto the LIVE
+  // round course (per-hole yardages, tee points, per-tee pars), then
+  // refresh everything that displays them. Shown whenever the course
+  // carries at least one imported tee set.
   function renderRoundTeePicker() {
     const wrap = document.getElementById('roundTeePickerWrap');
-    const sel = document.getElementById('roundTeePicker');
-    if (!wrap || !sel) return;
+    const row = document.getElementById('roundTeePicker');
+    if (!wrap || !row) return;
     const course = getCurrentCourse();
-    const sets = course && Array.isArray(course.teeSets) ? course.teeSets : [];
-    if (!state.roundSession || sets.length < 2) {
+    const sets =
+      course && Array.isArray(course.teeSets) ? course.teeSets : [];
+    if (!state.roundSession || !sets.length) {
       wrap.hidden = true;
-      sel.onchange = null;
       return;
     }
     wrap.hidden = false;
-    sel.innerHTML = sets
-      .map(
-        (t) =>
-          `<option value="${escapeHtml(t.name)}"${t.name === course.activeTeeSet ? ' selected' : ''
-          }>${escapeHtml(t.name)}</option>`
-      )
+    row.innerHTML = sets
+      .map((t) => {
+        const on = t.name === course.activeTeeSet;
+        return `<button type="button" class="tee-chip${on ? ' active' : ''}"
+          data-tee="${escapeHtml(t.name)}" aria-pressed="${on}">${escapeHtml(
+          t.name
+        )}</button>`;
+      })
       .join('');
-    sel.onchange = () => {
-      const updated = applyTeeSet(course, sel.value);
-      state.roundSession.course = updated;
-      saveRoundSession();
-      state.holeGeoKey = null; // force this hole's geometry to re-apply
-      renderRoundShotUI();
-      renderRound();
-      setNotice(`Playing from ${updated.teeName}.`, 'greenish');
-      haptic(6);
-    };
+    row.querySelectorAll('.tee-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        if (chip.dataset.tee === course.activeTeeSet) return;
+        const updated = applyTeeSet(course, chip.dataset.tee);
+        state.roundSession.course = updated;
+        saveRoundSession();
+        rememberCourseTees(updated);
+        state.holeGeoKey = null; // force this hole's geometry to re-apply
+        renderRoundShotUI();
+        renderRound();
+        setNotice(`Playing from ${updated.teeName}.`, 'greenish');
+        haptic(6);
+      });
+    });
   }
   function renderRoundHoleHeader() {
     if (!els.roundHoleStrip) return;
@@ -3648,26 +3677,22 @@
 
     renderRoundSetupCourseSelect();
     renderRoundSetupStartHoleOptions();
+    renderSavedCourseList();
 
-    els.roundSetupCourseName.value =
-      savedSetup.courseName || 'Casual Round';
-
-    els.roundSetupTeeName.value =
-      savedSetup.teeName || 'Default tees';
+    // Fresh sheet: nothing pre-selected. Saved-course cards are the
+    // primary path; typing a name is the casual path.
+    state.selectedCourseTemplate = null;
+    els.roundSetupCourseName.value = '';
+    els.roundSetupTeeName.value = 'Default tees';
 
     els.roundSetupStartHole.value = String(
       clamp(Math.round(num(savedSetup.startHole, 1)), 1, 18)
     );
 
-    els.roundSetupSaveCourse.checked =
-      !!savedSetup.courseName &&
-      savedSetup.courseName !== 'Casual Round';
+    els.roundSetupSaveCourse.checked = true;
 
-    renderRoundSetupHoles(
-      Array.isArray(savedSetup.holes)
-        ? savedSetup.holes
-        : defaultCourseHoles()
-    );
+    renderTeeSetPicker(null);
+    renderRoundSetupHoles(defaultCourseHoles());
 
     renderNearbyCourses();
 
@@ -3720,6 +3745,109 @@
             )} · ${escapeHtml(course.teeName || 'Default tees')}</option>`
         )
         .join('');
+  }
+
+  // Saved-course cards for the New-round sheet — the primary way to start.
+  // One card per course (tees are a property of the course, not a second
+  // profile); tapping loads name, tees and scorecard in one go.
+  function renderSavedCourseList() {
+    const list = document.getElementById('savedCourseList');
+    if (!list) return;
+
+    const profiles = Array.isArray(state.courseProfiles)
+      ? state.courseProfiles
+      : [];
+
+    if (!profiles.length) {
+      list.innerHTML =
+        '<div class="saved-courses-empty">No saved courses yet — find one below or just type a name.</div>';
+      return;
+    }
+
+    const sorted = [...profiles].sort((a, b) =>
+      String(a.name || '').localeCompare(String(b.name || ''))
+    );
+    const sel = state.selectedCourseTemplate;
+
+    list.innerHTML = sorted
+      .map((course) => {
+        const selected = !!sel && sel.id === course.id;
+        const holes = Number(course.holesCount) === 9 ? '9 holes' : '18 holes';
+        return `
+          <button class="saved-course-card${selected ? ' selected' : ''}"
+            type="button" data-id="${escapeHtml(course.id)}">
+            <span class="sc-name">${escapeHtml(course.name)}</span>
+            <span class="sc-meta">${escapeHtml(
+              course.teeName || 'Default tees'
+            )} · ${holes}</span>
+          </button>`;
+      })
+      .join('');
+
+    list.querySelectorAll('.saved-course-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const found = profiles.find((c) => c.id === card.dataset.id);
+        if (found) selectSavedCourse(found);
+      });
+    });
+  }
+
+  // Tee boxes the player used before, keyed by course name — so returning
+  // to a course auto-sets the same tees everywhere (map geometry,
+  // yardages, scorecard).
+  function rememberCourseTees(course) {
+    if (!course || !String(course.name || '').trim()) return;
+    try {
+      const mem = load('caddy:courseTees', {});
+      mem[String(course.name).trim().toLowerCase()] = {
+        teeName: course.teeName || '',
+        activeTeeSet: course.activeTeeSet || null,
+        at: Date.now(),
+      };
+      save('caddy:courseTees', mem);
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  function selectSavedCourse(saved) {
+    if (!saved) return;
+    const course = normalizeCourse({ ...saved });
+
+    state.selectedNearbyCourse = null;
+    state.selectedCourseTemplate = course;
+    applyTemplateHoleCount(course);
+
+    // Auto-apply tees: what this player used last time here, else the
+    // course's own active set. With ≥1 imported set this restores real
+    // tee points and yardages — not just the label.
+    let preferredTee = course.activeTeeSet || null;
+    try {
+      const mem = load('caddy:courseTees', {})[
+        String(course.name).trim().toLowerCase()
+      ];
+      if (mem && mem.activeTeeSet) preferredTee = mem.activeTeeSet;
+    } catch {
+      /* best-effort */
+    }
+    if (Array.isArray(course.teeSets) && course.teeSets.length && preferredTee) {
+      applyTeeSet(course, preferredTee);
+    }
+
+    els.roundSetupCourseSelect.value = course.id;
+    els.roundSetupCourseName.value = course.name;
+    els.roundSetupSaveCourse.checked = true;
+
+    renderRoundSetupHoles(course.holes);
+    renderTeeSetPicker(course);
+    renderSavedCourseList();
+
+    if (els.nearbyCourseStatus) {
+      els.nearbyCourseStatus.textContent = `${course.name} · ${
+        course.teeName || 'Default tees'
+      }`;
+    }
+    haptic(8);
   }
 
   function renderRoundSetupHoles(holes) {
@@ -3855,10 +3983,14 @@
   function saveCourseProfile(course) {
     const normalized = normalizeCourse(course);
 
+    // One profile per COURSE — tees are a property of the course (the
+    // active tee set), never part of its identity. Deduping on name+tee
+    // used to fork duplicate profiles per tee box, and name-only lookups
+    // then restored whichever copy came first: wrong yardages, wrong
+    // tee points.
     const existingIndex = state.courseProfiles.findIndex(
       (item) =>
-        item.name.toLowerCase() === normalized.name.toLowerCase() &&
-        item.teeName.toLowerCase() === normalized.teeName.toLowerCase()
+        item.name.toLowerCase() === normalized.name.toLowerCase()
     );
 
     if (existingIndex >= 0) {
@@ -3954,33 +4086,57 @@
     });
   }
 
+  // Tee-box chips: shown whenever a course carries ANY imported tee set
+  // (not just 2+). Replaces both the old dropdown and the free-text tee
+  // field when active — one control, same choice everywhere.
   function renderTeeSetPicker(course) {
     const wrap = document.getElementById('teeSetPickerWrap');
-    const sel = document.getElementById('teeSetPicker');
-    if (!wrap || !sel) return;
+    const row = document.getElementById('teeSetPicker');
+    if (!wrap || !row) return;
 
-    const sets = (course && course.teeSets) || [];
-    if (sets.length < 2) {
+    const sets =
+      course && Array.isArray(course.teeSets) ? course.teeSets : [];
+    if (!sets.length) {
       wrap.hidden = true;
+      syncTeeNameFieldVisibility();
       return;
     }
 
     wrap.hidden = false;
-    sel.innerHTML = sets
-      .map(
-        (t) =>
-          `<option value="${escapeHtml(t.name)}"${t.name === course.activeTeeSet ? ' selected' : ''
-          }>${escapeHtml(t.name)} · ${Object.keys(t.holes).length} holes</option>`
-      )
+    row.innerHTML = sets
+      .map((t) => {
+        const on = t.name === course.activeTeeSet;
+        return `<button type="button" class="tee-chip${on ? ' active' : ''}"
+          data-tee="${escapeHtml(t.name)}" aria-pressed="${on}">${escapeHtml(
+          t.name
+        )}</button>`;
+      })
       .join('');
 
-    sel.onchange = () => {
-      const updated = applyTeeSet(state.selectedCourseTemplate, sel.value);
-      state.selectedCourseTemplate = updated;
-      els.roundSetupTeeName.value = updated.teeName;
-      renderRoundSetupHoles(updated.holes);
-      haptic(5);
-    };
+    row.querySelectorAll('.tee-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const updated = applyTeeSet(
+          state.selectedCourseTemplate,
+          chip.dataset.tee
+        );
+        state.selectedCourseTemplate = updated;
+        els.roundSetupTeeName.value = updated.teeName;
+        renderRoundSetupHoles(updated.holes);
+        renderTeeSetPicker(updated);
+        rememberCourseTees(updated);
+        haptic(6);
+      });
+    });
+
+    syncTeeNameFieldVisibility();
+  }
+
+  // When chip pickers are visible they own the tee choice — the legacy
+  // free-text input steps aside instead of contradicting them.
+  function syncTeeNameFieldVisibility() {
+    const chipsVisible = !document.getElementById('teeSetPickerWrap')?.hidden;
+    const nameField = document.getElementById('teeNameField');
+    if (nameField) nameField.hidden = !!chipsVisible;
   }
 
   // Shared option-button markup for BOTH the geo-nearby list and the
@@ -4575,32 +4731,17 @@ out geom;`;
     const saved = getSavedCourseMatch(candidate.name);
 
     if (saved) {
-      const course = normalizeCourse({
+      // Same path as tapping a saved-course card: tees auto-apply from
+      // memory, scorecard renders, chips show.
+      selectSavedCourse({
         ...saved,
-
-        location:
-          saved.location || {
-            lat: state.selectedNearbyCourse.lat,
-            lng: state.selectedNearbyCourse.lng,
-          },
+        location: saved.location || {
+          lat: state.selectedNearbyCourse.lat,
+          lng: state.selectedNearbyCourse.lng,
+        },
       });
-
-      state.selectedCourseTemplate = course;
-      applyTemplateHoleCount(course);
-
-      els.roundSetupCourseSelect.value = course.id;
-      els.roundSetupCourseName.value = course.name;
-      els.roundSetupTeeName.value = course.teeName;
-      els.roundSetupSaveCourse.checked = true;
-
-      renderRoundSetupHoles(course.holes);
-      renderTeeSetPicker(course);
-
-      els.nearbyCourseStatus.textContent =
-        `Selected ${course.name}. Saved scorecard loaded.`;
-
+      els.nearbyCourseStatus.textContent = `Selected ${state.selectedCourseTemplate.name}. Saved scorecard loaded.`;
       renderNearbyCourses();
-      haptic(8);
       return;
     }
 
@@ -4860,9 +5001,9 @@ out geom;`;
       state.selectedCourseTemplate = null;
 
       if (!selectedId) {
-        els.roundSetupCourseName.value = 'Casual Round';
+        els.roundSetupCourseName.value = '';
         els.roundSetupTeeName.value = 'Default tees';
-        els.roundSetupSaveCourse.checked = false;
+        els.roundSetupSaveCourse.checked = true;
 
         state.setupHolesCount = 18;
         syncHolesCountUI();
@@ -4870,6 +5011,7 @@ out geom;`;
 
         renderRoundSetupHoles(defaultCourseHoles());
         renderTeeSetPicker(null);
+        renderSavedCourseList();
         renderNearbyCourses();
         return;
       }
@@ -4880,23 +5022,7 @@ out geom;`;
 
       if (!selected) return;
 
-      const course = normalizeCourse(selected);
-
-      state.selectedCourseTemplate = course;
-      applyTemplateHoleCount(course);
-
-      els.roundSetupCourseName.value = course.name;
-      els.roundSetupTeeName.value = course.teeName;
-      els.roundSetupSaveCourse.checked = true;
-
-      renderRoundSetupHoles(course.holes);
-      renderTeeSetPicker(course);
-
-      if (course.location) {
-        els.nearbyCourseStatus.textContent =
-          `Selected saved course: ${course.name}.`;
-      }
-
+      selectSavedCourse(selected);
       renderNearbyCourses();
     });
 
@@ -4918,9 +5044,11 @@ out geom;`;
 
       if (
         els.roundSetupSaveCourse.checked &&
+        course.name.trim() !== '' &&
         course.name !== 'Casual Round'
       ) {
         saveCourseProfile(course);
+        rememberCourseTees(course);
       }
 
       closeRoundSetup();
@@ -5521,9 +5649,9 @@ out geom;`;
     els.proToggleSheet.addEventListener('change', () =>
       setPro(els.proToggleSheet.checked)
     );
-    els.darkToggleSheet.addEventListener('change', () =>
-      setDark(els.darkToggleSheet.checked)
-    );
+    document.querySelectorAll('#themeSeg .seg-opt').forEach((b) => {
+      b.addEventListener('click', () => setTheme(b.dataset.theme));
+    });
     const dispersionToggle = $('dispersionToggle');
     if (dispersionToggle) {
       dispersionToggle.addEventListener('change', () => {
@@ -6297,10 +6425,6 @@ out geom;`;
   }
 
   function initGlobalEvents() {
-    els.proToggle.addEventListener('change', () =>
-      setPro(els.proToggle.checked)
-    );
-    els.darkToggle.addEventListener('click', () => setDark(!state.prefs.dark));
     els.gpsChip.addEventListener('click', () => {
       haptic(8);
       if (!state.gpsRunning) {
@@ -6569,7 +6693,7 @@ out geom;`;
         window.matchMedia('(display-mode: standalone)').matches) ||
       window.navigator.standalone
     ) {
-      els.topSubtitle.textContent = 'Standalone PWA';
+      // Standalone PWA — nothing to relabel now that the top bar is gone.
     }
     const aboutEl = $('aboutVersion');
     if (aboutEl) {
@@ -11705,6 +11829,52 @@ out geom;`;
       state.round = sRound; state.roundSession = sSession;
     }
 
+    // 16. Tee system: applyTeeSet rewrites yardages/tee points/pars,
+    // saveCourseProfile keeps ONE profile per course name across tees,
+    // and tee memory round-trips per course.
+    {
+      const sProfiles = state.courseProfiles;
+      try { localStorage.removeItem('caddy:courseTees'); } catch {}
+
+      const course = {
+        id: 'tee-test', name: 'Tee Test CC', teeName: 'Blue',
+        activeTeeSet: 'Blue', holesCount: 9,
+        holes: Array.from({ length: 9 }, (_, i) => ({
+          number: i + 1, par: 4, yards: 300,
+        })),
+        teeSets: [
+          { name: 'Blue', holes: { 1: { lat: 33.0, lng: -84.0, yards: 400 } } },
+          { name: 'White', holes: { 1: { lat: 33.001, lng: -84.0, yards: 360 } } },
+        ],
+      };
+      course.holes[0].parByTee = { White: 5 };
+
+      const applied = applyTeeSet(normalizeCourse(course), 'White');
+      const h1 = applied.holes[0];
+      ok('applyTeeSet swaps yardage + tee point',
+        h1.yards === 360 && h1.teePoint && h1.teePoint.lat === 33.001,
+        `yards=${h1.yards} tee=${h1.teePoint && h1.teePoint.lat}`);
+      ok('applyTeeSet applies per-tee par', h1.par === 5, `par=${h1.par}`);
+
+      // Saving the same course from two different tees must NOT fork
+      // duplicate profiles — one card per course.
+      state.courseProfiles = [];
+      saveCourseProfile(normalizeCourse({ ...course, teeName: 'Blue' }));
+      saveCourseProfile(normalizeCourse({ ...course, teeName: 'White' }));
+      ok('saveCourseProfile dedupes by course name',
+        state.courseProfiles.length === 1 &&
+        state.courseProfiles[0].teeName === 'White',
+        `profiles=${state.courseProfiles.length}`);
+
+      rememberCourseTees(applied);
+      const mem = load('caddy:courseTees', {})['tee test cc'];
+      ok('Tee memory persists per course',
+        !!mem && mem.activeTeeSet === 'White',
+        mem ? `set=${mem.activeTeeSet}` : 'missing');
+
+      state.courseProfiles = sProfiles;
+    }
+
     console.log(out.join('\n'));
     return out;
   };
@@ -12296,10 +12466,20 @@ out geom;`;
   if (els.roundResetStart)
     els.roundResetStart.addEventListener('click', resetPendingStart);
 
-  // Dark is the house look: EVERY launch starts dark. The settings toggle
-  // is a per-session override and is deliberately never persisted.
-  state.prefs.dark = true;
+  // Theme: 'dark' is the house default; Auto follows the OS. Persisted so
+  // the app opens the way the player left it.
+  if (!['light', 'dark', 'auto'].includes(state.prefs.theme)) {
+    state.prefs.theme = 'dark';
+  }
   save('caddy:prefs', state.prefs);
+
+  // React when the system flips under an Auto setting.
+  if (THEME_MEDIA && THEME_MEDIA.addEventListener) {
+    THEME_MEDIA.addEventListener('change', (e) => {
+      systemDark = e.matches;
+      applyPrefs();
+    });
+  }
 
   bootstrap();
 })();

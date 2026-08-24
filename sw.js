@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.39'; // ui: Round-tab premium pass — OUT/IN scorecard chips, live nine totals, current-hole marker, sticky group names
+const CACHE_VERSION = 'v1.0.40'; // ui: top bar retired (large titles, Light/Dark/Auto), tee system unified (chips + per-course memory), New-round sheet rebuilt
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
