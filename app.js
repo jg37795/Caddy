@@ -9656,6 +9656,9 @@ out geom;`;
       ? `${ci.n ? `${Math.round(ci.p * 100)}%` : '—'} (${Math.round(ci.lo * 100)}–${Math.round(ci.hi * 100)}%, n=${ci.n})`
       : '—';
 
+    // Hole count for labels/projections — matches the active course layout.
+    const roundLen = getCourseHoleCount();
+
     const rows = [
       ['Holes entered', `${s.played} / 18`],
       ['Avg score / hole', avgScore === null ? '—' : fmt(avgScore, 2)],

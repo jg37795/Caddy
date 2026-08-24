@@ -3038,24 +3038,6 @@ body.dark .plays-like-num.pl-short {
   color: #6cb2ff;
 }
 
-/* Glanceable tint: amber when conditions stretch the shot (take more club),
-   blue when they shorten it — matching the app's manage/easy language. */
-.plays-like-num.pl-long {
-  color: #d38713;
-}
-
-.plays-like-num.pl-short {
-  color: var(--blue);
-}
-
-body.dark .plays-like-num.pl-long {
-  color: #f5b14a;
-}
-
-body.dark .plays-like-num.pl-short {
-  color: #6cb2ff;
-}
-
 .plays-like-unit {
   font-size: 9.5px;
   font-weight: 800;
