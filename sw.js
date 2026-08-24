@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.29'; // JSON backup/restore, shot-log CSV, remembered putts default, haptic vocabulary
+const CACHE_VERSION = 'v1.0.30'; // fix: TDZ crash — BACKUP_KEYS read SHOTLOG_KEY before its declaration
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

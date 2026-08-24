@@ -5389,7 +5389,7 @@ out geom;`;
     ['prefs', 'caddy:prefs'],
     ['clubs', 'caddy:clubs'],
     ['courseProfiles', COURSE_PROFILES_KEY],
-    ['shotLog', SHOTLOG_KEY],           // routed through saveShotLog on restore (cache coherence)
+    ['shotLog', 'caddy:shotLog:v1'],    // literal on purpose: SHOTLOG_KEY is declared later in the file (Block 0), and reading it here would throw a TDZ ReferenceError at startup
     ['roundSession', 'caddy:roundSession'],
     ['round', 'caddy:round'],
     ['history', 'caddy:history'],
