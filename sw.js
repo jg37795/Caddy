@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.36'; // ui: Play/Score/Bag/Prep/Stats tab bar, paired SF-style icons, ball-and-tee brand mark
+const CACHE_VERSION = 'v1.0.37'; // ui: Play-tab premium pass — sliding-thumb green segment, set-dots, drag-fade fix, geocoder course search, Score tab renamed Round
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
