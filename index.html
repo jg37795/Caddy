@@ -399,14 +399,15 @@
                   </div>
                 </div>
                 <div class="fcb-seg" role="group" aria-label="Mark green edges">
-                  <button class="fcb-seg-btn" id="setFrontBtn" type="button">
-                    Front
+                  <span class="seg-thumb" aria-hidden="true"></span>
+                  <button class="fcb-seg-btn" id="setFrontBtn" type="button" aria-pressed="false">
+                    Front<span class="fcb-set-dot" data-dot="front" hidden></span>
                   </button>
-                  <button class="fcb-seg-btn" id="setCenterBtn" type="button">
-                    Middle
+                  <button class="fcb-seg-btn" id="setCenterBtn" type="button" aria-pressed="false">
+                    Middle<span class="fcb-set-dot" data-dot="center" hidden></span>
                   </button>
-                  <button class="fcb-seg-btn" id="setBackBtn" type="button">
-                    Back
+                  <button class="fcb-seg-btn" id="setBackBtn" type="button" aria-pressed="false">
+                    Back<span class="fcb-set-dot" data-dot="back" hidden></span>
                   </button>
                 </div>
 
@@ -424,10 +425,10 @@
                 </div>
 
                 <div class="fcb-actions" id="fcbActions">
-                  <button class="fcb-btn" id="restoreGreenBtn" type="button" disabled>
+                  <button class="fcb-btn quiet" id="restoreGreenBtn" type="button" disabled>
                     Restore Green
                   </button>
-                  <button class="fcb-btn clear" id="clearFbBtn" type="button">
+                  <button class="fcb-btn clear quiet" id="clearFbBtn" type="button">
                     Clear Green
                   </button>
                 </div>
@@ -853,7 +854,7 @@
         Play
       </button>
 
-      <!-- Score — the ONLY flag-free tab set member: scorecard rows -->
+      <!-- Round — the ONLY flag-free tab set member: scorecard rows -->
       <button class="tab-btn" data-tab="round">
         <span class="tab-ic" aria-hidden="true">
           <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -867,7 +868,7 @@
               d="M6.4 4.6h11.2a2.9 2.9 0 0 1 2.9 2.9v9a2.9 2.9 0 0 1-2.9 2.9H6.4a2.9 2.9 0 0 1-2.9-2.9v-9a2.9 2.9 0 0 1 2.9-2.9Zm3.9 3.9h7v1.8h-7V8.5Zm0 5.2h7v1.8h-7v-1.8Z" />
           </svg>
         </span>
-        Score
+        Round
       </button>
 
       <!-- Bag — golf bag with clubs peeking out -->

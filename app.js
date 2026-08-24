@@ -16,15 +16,17 @@
   const LAST_ROUND_SETUP_KEY = 'caddy:lastRoundSetup:v1';
   const NEARBY_COURSES_CACHE_KEY = 'caddy:nearbyCourses:v3';
   const NEARBY_COURSES_TTL = 6 * 60 * 60 * 1000;
-  // Course name search (round setup): Overpass regex lookup around the last
-  // known location. Radius-bounded on purpose — unbounded name queries
-  // reliably time out on public Overpass mirrors.
+  // Course name search (round setup): Photon geocoder FIRST (sub-second,
+  // built for free-text place lookup), Overpass regex lookup as automatic
+  // fallback. Radius-bounded on purpose — unbounded name queries reliably
+  // time out on public Overpass mirrors.
   const COURSE_SEARCH_RADIUS_M = 100000;
   const COURSE_SEARCH_MIN_CHARS = 3;
   const COURSE_SEARCH_DEBOUNCE_MS = 500;
   const COURSE_SEARCH_TTL_MS = 24 * 60 * 60 * 1000;
   const COURSE_SEARCH_FETCH_LIMIT = 60;   // fetched, sorted by distance, then trimmed…
   const COURSE_SEARCH_MAX_RESULTS = 12;   // …to this many displayed
+  const PHOTON_GEOCODER_URL = 'https://photon.komoot.io/api/';
   const LAST_PUTTS_KEY = 'caddy:lastPutts';
   const NEARBY_COURSE_RADIUS_M = 12000;
   const MAX_GPS_SPEED_MPS = 18;
@@ -1396,6 +1398,29 @@
     updateAdvice([], 'neutral');
     state.twoTapComplete = true;
   }
+  // One source of truth for the green segmented control's two states:
+  // data-place moves the sliding thumb to whichever point is being placed
+  // right now, and each button's set-dot + aria-pressed reflect whether its
+  // point exists on the map.
+  function syncFcbSeg() {
+    const seg = document.querySelector('.fcb-seg');
+    if (seg) {
+      if (state.placeMode) seg.setAttribute('data-place', state.placeMode);
+      else seg.removeAttribute('data-place');
+    }
+    els.setFrontBtn.setAttribute('aria-pressed', String(!!state.frontPt));
+    els.setCenterBtn.setAttribute('aria-pressed', String(!!state.greenCenter));
+    els.setBackBtn.setAttribute('aria-pressed', String(!!state.backPt));
+    const dots = [
+      [els.setFrontBtn.querySelector('.fcb-set-dot'), !!state.frontPt],
+      [els.setCenterBtn.querySelector('.fcb-set-dot'), !!state.greenCenter],
+      [els.setBackBtn.querySelector('.fcb-set-dot'), !!state.backPt],
+    ];
+    dots.forEach(([dot, on]) => {
+      if (dot) dot.hidden = !on;
+    });
+  }
+
   function armPlaceMode(mode) {
     if (!state.loc) {
       setNotice(
@@ -1405,18 +1430,14 @@
       return;
     }
     state.placeMode = state.placeMode === mode ? null : mode;
-    els.setFrontBtn.classList.toggle('armed', state.placeMode === 'front');
-    els.setCenterBtn.classList.toggle('armed', state.placeMode === 'center');
-    els.setBackBtn.classList.toggle('armed', state.placeMode === 'back');
+    syncFcbSeg();
     renderTeeRow();
     if (state.sheet) state.sheet.half();
     haptic(6);
   }
   function disarmPlaceMode() {
     state.placeMode = null;
-    els.setFrontBtn.classList.remove('armed');
-    els.setCenterBtn.classList.remove('armed');
-    els.setBackBtn.classList.remove('armed');
+    syncFcbSeg();
     renderTeeRow();
   }
 
@@ -2124,12 +2145,10 @@
     });
   }
   function renderFcb() {
-    // Persistent lit state: a segment stays tinted while its point is set,
-    // distinct from the solid .armed fill used while placing. The tee has
-    // its own dedicated row and is managed entirely by renderTeeRow().
-    els.setFrontBtn.classList.toggle('lit', !!state.frontPt);
-    els.setCenterBtn.classList.toggle('lit', !!state.greenCenter);
-    els.setBackBtn.classList.toggle('lit', !!state.backPt);
+    // Persistent "set" state now lives in the set-dots + aria-pressed
+    // (see syncFcbSeg). The tee has its own dedicated row and is managed
+    // entirely by renderTeeRow().
+    syncFcbSeg();
     renderTeeRow();
 
     // Tiles become tappable when their green reference exists; tapping
@@ -10416,9 +10435,82 @@ out geom;`;
   // metacharacters. Prevents both query breakage and regex injection.
   function osmEscapeQueryString(s) {
     return String(s)
-      .replace(/\\/g, '\\\\')
+      .replace(/\\\\/g, '\\\\\\\\')
       .replace(/"/g, '\\"')
       .replace(/([.*+?^${}()\[\]])/g, '\\$1');
+  }
+
+  // Free-text course lookup via Photon (komoot's OSM geocoder). Returns the
+  // same {id, osmType, osmId, name, lat, lng, source} shape the Overpass
+  // path produces, so both feed the shared select-and-import pipeline.
+  // Bias toward the player's location, but don't hard-reject distant
+  // matches — a typed name is intent.
+  async function photonCourseSearch(term, loc) {
+    const params = new URLSearchParams({
+      q: term,
+      limit: String(COURSE_SEARCH_MAX_RESULTS * 2),
+      lang: 'en',
+      // Ask Photon to pre-filter to golf courses; the client-side kind
+      // check below stays as a safety net.
+      osm_tag: 'leisure:golf_course',
+    });
+    if (loc) {
+      params.set('lat', loc.lat.toFixed(5));
+      params.set('lon', loc.lng.toFixed(5));
+    }
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(`${PHOTON_GEOCODER_URL}?${params}`, {
+        signal: ctrl.signal,
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      const features = Array.isArray(json.features) ? json.features : [];
+      const seen = new Set();
+      return features
+        .map((f) => {
+          const p = f.properties || {};
+          const c = f.geometry && f.geometry.coordinates;
+          const name = String(p.name || '').trim();
+          const kind = `${p.osm_key}:${p.osm_value}`;
+          if (
+            !name ||
+            !Array.isArray(c) ||
+            !Number.isFinite(Number(c[0])) ||
+            !Number.isFinite(Number(c[1])) ||
+            !/golf|sport|^leisure:(pitch|track)$/.test(kind)
+          ) {
+            return null;
+          }
+          return {
+            id: `osm:${p.osm_type || 'n'}:${p.osm_id}`,
+            osmType: p.osm_type || null,
+            osmId: Number(p.osm_id),
+            name,
+            lat: Number(c[1]),
+            lng: Number(c[0]),
+            source: 'openstreetmap',
+          };
+        })
+        .filter(Boolean)
+        .filter((course) => {
+          const key = `${course.name.toLowerCase()}|${course.lat.toFixed(4)}|${course.lng.toFixed(4)}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            haversineMeters(loc || { lat: 0, lng: 0 }, a) -
+            haversineMeters(loc || { lat: 0, lng: 0 }, b)
+        )
+        .slice(0, COURSE_SEARCH_MAX_RESULTS);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   function renderCourseSearchResults() {
@@ -10441,7 +10533,16 @@ out geom;`;
       els.nearbyCourseStatus.textContent =
         state.courseSearchError ||
         `No matches within ${Math.round(COURSE_SEARCH_RADIUS_M / 1000)} km.`;
-      els.nearbyCourseList.innerHTML = '';
+      els.nearbyCourseList.innerHTML = state.courseSearchError
+        ? '<button class="ghost-btn" id="courseSearchRetryBtn" type="button">Try again</button>'
+        : '';
+      const retryBtn = document.getElementById('courseSearchRetryBtn');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', () => {
+          state.courseSearchError = null;
+          runCourseSearch();
+        });
+      }
       return;
     }
 
@@ -10504,6 +10605,11 @@ out geom;`;
     renderCourseSearchResults();
 
     const { lat, lng } = state.loc;
+    const cacheKey =
+      OSM_CACHE_PREFIX +
+      `search:${COURSE_SEARCH_RADIUS_M}:${lat.toFixed(2)},${lng.toFixed(
+        2
+      )}:${term.toLowerCase()}`;
     const pat = osmEscapeQueryString(term);
     const query = `
     [out:json][timeout:20];
@@ -10515,54 +10621,59 @@ out geom;`;
   `;
 
     try {
-      const data = await overpassFetch(query, {
-        timeoutMs: 25000,
-        cacheKey:
-          OSM_CACHE_PREFIX +
-          `search:${COURSE_SEARCH_RADIUS_M}:${lat.toFixed(2)},${lng.toFixed(
-            2
-          )}:${term.toLowerCase()}`,
-        cacheTtlMs: COURSE_SEARCH_TTL_MS,
-      });
+      let results = [];
+      try {
+        results = await photonCourseSearch(term, state.loc);
+      } catch (photonError) {
+        console.warn('Photon search failed, falling back to Overpass:', photonError);
+      }
 
-      const seen = new Set();
-      const results = (Array.isArray(data) ? data : [])
-        .map((item) => {
-          const name = String(item.tags?.name || '').trim();
-          const point = item.center || item;
+      if (!results.length) {
+        const data = await overpassFetch(query, {
+          timeoutMs: 12000,
+          cacheKey,
+          cacheTtlMs: COURSE_SEARCH_TTL_MS,
+        });
 
-          if (
-            !name ||
-            !Number.isFinite(Number(point.lat)) ||
-            !Number.isFinite(Number(point.lon))
-          ) {
-            return null;
-          }
+        const seen = new Set();
+        results = (Array.isArray(data) ? data : [])
+          .map((item) => {
+            const name = String(item.tags?.name || '').trim();
+            const point = item.center || item;
 
-          return {
-            id: `osm:${item.type}:${item.id}`,
-            osmType: item.type,
-            osmId: Number(item.id),
-            name,
-            lat: Number(point.lat),
-            lng: Number(point.lon),
-            source: 'openstreetmap',
-          };
-        })
-        .filter(Boolean)
-        .filter((course) => {
-          const key = `${course.name.toLowerCase()}|${course.lat.toFixed(
-            4
-          )}|${course.lng.toFixed(4)}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        })
-        .sort(
-          (a, b) =>
-            haversineMeters(state.loc, a) - haversineMeters(state.loc, b)
-        )
-        .slice(0, COURSE_SEARCH_MAX_RESULTS);
+            if (
+              !name ||
+              !Number.isFinite(Number(point.lat)) ||
+              !Number.isFinite(Number(point.lon))
+            ) {
+              return null;
+            }
+
+            return {
+              id: `osm:${item.type}:${item.id}`,
+              osmType: item.type,
+              osmId: Number(item.id),
+              name,
+              lat: Number(point.lat),
+              lng: Number(point.lon),
+              source: 'openstreetmap',
+            };
+          })
+          .filter(Boolean)
+          .filter((course) => {
+            const key = `${course.name.toLowerCase()}|${course.lat.toFixed(
+              4
+            )}|${course.lng.toFixed(4)}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .sort(
+            (a, b) =>
+              haversineMeters(state.loc, a) - haversineMeters(state.loc, b)
+          )
+          .slice(0, COURSE_SEARCH_MAX_RESULTS);
+      }
 
       // Drop the answer if the query it belongs to is no longer current.
       if (mySeq !== state._courseSearchSeq) return;
@@ -10574,7 +10685,7 @@ out geom;`;
       state.courseSearchResults = [];
       state.courseSearchError =
         error && error.name === 'AbortError'
-          ? 'Name search timed out — try again.'
+          ? 'Search is taking too long right now.'
           : 'Name search is unavailable right now.';
     } finally {
       if (mySeq === state._courseSearchSeq) {

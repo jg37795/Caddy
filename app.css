@@ -2445,7 +2445,7 @@ body[data-dragging='1'] .fcb-block {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 7px;
-  padding: 6px 4px 8px;
+  padding: 4px 4px 6px;
 }
 
 .fcb {
@@ -2524,9 +2524,10 @@ body.dark .fcb.clickable:hover {
 }
 
 .fcb-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
   padding: 0 4px 8px;
 }
 
@@ -2536,7 +2537,7 @@ body.dark .fcb.clickable:hover {
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  padding: 2px 6px 7px;
+  padding: 0 6px 5px;
 }
 
 .fcb-group-title {
@@ -2565,6 +2566,7 @@ body.dark .fcb.clickable:hover {
   padding: 3px;
   border-radius: 14px;
   background: rgba(127, 127, 127, 0.14);
+  position: relative;
 }
 
 body.dark .fcb-seg {
@@ -2572,7 +2574,13 @@ body.dark .fcb-seg {
 }
 
 .fcb-seg-btn {
+  position: relative;
+  z-index: 1;
   min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 0;
   border-radius: 11px;
   padding: 8px 6px;
@@ -2580,7 +2588,8 @@ body.dark .fcb-seg {
   color: var(--glass-text);
   font-weight: 850;
   font-size: 12.5px;
-  transition: background 0.22s ease, color 0.22s ease,
+  opacity: 0.62;
+  transition: opacity 0.22s ease, color 0.22s ease,
     transform 0.15s var(--spring-snappy);
 }
 
@@ -2588,54 +2597,72 @@ body.dark .fcb-seg {
   transform: scale(0.96);
 }
 
-/* Armed segment fills with the matching dot color (Front emerald,
-   Middle green, Back amber). */
-.fcb-seg-btn.armed {
-  box-shadow: 0 2px 8px rgba(20, 45, 30, 0.22);
+/* Sliding thumb — placement state reads as POSITION (the white pill moves
+   to whichever segment is placing a point), never as a color flood.
+   GPU-only transform, same pattern as the map-layer switcher. */
+.fcb-seg > .seg-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: 11px;
+  background: var(--card-solid);
+  box-shadow:
+    0 3px 8px rgba(20, 45, 30, 0.18),
+    0 0 0 0.5px rgba(20, 45, 30, 0.04);
+  transform: translateX(0);
+  transition: transform 0.32s var(--spring-snappy);
+  pointer-events: none;
 }
 
-#setFrontBtn.armed {
-  background: #34d399;
-  color: #06281c;
+body.dark .fcb-seg > .seg-thumb {
+  background: #243029;
 }
 
-#setCenterBtn.armed {
-  background: var(--green);
-  color: #fff;
+.fcb-seg[data-place='center'] > .seg-thumb {
+  transform: translateX(100%);
 }
 
-#setBackBtn.armed {
+.fcb-seg[data-place='back'] > .seg-thumb {
+  transform: translateX(200%);
+}
+
+/* The segment being placed sits on the thumb — its label gets full weight. */
+.fcb-seg[data-place='front'] #setFrontBtn,
+.fcb-seg[data-place='center'] #setCenterBtn,
+.fcb-seg[data-place='back'] #setBackBtn {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fcb-seg > .seg-thumb {
+    transition: none;
+  }
+}
+
+/* Persistent "set" state = tiny colored dot beside the label, matching the
+   map markers. Presence, not emphasis. */
+.fcb-set-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.9;
+  flex: 0 0 auto;
+}
+
+.fcb-set-dot[data-dot='front'] {
+  background: #10b981;
+}
+
+.fcb-set-dot[data-dot='center'] {
+  background: var(--green-2);
+}
+
+.fcb-set-dot[data-dot='back'] {
   background: #f59e0b;
-  color: #2a1c02;
-}
-
-/* Persistent "set" state: a segment stays softly tinted while its point
-   exists on the map — solid fill (.armed) still means "placing now". */
-#setFrontBtn.lit {
-  background: rgba(52, 211, 153, 0.18);
-  color: #0c7a54;
-}
-
-#setCenterBtn.lit {
-  background: rgba(15, 122, 67, 0.16);
-  color: var(--green);
-}
-
-#setBackBtn.lit {
-  background: rgba(245, 158, 11, 0.2);
-  color: #a16207;
-}
-
-body.dark #setFrontBtn.lit {
-  color: #34d399;
-}
-
-body.dark #setCenterBtn.lit {
-  color: #63e89a;
-}
-
-body.dark #setBackBtn.lit {
-  color: #f5b14a;
 }
 
 /* ===== Dedicated tee-box row (live rounds only) ===== */
@@ -2644,8 +2671,8 @@ body.dark #setBackBtn.lit {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 0 4px 8px;
-  padding: 10px 13px;
+  margin: 0 4px 6px;
+  padding: 8px 12px;
   border-radius: 14px;
   background: rgba(22, 119, 255, 0.07);
   border: 1px solid rgba(22, 119, 255, 0.16);
@@ -2753,6 +2780,53 @@ body.dark #restoreGreenBtn {
   background: rgba(24, 164, 91, 0.12);
   color: #63e89a;
   border-color: rgba(99, 232, 154, 0.3);
+}
+
+/* Rarely-used recovery actions: quiet text-style buttons instead of twin
+   slabs eating half of the sheet's vertical budget. */
+#restoreGreenBtn.quiet,
+#clearFbBtn.quiet {
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 3px 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  opacity: 0.66;
+  text-decoration: underline;
+  text-decoration-color: rgba(15, 122, 67, 0.28);
+  text-underline-offset: 3px;
+}
+
+#clearFbBtn.quiet {
+  color: var(--danger);
+  text-decoration-color: rgba(214, 69, 69, 0.28);
+}
+
+#restoreGreenBtn.quiet:disabled {
+  opacity: 0.35;
+  filter: none;
+  cursor: default;
+}
+
+#restoreGreenBtn.quiet:not(:disabled):active,
+#clearFbBtn.quiet:active {
+  background: transparent;
+  opacity: 0.5;
+  transform: none;
+}
+
+body.dark #restoreGreenBtn.quiet {
+  background: transparent;
+  color: #63e89a;
+}
+
+body.dark #clearFbBtn.quiet {
+  background: transparent;
 }
 
 .aim-chip,
@@ -3031,6 +3105,13 @@ body[data-detent='full'] .detail-block {
 
 body[data-dragging='1'] .detail-block {
   opacity: var(--detail-reveal, 0);
+  /* Frame-lock the fade: keeping the 0.3s opacity transition here made the
+     content chase the sheet and pop in late mid-drag. */
+  transition: none !important;
+}
+
+body[data-dragging='1'] .fcb-block {
+  transition: none !important;
 }
 
 .big-number {
