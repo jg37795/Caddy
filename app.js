@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.14.0'; // dedicated in-round tee editor, uncapped plays-like solve, sheet detent memory, plays-like condition tint, chip yardages
+  const APP_VERSION = '1.17.0'; // JSON backup/restore via share sheet, shot-log CSV export, remembered putts default, verdict & shot-capture haptic vocabulary
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -12,6 +12,7 @@
   const LAST_ROUND_SETUP_KEY = 'caddy:lastRoundSetup:v1';
   const NEARBY_COURSES_CACHE_KEY = 'caddy:nearbyCourses:v3';
   const NEARBY_COURSES_TTL = 6 * 60 * 60 * 1000;
+  const LAST_PUTTS_KEY = 'caddy:lastPutts';
   const NEARBY_COURSE_RADIUS_M = 12000;
   const MAX_GPS_SPEED_MPS = 18;
   const MAX_CONSECUTIVE_REJECTS = 3;
@@ -204,6 +205,21 @@
     restoreGreenBtn: $('restoreGreenBtn'),
     clearFbBtn: $('clearFbBtn'),
     modeToggle: $('modeToggle'),
+    holeAdvanceChip: $('holeAdvanceChip'),
+    holeAdvanceText: $('holeAdvanceText'),
+    roundPenOptions: $('roundPenOptions'),
+    roundSummarySheet: $('roundSummarySheet'),
+    roundSummaryScrim: $('roundSummaryScrim'),
+    roundSummaryCloseBtn: $('roundSummaryCloseBtn'),
+    roundSummaryMeta: $('roundSummaryMeta'),
+    roundSummaryScore: $('roundSummaryScore'),
+    roundSummaryBody: $('roundSummaryBody'),
+    roundSummarySaveBtn: $('roundSummarySaveBtn'),
+    roundSummaryFinishBtn: $('roundSummaryFinishBtn'),
+    backupBtn: $('backupBtn'),
+    restoreBtn: $('restoreBtn'),
+    restoreInput: $('restoreInput'),
+    exportCsvBtn: $('exportCsvBtn'),
   };
 
   const savedLoc = (() => {
@@ -655,6 +671,23 @@
   function haptic(ms) {
     try {
       if (navigator.vibrate && !reduceMotion) navigator.vibrate(ms);
+    } catch { }
+  }
+
+  // Named vibration vocabulary so state changes are FEELABLE without
+  // looking: verdicts pulse differently, shot start/finish are distinct.
+  const HAPTIC_PATTERNS = {
+    go: [14],                    // single short tick — committed
+    manage: [32],                // single medium — caution
+    bail: [38, 70, 38],          // triple pulse — think twice
+    shotStart: [12, 60, 22],     // rising double — capture began
+    shotFinish: [16],            // firm single — logged
+  };
+  function hapticPattern(name) {
+    const p = HAPTIC_PATTERNS[name];
+    if (p == null) return;
+    try {
+      if (navigator.vibrate && !reduceMotion) navigator.vibrate(p);
     } catch { }
   }
 
@@ -1264,6 +1297,7 @@
         }).addTo(state.map);
       else state.markers.target.setLatLng([latlng.lat, latlng.lng]);
       save('caddy:lastTarget', state.target);
+      rememberPinIfOnGreen();
       updateLine();
       calculateRange();
       scheduleContextUpdate();
@@ -1656,6 +1690,13 @@
     if (v === 'go') card.classList.add('v-go');
     else if (v === 'manage') card.classList.add('v-manage');
     else if (v === 'bail') card.classList.add('v-bail');
+
+    // Haptic vocabulary fires ONLY when the verdict actually flips — GPS
+    // recalcs at an unchanged target stay silent.
+    if (v !== state.lastVerdict) {
+      state.lastVerdict = v;
+      if (v === 'go' || v === 'manage' || v === 'bail') hapticPattern(v);
+    }
   }
 
   function scheduleContextUpdate() {
@@ -2251,8 +2292,20 @@
   function renderClubs() {
     const clubs = sortedClubsDesc();
     els.clubsList.innerHTML = clubs
-      .map(
-        (c) => `
+      .map((c) => {
+        const st = clubStats(c.id);
+        const stock = num(c.yards, 0);
+        // Data contradicts the typed number beyond its own confidence
+        // interval? Offer the measured carry as a one-tap fix.
+        const contradicted =
+          st &&
+          Number.isFinite(st.ciLo) &&
+          Number.isFinite(st.ciHi) &&
+          (st.nEff || 0) >= SHOT_MIN_TRUST_N &&
+          stock > 0 &&
+          (stock < st.ciLo || stock > st.ciHi);
+        const measured = st ? Math.round(st.meanPost) : stock;
+        return `
         <div class="club-row" data-id="${escapeHtml(c.id)}">
           <input class="club-name-input" value="${escapeHtml(
           c.name
@@ -2260,9 +2313,15 @@
           <input class="club-yard-input" type="number" inputmode="numeric" value="${escapeHtml(
           c.yards
         )}" aria-label="${escapeHtml(c.name)} yards" />
-          <button class="small-btn delete-club" title="Delete">Delete</button>
-        </div>`
-      )
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <button class="small-btn delete-club" title="Delete">Delete</button>
+            ${contradicted
+            ? `<button class="small-btn sync-club" data-measured="${measured}" title="Adopt measured carry">→ ${measured} yd</button>`
+            : ''
+          }
+          </div>
+        </div>`;
+      })
       .join('');
     els.clubsList.querySelectorAll('.club-row').forEach((row) => {
       const id = row.dataset.id;
@@ -2283,6 +2342,20 @@
         renderManualClubSelect();
         if (state.target) calculateRange();
       });
+      const syncBtn = row.querySelector('.sync-club');
+      if (syncBtn) {
+        syncBtn.addEventListener('click', () => {
+          updateClub(id, {
+            yards: clamp(
+              Math.round(num(syncBtn.dataset.measured, 0)),
+              1,
+              400
+            ),
+          });
+          renderClubs();
+          haptic(8);
+        });
+      }
     });
     renderManualClubSelect();
     if (typeof renderRoundShotUI === 'function') renderRoundShotUI();
@@ -2389,6 +2462,7 @@
       const i = Number(row.dataset.i);
       const sync = () => {
         state.round[i] = {
+          ...(state.round[i] || {}),
           hole: i + 1,
           score: sanitizeInt(row.querySelector('.round-score').value),
           putts: sanitizeInt(row.querySelector('.round-putts').value),
@@ -2484,9 +2558,261 @@
     // Safety fallback if setup UI is unavailable.
     beginRound(makeCasualCourse(), 1);
   }
-  function endRound() {
-    if (!confirm('End round mode? Logged shots stay in your club data.'))
+  /* ============================================================
+     ROUND FLOW UPGRADES — pin memory, auto hole-change prompt,
+     shot trails, and the round-end summary sheet.
+  ============================================================ */
+
+  const PIN_MEMORY_KEY = 'caddy:pinMemory:v1';
+  const HOLE_ADVANCE_RADIUS_YD = 35;   // show the prompt inside this radius of the next tee
+  const HOLE_ADVANCE_EXIT_YD = 55;     // past this, a dismissed prompt re-arms
+  let _holeAdvanceDismissedFor = null; // hole number whose prompt was swatted away
+
+  function pinMemoryCourseKey(course) {
+    return course ? String(course.id || course.name || 'course') : null;
+  }
+  function rememberedPin(key, holeNumber) {
+    if (!key) return null;
+    const mem = load(PIN_MEMORY_KEY, {});
+    const p = mem?.[key]?.[String(holeNumber)];
+    return p && Number.isFinite(p.lat) && Number.isFinite(p.lng) ? p : null;
+  }
+  // Called whenever the user taps an aim target: if it sits on/near the
+  // marked green of a SAVED course, remember it as this hole's pin.
+  function rememberPinIfOnGreen() {
+    const course = getCurrentCourse();
+    if (!course || course.id === 'casual' || !state.roundSession) return;
+    if (!state.target || !state.greenCenter) return;
+    const geo = greenGeometry();
+    const depthYd = Math.max(12, num(geo?.depthStraight, 24));
+    const radiusYd = clamp(depthYd * 0.8, 14, 42);
+    const dYd = haversineMeters(state.target, state.greenCenter) * M_TO_YD;
+    if (dYd > radiusYd) return;
+
+    const key = pinMemoryCourseKey(course);
+    const mem = load(PIN_MEMORY_KEY, {});
+    mem[key] = mem[key] || {};
+    mem[key][String(getCurrentHoleNumber())] = {
+      lat: state.target.lat,
+      lng: state.target.lng,
+      ts: Date.now(),
+    };
+    save(PIN_MEMORY_KEY, mem);
+  }
+
+  /* ---------- Auto hole-change prompt ---------- */
+  function hideHoleAdvanceChip() {
+    if (els.holeAdvanceChip) els.holeAdvanceChip.hidden = true;
+  }
+  function checkHoleAdvancePrompt() {
+    if (!els.holeAdvanceChip) return;
+    const rs = state.roundSession;
+    if (!rs || roundStatus() !== 'active' || !state.loc) {
+      hideHoleAdvanceChip();
       return;
+    }
+    const total = getCourseHoleCount();
+    if (rs.hole >= total) {
+      hideHoleAdvanceChip();
+      return;
+    }
+    // Index rs.hole == next hole's data (holes[] is 0-based).
+    const teePt = getCurrentCourse()?.holes?.[rs.hole]?.teePoint;
+    if (!teePt) {
+      hideHoleAdvanceChip();
+      return;
+    }
+    const yd = haversineMeters(state.loc, teePt) * M_TO_YD;
+    if (yd <= HOLE_ADVANCE_RADIUS_YD) {
+      if (_holeAdvanceDismissedFor !== rs.hole) {
+        els.holeAdvanceChip.hidden = false;
+        if (els.holeAdvanceText)
+          els.holeAdvanceText.textContent = `Near Hole ${rs.hole + 1} tee`;
+      }
+    } else {
+      if (yd > HOLE_ADVANCE_EXIT_YD) _holeAdvanceDismissedFor = null;
+      hideHoleAdvanceChip();
+    }
+  }
+  function advanceToNextHoleFromTee() {
+    const rs = state.roundSession;
+    if (!rs || roundStatus() !== 'active') return;
+    if (rs.hole >= getCourseHoleCount()) return;
+    rs.hole += 1;
+    rs.currentHole = rs.hole;
+    _holeAdvanceDismissedFor = null;
+    saveRoundSession();
+    hideHoleAdvanceChip();
+    renderRound();
+    renderRoundShotUI();
+    haptic(10);
+    setNotice(`Advanced to Hole ${rs.hole}.`, 'greenish');
+  }
+
+  /* ---------- Shot trail (this round's counted shots) ---------- */
+  function renderShotTrail() {
+    clearShotTrail();
+    const rs = state.roundSession;
+    if (!rs || !state.mapReady || !Array.isArray(rs.shots)) return;
+    const done = rs.shots.filter((s) => s.counted && s.startPt && s.endPt);
+    if (!done.length) return;
+    const img = isImagery();
+    const group = L.layerGroup();
+    for (const s of done) {
+      group.addLayer(
+        L.polyline(
+          [
+            [s.startPt.lat, s.startPt.lng],
+            [s.endPt.lat, s.endPt.lng],
+          ],
+          {
+            pane: 'shotLinePane',
+            color: img ? '#ffffff' : '#1677ff',
+            weight: 2,
+            opacity: 0.4,
+            dashArray: '2 6',
+            interactive: false,
+          }
+        )
+      );
+      const mid = midpointGeodesic(s.startPt, s.endPt);
+      group.addLayer(
+        L.marker([mid.lat, mid.lng], {
+          icon: L.divIcon({
+            className: '',
+            html: `<div class="shot-trail-label">${s.distanceYd} yd</div>`,
+            iconSize: [48, 16],
+            iconAnchor: [24, 8],
+          }),
+          interactive: false,
+          zIndexOffset: 700,
+        })
+      );
+    }
+    group.addTo(state.map);
+    state.layers.shotTrail = group;
+  }
+  function clearShotTrail() {
+    if (state.layers.shotTrail && state.map) {
+      try {
+        state.map.removeLayer(state.layers.shotTrail);
+      } catch { }
+    }
+    state.layers.shotTrail = null;
+  }
+
+  /* ---------- Round-end summary sheet ---------- */
+  function buildRoundSummary() {
+    const course = getCurrentCourse();
+    const s = summarizeRound(state.round);
+    const tp = roundScoreToPar();
+    const countedShots = (
+      (state.roundSession && state.roundSession.shots) || []
+    ).filter((x) => x.counted && Number.isFinite(x.distanceYd));
+    const longest = countedShots.reduce(
+      (best, x) => (!best || x.distanceYd > best.distanceYd ? x : best),
+      null
+    );
+    const longestClub = longest
+      ? state.clubs.find((c) => c.id === longest.clubId)?.name || 'Shot'
+      : null;
+    let best = null;
+    state.round.forEach((r, i) => {
+      const sc = Number(r.score);
+      if (!Number.isFinite(sc) || sc <= 0) return;
+      const par = clamp(Math.round(num(course?.holes?.[i]?.par, 4)), 3, 6);
+      const d = sc - par;
+      if (!best || d < best.d) best = { hole: i + 1, d };
+    });
+    const totalPen = state.round.reduce(
+      (a, r) => a + (Number(r.penalties) || 0),
+      0
+    );
+    return { course, s, tp, countedShots, longest, longestClub, best, totalPen };
+  }
+  function openRoundSummary() {
+    if (!els.roundSummarySheet || !els.roundSummaryScrim) {
+      teardownRoundSession(false); // markup missing — degrade gracefully
+      return;
+    }
+    const sum = buildRoundSummary();
+    els.roundSummaryMeta.textContent = [
+      sum.course?.name || 'Casual Round',
+      sum.course?.teeName,
+      new Date().toLocaleDateString(),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    const played = !!sum.s.played;
+    els.roundSummaryScore.textContent = played ? String(sum.s.totalScore) : '—';
+    els.roundSummaryScore.classList.toggle('under', played && sum.tp.toPar < 0);
+    els.roundSummaryScore.classList.toggle('over', played && sum.tp.toPar > 0);
+
+    const rows = [];
+    if (played) {
+      rows.push([
+        'Score',
+        `${sum.s.totalScore} (${formatToPar(sum.tp.toPar)}) thru ${sum.tp.holesPlayed}`,
+      ]);
+    }
+    rows.push([
+      'Putts',
+      sum.s.puttRows
+        ? `${sum.s.totalPutts} · ${fmt(sum.s.totalPutts / Math.max(1, sum.s.puttRows), 2)} / hole`
+        : '—',
+    ]);
+    rows.push([
+      'Fairways',
+      sum.s.firRows
+        ? `${sum.s.firMade}/${sum.s.firRows} (${Math.round(sum.s.firCI.p * 100)}%)`
+        : '—',
+    ]);
+    rows.push([
+      'Greens',
+      sum.s.girRows
+        ? `${sum.s.girMade}/${sum.s.girRows} (${Math.round(sum.s.girCI.p * 100)}%)`
+        : '—',
+    ]);
+    rows.push(['Shots logged', String(sum.countedShots.length)]);
+    if (sum.longest)
+      rows.push(['Longest drive', `${sum.longest.distanceYd} yd · ${sum.longestClub}`]);
+    if (sum.best)
+      rows.push([
+        'Best hole',
+        `#${sum.best.hole} (${sum.best.d >= 0 ? '+' : ''}${sum.best.d})`,
+      ]);
+    rows.push(['Penalties', String(sum.totalPen)]);
+
+    els.roundSummaryBody.innerHTML = rows
+      .map(
+        ([k, v]) =>
+          `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`
+      )
+      .join('');
+
+    state._summaryTeardownPending = true;
+    els.roundSummaryScrim.classList.add('open');
+    els.roundSummarySheet.classList.add('open');
+    els.roundSummarySheet.setAttribute('aria-hidden', 'false');
+    haptic(6);
+  }
+  function closeRoundSummary(saveToHistory) {
+    if (!els.roundSummarySheet || !els.roundSummaryScrim) return;
+    els.roundSummarySheet.classList.remove('open');
+    els.roundSummaryScrim.classList.remove('open');
+    els.roundSummarySheet.setAttribute('aria-hidden', 'true');
+    if (state._summaryTeardownPending) {
+      state._summaryTeardownPending = false;
+      teardownRoundSession(!!saveToHistory);
+    }
+  }
+  function teardownRoundSession(saveToHistory) {
+    const s = summarizeRound(state.round);
+    if (saveToHistory && s.played) {
+      state.history.push({ date: new Date().toISOString(), ...s });
+      save('caddy:history', state.history);
+    }
     state.roundSession = null;
     state.holeGeoKey = null;
     // The tee editor only exists inside a live round — drop any on-map tee
@@ -2495,9 +2821,31 @@
     renderTeeMarker();
     renderTeeRow();
     saveRoundSession();
+    clearShotTrail();
+    hideHoleAdvanceChip();
     renderRoundShotUI();
+    renderStats();
     releaseWakeLock();
-    haptic(8);
+    haptic(10);
+    setNotice(
+      saveToHistory && s.played
+        ? 'Round ended and saved to history.'
+        : 'Round ended. The scorecard remains on the Stats tab.',
+      'greenish'
+    );
+  }
+  function endRound() {
+    const rs = state.roundSession;
+    if (!rs) return;
+    if (rs.status === 'pending') {
+      setNotice(
+        'Finish or discard the current shot before ending the round.',
+        'danger'
+      );
+      haptic(12);
+      return;
+    }
+    openRoundSummary();
   }
 
   // Capture the start of a shot: snapshot position + recommended club +
@@ -2536,7 +2884,7 @@
       'Shot started. Drag the flag pin to fine-tune your start spot, then walk to your ball and tap Finish shot.',
       'greenish'
     );
-    haptic(8);
+    hapticPattern('shotStart');
   }
 
 
@@ -2723,19 +3071,27 @@
       }).addTo(state.map);
     }
 
-    // Default the aim point to the green MIDDLE for the new hole, and label it
-    // clearly ("Aim: Middle") so it is never confused with a tapped pin.
+    // Default the aim point for the new hole. A remembered pin — where the
+    // flag actually was last time this SAVED course/hole was played — beats
+    // the green middle as the starting aim.
     if (resetAim && center && state.mapReady) {
-      state.target = { ...center };
+      const mem = getCurrentCourse()
+        ? rememberedPin(
+          pinMemoryCourseKey(getCurrentCourse()),
+          getCurrentHoleNumber()
+        )
+        : null;
+      const aimPt = mem ? { lat: mem.lat, lng: mem.lng } : { ...center };
+      state.target = aimPt;
       save('caddy:lastTarget', state.target);
 
       if (!state.markers.target) {
-        state.markers.target = L.marker([center.lat, center.lng], {
+        state.markers.target = L.marker([aimPt.lat, aimPt.lng], {
           icon: targetIcon(),
           zIndexOffset: 850,
         }).addTo(state.map);
       } else {
-        state.markers.target.setLatLng([center.lat, center.lng]);
+        state.markers.target.setLatLng([aimPt.lat, aimPt.lng]);
       }
     }
 
@@ -2845,6 +3201,8 @@
     renderRoundFab();
     renderRoundMapHud();
     renderPendingShot();
+    renderShotTrail();
+    checkHoleAdvancePrompt();
   }
   let _roundHudResizeBound = false;
   // Cap the live-round HUD so it can never cover the wind pill / recenter
@@ -4375,10 +4733,13 @@ out geom;`;
       putts:
         row.putts !== '' && Number.isFinite(Number(row.putts))
           ? Math.max(0, Math.round(Number(row.putts)))
-          : '',
+          // Most holes are two-putts: pre-fill with whatever the LAST saved
+          // hole took (defaults to 2) so the common case costs zero taps.
+          : clamp(Math.round(num(load(LAST_PUTTS_KEY, 2), 2)), 0, 9),
 
       fir: row.fir || (Number(hole.par) === 3 ? 'NA' : ''),
       gir: row.gir || '',
+      penalties: Math.max(0, Math.round(Number(row.penalties) || 0)),
     };
   }
 
@@ -4439,6 +4800,16 @@ out geom;`;
     if (els.roundGirOptions) {
       els.roundGirOptions.querySelectorAll('button').forEach((button) => {
         const active = draft.gir === button.dataset.gir;
+
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    }
+
+    if (els.roundPenOptions) {
+      const penVal = Math.max(0, Math.round(draft.penalties || 0));
+      els.roundPenOptions.querySelectorAll('button').forEach((button) => {
+        const active = (Number(button.dataset.pen) || 0) === penVal;
 
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', String(active));
@@ -4517,9 +4888,14 @@ out geom;`;
           : String(Math.max(0, Math.round(draft.putts))),
       fir: draft.fir || '',
       gir: draft.gir || '',
+      penalties: Math.max(0, Math.round(draft.penalties || 0)),
     };
 
     syncRoundScorecard();
+
+    // Remember for the next hole's pre-fill.
+    if (draft.putts !== '')
+      save(LAST_PUTTS_KEY, Math.max(0, Math.round(draft.putts)));
 
     const shouldAdvance =
       andNext &&
@@ -4645,6 +5021,25 @@ out geom;`;
       });
     }
 
+    if (els.roundPenOptions) {
+      els.roundPenOptions.querySelectorAll('button').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!state.roundScoreDraft) return;
+
+          const value = Number(button.dataset.pen) || 0;
+
+          // Toggle: tapping the active count returns it to zero.
+          state.roundScoreDraft.penalties =
+            (state.roundScoreDraft.penalties || 0) === value && value !== 0
+              ? 0
+              : value;
+
+          renderRoundScoreSheet();
+          haptic(4);
+        });
+      });
+    }
+
     if (els.roundScoreSaveBtn) {
       els.roundScoreSaveBtn.addEventListener('click', () => {
         saveRoundScoreDraft(false);
@@ -4717,6 +5112,48 @@ out geom;`;
     if (window.L && L.DomEvent && els.roundFabWrap) {
       L.DomEvent.disableClickPropagation(els.roundFabWrap);
     }
+
+    // Auto hole-change prompt chip: ✕ dismisses, tapping the body advances.
+    if (els.holeAdvanceChip) {
+      els.holeAdvanceChip.addEventListener('click', (e) => {
+        if (e.target.closest('.hole-advance-x')) {
+          _holeAdvanceDismissedFor = state.roundSession
+            ? state.roundSession.hole
+            : null;
+          hideHoleAdvanceChip();
+          haptic(5);
+          return;
+        }
+        advanceToNextHoleFromTee();
+      });
+    }
+
+    // Round-end summary: scrim / ✕ / Finish all end the round without a
+    // history entry; Save to history records it first.
+    if (els.roundSummaryCloseBtn)
+      els.roundSummaryCloseBtn.addEventListener('click', () =>
+        closeRoundSummary(false)
+      );
+    if (els.roundSummaryScrim)
+      els.roundSummaryScrim.addEventListener('click', () =>
+        closeRoundSummary(false)
+      );
+    if (els.roundSummaryFinishBtn)
+      els.roundSummaryFinishBtn.addEventListener('click', () =>
+        closeRoundSummary(false)
+      );
+    if (els.roundSummarySaveBtn)
+      els.roundSummarySaveBtn.addEventListener('click', () =>
+        closeRoundSummary(true)
+      );
+    document.addEventListener('keydown', (event) => {
+      if (
+        event.key === 'Escape' &&
+        els.roundSummarySheet?.classList.contains('open')
+      ) {
+        closeRoundSummary(false);
+      }
+    });
 
     renderRoundShotUI();
   }
@@ -4860,6 +5297,78 @@ out geom;`;
         if (state.target && state.loc) calculateRange();
       });
     }
+    // ---- Backup / restore / CSV export ----
+    if (els.backupBtn) {
+      els.backupBtn.addEventListener('click', () => {
+        const payload = JSON.stringify(buildBackupObject());
+        exportTextFile(
+          `caddy-backup-${new Date().toISOString().slice(0, 10)}.json`,
+          payload,
+          'application/json'
+        );
+        haptic(8);
+      });
+    }
+    if (els.restoreBtn && els.restoreInput) {
+      els.restoreBtn.addEventListener('click', () => {
+        els.restoreInput.click();
+      });
+      els.restoreInput.addEventListener('change', () => {
+        const f =
+          els.restoreInput.files && els.restoreInput.files[0];
+        els.restoreInput.value = ''; // allow re-selecting the same file later
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          let obj = null;
+          try {
+            obj = JSON.parse(String(reader.result));
+          } catch {
+            alert('That file is not valid JSON.');
+            return;
+          }
+          let summary;
+          try {
+            summary = describeBackup(obj);
+          } catch (err) {
+            alert(err && err.message ? err.message : 'Not a Caddy backup file.');
+            return;
+          }
+          if (
+            !confirm(
+              `${summary}\n\nRestoring replaces the current local data. Continue?`
+            )
+          )
+            return;
+          try {
+            applyBackupObject(obj);
+            reloadStateFromStorage();
+            haptic(12);
+            alert('Backup restored.');
+          } catch (err) {
+            alert(err && err.message ? err.message : 'Restore failed.');
+          }
+        };
+        reader.onerror = () => alert('Could not read that file.');
+        reader.readAsText(f);
+      });
+    }
+    if (els.exportCsvBtn) {
+      els.exportCsvBtn.addEventListener('click', () => {
+        const csv = buildShotLogCsv();
+        if (!csv.includes('\n')) {
+          alert('No shots logged yet — track some in Round mode first.');
+          return;
+        }
+        exportTextFile(
+          `caddy-shots-${new Date().toISOString().slice(0, 10)}.csv`,
+          csv,
+          'text/csv'
+        );
+        haptic(8);
+      });
+    }
+
     els.settingsSheet
       .querySelector('.sheet-handle')
       ?.addEventListener('click', close);
@@ -4867,6 +5376,151 @@ out geom;`;
       if (e.key === 'Escape' && els.settingsSheet.classList.contains('open'))
         close();
     });
+  }
+
+  /* ============================================================
+     DATA SAFETY — full JSON backup/restore + shot-log CSV export.
+     Everything Caddy knows lives in localStorage; one bad wipe loses
+     it. Export goes through the iOS share sheet when available and
+     falls back to a classic file download everywhere else.
+  ============================================================ */
+
+  const BACKUP_KEYS = [
+    ['prefs', 'caddy:prefs'],
+    ['clubs', 'caddy:clubs'],
+    ['courseProfiles', COURSE_PROFILES_KEY],
+    ['shotLog', SHOTLOG_KEY],           // routed through saveShotLog on restore (cache coherence)
+    ['roundSession', 'caddy:roundSession'],
+    ['round', 'caddy:round'],
+    ['history', 'caddy:history'],
+    ['pinMemory', PIN_MEMORY_KEY],
+    ['lastRoundSetup', LAST_ROUND_SETUP_KEY],
+  ];
+
+  function buildBackupObject() {
+    const data = {};
+    for (const [name, key] of BACKUP_KEYS) {
+      const v = load(key, null);
+      if (v != null) data[name] = v;
+    }
+    return {
+      app: 'caddy',
+      schema: 1,
+      exportedAt: new Date().toISOString(),
+      appVersion: APP_VERSION,
+      data,
+    };
+  }
+
+  function describeBackup(obj) {
+    if (!obj || obj.app !== 'caddy' || !obj.data)
+      throw new Error('Not a Caddy backup file.');
+    const d = obj.data;
+    let shots = 0;
+    if (d.shotLog && typeof d.shotLog === 'object') {
+      for (const k of Object.keys(d.shotLog)) {
+        shots += (d.shotLog[k] || []).map(normalizeShotEntry).filter(Boolean)
+          .length;
+      }
+    }
+    const courses = Array.isArray(d.courseProfiles)
+      ? d.courseProfiles.length
+      : 0;
+    const histRounds = Array.isArray(d.history) ? d.history.length : 0;
+    const when = obj.exportedAt
+      ? new Date(obj.exportedAt).toLocaleDateString()
+      : 'unknown date';
+    return (
+      `Caddy backup (${when}) — ${shots} tracked shots · ${courses} saved ` +
+      `courses · ${histRounds} rounds of history.`
+    );
+  }
+
+  function applyBackupObject(obj) {
+    const d = describeBackup(obj) && obj.data; // validates shape first
+    if (d.clubs && !Array.isArray(d.clubs))
+      throw new Error('Backup contains malformed club data.');
+    for (const [name, key] of BACKUP_KEYS) {
+      if (name === 'shotLog') continue; // handled below via saveShotLog
+      if (d[name] != null) save(key, d[name]);
+    }
+    if (d.shotLog != null) saveShotLog(d.shotLog);
+  }
+
+  // Re-hydrate every in-memory structure from storage after a restore.
+  function reloadStateFromStorage() {
+    state.prefs = load('caddy:prefs', state.prefs);
+    state.clubs = load('caddy:clubs', DEFAULT_CLUBS);
+    state.courseProfiles = load(COURSE_PROFILES_KEY, []);
+    state.round = load('caddy:round', emptyRound());
+    state.history = load('caddy:history', []);
+    state.roundSession = load('caddy:roundSession', null);
+
+    // Invalidate every derived-data cache.
+    _shotLogCache = null;
+    _clubStatsCache.clear();
+    _carryMemo.clear();
+    _plCache.clear();
+
+    migrateRoundSession();
+    applyPrefs();
+    renderClubs();
+    renderClubChips(state.lastCalc ? state.lastCalc.playsLikeYd : 0);
+    renderRound();
+    renderStats();
+    renderRoundShotUI();
+    if (state.prefs.mode === 'range') renderPracticeSection();
+  }
+
+  // Share-sheet-first file handoff with a download-anchor fallback.
+  async function exportTextFile(filename, text, mime) {
+    try {
+      const file = new File([text], filename, { type: mime });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // user closed the share sheet
+    }
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: mime }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch { }
+  }
+
+  function csvCell(v) {
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function buildShotLogCsv() {
+    const log = loadShotLog();
+    const rows = [
+      ['club', 'date', 'total_yd', 'carry_yd', 'lateral_yd', 'gps_acc_m'],
+    ];
+    for (const c of sortedClubsDesc()) {
+      const entries = (log[c.id] || [])
+        .map(normalizeShotEntry)
+        .filter(Boolean);
+      for (const e of entries) {
+        rows.push([
+          c.name,
+          e.t ? new Date(e.t).toISOString() : '',
+          e.d != null ? e.d : '',
+          e.c != null ? e.c : '',
+          e.l != null ? e.l : '',
+          e.a != null ? e.a : '',
+        ]);
+      }
+    }
+    return rows.map((r) => r.map(csvCell).join(',')).join('\n');
   }
 
   function initSheet() {
@@ -7196,6 +7850,7 @@ out geom;`;
   const LATERAL_REL_PRIOR = 0.065;  // prior relative σ of lateral dispersion (offline as a fraction of carry) — Broadie (2014) ch.4
   const SHOT_SANITY_LO = 0.40;      // hard reject below 40% of stock: topped/chunked, not a distance sample
   const SHOT_SANITY_HI = 1.60;      // hard reject above 160% of stock: mis-tagged club or GPS blowup
+  const MISS_BIAS_MIN_N = 5;        // tracked shots with lateral data before miss-direction coaching activates
 
   function loadShotLog() {
     const v = load(SHOTLOG_KEY, {});
@@ -7400,6 +8055,18 @@ out geom;`;
     if (!club) return 0;
     const st = clubStats(club.id);
     return Number.isFinite(st.lateralSigma) ? st.lateralSigma : LATERAL_REL_PRIOR * num(club.yards, 150);
+  }
+
+  // Signed lateral bias (yd, + = right of intended line) for a club with
+  // enough samples to trust. Robust: median of recorded offsets.
+  function clubLateralBiasYd(clubId) {
+    const log = loadShotLog();
+    const vals = (log[clubId] || [])
+      .map(normalizeShotEntry)
+      .filter((e) => e && Number.isFinite(e.l))
+      .map((e) => e.l);
+    if (vals.length < MISS_BIAS_MIN_N) return null;
+    return median(vals);
   }
 
   // ============================================================
@@ -7671,9 +8338,10 @@ out geom;`;
   const VERDICT_GO_PGREEN = 0.55;      // ≥55% green with the best club => commit
   const VERDICT_BAIL_PGREEN = 0.22;    // <22% green with the best club => the target itself is wrong
   const VERDICT_BAIL_ES = 3.35;        // expected strokes above which the shot is not worth attempting as aimed
-  function recommendSmart(playsTarget, geo, bearing, accYd) {
+  function recommendSmart(playsTarget, geo, bearing, accYd, opts = {}) {
     const asc = sortedClubsAsc();
     const desc = sortedClubsDesc();
+    const strokeIndex = Number(opts.strokeIndex) || null;
 
     if (!asc.length) {
       return {
@@ -7773,6 +8441,13 @@ out geom;`;
     } else {
       verdict = 'manage';
       tips.push(`🟡 Manageable but not free — ~${Math.round(pG * 100)}% green with ${c.name}. Smooth swing, favour the miss you can live with.`);
+    }
+
+    // Hardest-third stroke index: keep the commitment but soften the target line.
+    if (strokeIndex && strokeIndex <= 6) {
+      tips.push(
+        `#${strokeIndex} handicap hole — the numbers say commit, but favour the fat side of the green over any corner pin.`
+      );
     }
 
     // Which miss is actually costly? Compare conditional expected strokes short vs long.
@@ -8056,6 +8731,155 @@ out geom;`;
       lateralText
     );
   }
+
+  /* ============================================================
+     BLOCK 9b — HAZARDS, HOLE BRIEF & SMART LAYUP (advice inputs)
+     Spends the OSM-imported hazard coordinates and per-hole metadata
+     that were previously stored but never read.
+  ============================================================ */
+
+  const HAZARD_GREENSIDE_ALONG_YD = 28;  // "greenside" along-line window around the target, yd
+  const HAZARD_GREENSIDE_CROSS_YD = 32;  // "greenside" lateral window, yd
+  const HAZARD_CARRY_BUFFER_YD = 12;     // water this far short of the target counts as a carry threat
+  const TEE_SHOT_RADIUS_YD = 40;         // how close to the tee the hole brief appears
+
+  function holeHazards() {
+    const hole = getCurrentHoleData();
+    return hole && Array.isArray(hole.hazards) ? hole.hazards : [];
+  }
+
+  // Project imported hazards onto the CURRENT shot line: along = downrange,
+  // cross = + right of the line.
+  function hazardsOnLine() {
+    const list = holeHazards();
+    if (!list.length || !state.loc || !state.target) return [];
+    return list
+      .map((h) => {
+        if (!h || !Number.isFinite(h.lat) || !Number.isFinite(h.lng))
+          return null;
+        return {
+          type: h.type === 'water' ? 'water' : 'bunker',
+          alongYd: alongTrackYd(state.loc, state.target, h),
+          crossYd: crossTrackYd(state.loc, state.target, h),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  // Up to two human tips for hazards that genuinely threaten THIS target.
+  function hazardTips(targetYd) {
+    const out = [];
+    const hs = hazardsOnLine();
+    if (!hs.length) return out;
+
+    const side = (x) => (x >= 0 ? 'right' : 'left');
+
+    // Greenside threats: beside or around the target.
+    const greenside = hs.filter(
+      (h) =>
+        Math.abs(h.alongYd - targetYd) <= HAZARD_GREENSIDE_ALONG_YD &&
+        Math.abs(h.crossYd) <= HAZARD_GREENSIDE_CROSS_YD
+    );
+    if (greenside.length) {
+      const g =
+        greenside.find((h) => h.type === 'water') || greenside[0];
+      const kind = g.type === 'water' ? 'Water' : 'Bunker';
+      const whereTxt =
+        Math.abs(g.crossYd) >= 8
+          ? `${Math.round(Math.abs(g.crossYd))} yd ${side(g.crossYd)}`
+          : '';
+      const depthTxt =
+        Math.abs(g.alongYd - targetYd) <= 10
+          ? 'at the target'
+          : g.alongYd < targetYd
+            ? 'short'
+            : 'long';
+      out.push(
+        `${kind} ${depthTxt}${whereTxt ? ' ' + whereTxt : ''} of this target — favour the open side and take enough club to clear it.`
+      );
+    }
+
+    // Carry threats: water sitting ON the line between ball and target.
+    const carry = hs.filter(
+      (h) =>
+        h.type === 'water' &&
+        h.alongYd > 5 &&
+        h.alongYd < targetYd - HAZARD_CARRY_BUFFER_YD &&
+        Math.abs(h.crossYd) <= 18
+    );
+    if (carry.length) {
+      const c = carry.reduce((a, b) => (b.alongYd > a.alongYd ? b : a));
+      out.push(
+        `The line crosses water around ${Math.round(c.alongYd)} yd — your club must clear it with margin, not just reach.`
+      );
+    }
+    return out.slice(0, 2);
+  }
+
+  // Opening plan while standing on/near this hole's tee of a fresh hole.
+  function holeBrief() {
+    if (!state.roundSession || !state.loc) return null;
+    const hole = getCurrentHoleData();
+    if (!hole || !hole.teePoint) return null;
+    const toTeeYd = haversineMeters(state.loc, hole.teePoint) * M_TO_YD;
+    if (toTeeYd > TEE_SHOT_RADIUS_YD) return null;
+    // Fresh hole only: no counted shots logged here yet.
+    const played = (state.roundSession.shots || []).some(
+      (s) => s.hole === hole.number && s.counted
+    );
+    if (played) return null;
+
+    const course = getCurrentCourse();
+    const totalYd = Number(hole.yards) || null;
+    const par = hole.par || 4;
+
+    // Greedy full-swing plan from the long end of the bag.
+    const plan = [];
+    let remain = totalYd;
+    if (remain) {
+      for (const c of sortedClubsDesc()) {
+        if (remain <= c.yards * 1.08) break;
+        if (plan.length >= 3) break;
+        plan.push(c.name);
+        remain -= c.yards;
+      }
+    }
+
+    const bodyBits = [];
+    if (plan.length)
+      bodyBits.push(
+        `Plan: ${plan.join(' → ')}${remain > 0 ? `, then ~${Math.round(remain)} yd in` : ''
+        }`
+      );
+    if (course?.teeName) bodyBits.push(`from the ${course.teeName}`);
+    if (hole.strokeIndex) bodyBits.push(`stroke index ${hole.strokeIndex}`);
+
+    return {
+      kicker: 'Hole brief',
+      main: `Par ${par}${totalYd ? ` · ${totalYd} yd` : ''}`,
+      sub: bodyBits.join(' · ') || 'No mapped plan — play your normal tee club.',
+    };
+  }
+
+  // Named-club layup coaching for targets beyond the bag: names the club
+  // you're leaving yourself and, with green geometry, the exact finish yardage.
+  function smartLayupTip(geo) {
+    const desc = sortedClubsDesc();
+    const asc = sortedClubsAsc();
+    if (!asc.length || !desc.length) return null;
+    const calc = state.lastCalc;
+    if (!calc) return null;
+    const approach = asc[0]; // most lofted full swing
+    if (!(approach.yards > 0)) return null;
+
+    if (geo && Number.isFinite(geo.frontAlong)) {
+      const finishAt = Math.round(geo.frontAlong - approach.yards);
+      if (finishAt > 10) {
+        return `Smart layup: land it near ${finishAt} yd out — a full ${approach.name} (${approach.yards} yd) then covers the front edge.`;
+      }
+    }
+    return `Smart layup: club down short of your target so a full ${approach.name} (${approach.yards} yd) remains into the green.`;
+  }
   // ============================================================
   //  BLOCK 10 — WEATHER / ELEVATION CONTEXT
   //  Replaces: updateContext, getWeatherOrNeutral,
@@ -8096,7 +8920,7 @@ out geom;`;
     const wUrl = 'https://api.open-meteo.com/v1/forecast' +
       `?latitude=${p.lat.toFixed(5)}&longitude=${p.lng.toFixed(5)}` +
       '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,' +
-      'wind_gusts_10m,surface_pressure,pressure_msl,wind_speed_80m,wind_direction_80m' +
+      'wind_gusts_10m,surface_pressure,pressure_msl,wind_speed_80m,wind_direction_80m,sunset' +
       '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto';
     try {
       const w = await cachedJSON(wKey, wUrl, WEATHER_TTL);
@@ -8114,6 +8938,7 @@ out geom;`;
           pHpa = stationPressureFromMSL(msl * 100, e0.userFt * FT_TO_M,
             (num(cur.temperature_2m, 70) - 32) / 1.8) / 100;
       }
+      const sunsetMs = cur.sunset ? Date.parse(cur.sunset) : NaN;
       state.context.weather = {
         tempF: num(cur.temperature_2m, STD_TEMP_F),
         rh: num(cur.relative_humidity_2m, STD_RH),
@@ -8123,6 +8948,7 @@ out geom;`;
         pressureHpa: Number.isFinite(pHpa) ? pHpa : NaN,
         shearAlpha: Number.isFinite(alpha) ? alpha : NaN,
         wind80Mph: Number.isFinite(u80) ? u80 : NaN,
+        sunsetMs: Number.isFinite(sunsetMs) ? sunsetMs : NaN,
       };
       state.context.offlineWeather = !!w.offline;
       state.context.weatherTs = w.ts;
@@ -8237,6 +9063,22 @@ out geom;`;
     if (!state.context.weather) bits.push('Neutral');
     if (state.context.offlineWeather) bits.push('Cached wx');
     if (state.context.offlineElevation) bits.push('Cached elev');
+    // Daylight budget: quiet clock when there's time, a warning inside 45
+    // minutes of a live round.
+    if (Number.isFinite(w.sunsetMs)) {
+      const minsLeft = Math.round((w.sunsetMs - Date.now()) / 60000);
+      if (minsLeft > 0 && minsLeft <= 180) {
+        if (minsLeft <= 45 && roundStatus() !== 'idle') {
+          bits.push(`⚠ ${minsLeft} min light`);
+        } else {
+          const t = new Date(w.sunsetMs).toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+          });
+          bits.push(`sunset ${t}`);
+        }
+      }
+    }
     // Density ratio is the single most informative status number for a golfer.
     const rho = airDensity({
       tempF: w.tempF, rh: w.rh,
@@ -8405,6 +9247,15 @@ out geom;`;
         score: () => (accYd > ACCURACY_WARN_YD ? accYd * S * 0.6 : 0),
         text: () => `GPS is only ±${fmt(accYd)} yd — that is real distance uncertainty on top of your swing. Favour the centre of the green.`
       },
+      {
+        id: 'missbias', cat: 'pattern',
+        score: () => (ctx.lateralBiasYd != null && Math.abs(ctx.lateralBiasYd) >= 6 ? 0.06 : 0),
+        text: () => {
+          const b = ctx.lateralBiasYd;
+          const dir = b > 0 ? 'right' : 'left';
+          return `Your tracked pattern: misses with ${ctx.biasClubName} average ${Math.abs(Math.round(b))} yd ${dir}. Start this one at the ${b > 0 ? 'left' : 'right'} edge and let the bias work back to centre.`;
+        }
+      },
     ];
     const seen = new Set();
     return TIPS.map((t) => {
@@ -8567,7 +9418,7 @@ out geom;`;
       setNotice(`${Math.round(distanceYd)} yd recorded (outside normal range — excluded from club stats).`, 'greenish');
 
     renderPendingShot();
-    haptic(10);
+    hapticPattern('shotFinish');
     if (state.target && state.loc) calculateRange();
   }
   // ============================================================
@@ -8650,6 +9501,45 @@ out geom;`;
     const gaps = gapAnalysis().filter((g) => g.verdict !== 'ok');
     if (gaps.length) {
       rows.push('<div class="break-row" style="margin-top:6px"><span><b>— Gapping —</b></span><b></b></div>');
+
+      // Visual band chart: every club's coverage band drawn to scale across
+      // the bag's yardage range, so overlaps and dead zones are SEEN.
+      const descAll = sortedClubsDesc();
+      const scaleMax = Math.max(...descAll.map((x) => x.yards)) * 1.08 || 300;
+      const chart = descAll
+        .filter((c) => c.yards > 0)
+        .map((c) => {
+          const st = clubStats(c.id);
+          const meanC =
+            Number.isFinite(st.meanPost) && st.n >= SHOT_MIN_TRUST_N
+              ? st.meanPost
+              : c.yards;
+          const bandYd = clubDispersionYd(c);
+          const lo = Math.max(0, meanC - bandYd);
+          const hi = meanC + bandYd;
+          const lft = clamp((lo / scaleMax) * 100, 0, 97);
+          const wdt = clamp(
+            ((hi - lo) / scaleMax) * 100,
+            3,
+            100 - lft
+          );
+          const flagged = gaps.some(
+            (g) => g.hi.id === c.id || g.lo.id === c.id
+          );
+          return (
+            `<div class="gap-chart-row${flagged ? ' flag' : ''}" title="${escapeHtml(
+              c.name
+            )}: covers ~${Math.round(lo)}–${Math.round(hi)} yd">` +
+            `<span class="gap-chart-name">${escapeHtml(c.name)}</span>` +
+            `<span class="gap-track"><span class="gap-band" style="left:${lft.toFixed(
+              1
+            )}%;width:${wdt.toFixed(1)}%"></span></span>` +
+            `<b class="gap-chart-yd">${Math.round(meanC)}</b></div>`
+          );
+        })
+        .join('');
+      rows.push(`<div class="gap-chart">${chart}</div>`);
+
       for (const g of gaps)
         rows.push(`<div class="break-row"><span>${escapeHtml(g.hi.name)} → ${escapeHtml(g.lo.name)}</span>` +
           `<b>${g.gap} yd · ${g.verdict === 'gap' ? 'too wide' : 'redundant'}</b></div>`);
@@ -8698,6 +9588,24 @@ out geom;`;
       Math.sqrt(Math.max(0, (roundLen - played.length) / Math.max(1, roundLen - 1)))
       : null;
 
+    // Scoring averages by par. Outside a live session the course lookup
+    // falls back to par 4 — legacy scorecards get approximate splits.
+    const courseNow = getCurrentCourse();
+    const parSplits = {};
+    rows.forEach((r, i) => {
+      const sc = Number(r.score);
+      if (!Number.isFinite(sc) || sc <= 0) return;
+      const par = clamp(
+        Math.round(num(courseNow?.holes?.[i]?.par, 4)),
+        3,
+        6
+      );
+      if (par > 5) return;
+      parSplits[par] = parSplits[par] || { n: 0, total: 0 };
+      parSplits[par].n += 1;
+      parSplits[par].total += sc;
+    });
+
     return {
       played: played.length, totalScore,
       puttRows: puttRows.length, totalPutts,
@@ -8710,6 +9618,27 @@ out geom;`;
       projected18: proj, projected18Se: projSe,
       threePutts: puttRows.filter((r) => num(r.putts, 0) >= 3).length,
       onePutts: puttRows.filter((r) => num(r.putts, 0) === 1).length,
+      totalPen: rows.reduce((a, r) => a + (Number(r.penalties) || 0), 0),
+      parSplits,
+    };
+  }
+
+  // Direction of your misses across ALL tracked shots with lateral data:
+  // the share finishing right of the intended line (+ = right).
+  function missDirectionSummary() {
+    const log = loadShotLog();
+    const vals = [];
+    for (const k of Object.keys(log)) {
+      for (const e of (log[k] || []).map(normalizeShotEntry)) {
+        if (e && Number.isFinite(e.l)) vals.push(e.l);
+      }
+    }
+    if (!vals.length) return null;
+    const right = vals.filter((v) => v > 0).length;
+    return {
+      n: vals.length,
+      right,
+      rightPct: Math.round((right / vals.length) * 100),
     };
   }
 
@@ -8738,8 +9667,25 @@ out geom;`;
         : `${fmt(s.puttsOnGir, 2)} (Tour ${PUTTS_PAR_BASELINE})`],
       ['Putts when missed', s.puttsOffGir === null ? '—' : fmt(s.puttsOffGir, 2)],
       ['1-putts / 3-putts', s.puttRows ? `${s.onePutts} / ${s.threePutts}` : '—'],
+      ['Penalty strokes', String(s.totalPen || 0)],
+      ...([3, 4, 5]
+        .filter((p) => s.parSplits && s.parSplits[p] && s.parSplits[p].n)
+        .map((p) => [
+          `Avg score · Par ${p}`,
+          `${fmt(s.parSplits[p].total / s.parSplits[p].n, 2)} over ${s.parSplits[p].n
+          } hole${s.parSplits[p].n === 1 ? '' : 's'}`,
+        ])),
       [`Fairways (${Math.round(STATS_CONF * 100)}% CI)`, pctCI(s.firCI)],
       [`Greens (${Math.round(STATS_CONF * 100)}% CI)`, pctCI(s.girCI)],
+      [
+        'Offline tendency',
+        (() => {
+          const m = missDirectionSummary();
+          return m
+            ? `${m.rightPct}% right of line · ${m.n} tracked shot${m.n === 1 ? '' : 's'}`
+            : '—';
+        })(),
+      ],
     ];
 
     const hist = state.history || [];
@@ -8768,10 +9714,42 @@ out geom;`;
       rows.push(['Recent avg FIR', wAvg(firPct) === null ? '—' : `${fmt(wAvg(firPct))}%`]);
       rows.push(['Recent avg GIR', wAvg(girPct) === null ? '—' : `${fmt(wAvg(girPct))}%`]);
       if (ts) rows.push(['Trend', `${ts.slope >= 0 ? '+' : ''}${fmt(ts.slope, 2)} strokes / round`]);
+      const spark = sparklineRow(scores.slice(-15));
+      if (spark) rows.push(['Recent scores', spark]);
     }
     els.statsBreakdown.innerHTML = rows
-      .map(([k, v]) => `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`)
+      .map(([k, v]) =>
+        v && v.__raw
+          ? `<div class="break-row"><span>${escapeHtml(k)}</span><b>${v.html}</b></div>`
+          : `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`
+      )
       .join('');
+  }
+
+  // Inline SVG trend line for recent scores. Lower-is-better golf scoring is
+  // inverted so an improving player watches the line CLIMB. Returns a raw-
+  // flagged object because it carries trusted, self-generated markup.
+  function sparklineRow(values, width = 116, height = 26) {
+    const pts = (values || []).filter(Number.isFinite);
+    if (pts.length < 2) return null;
+    const min = Math.min(...pts);
+    const max = Math.max(...pts);
+    const span = max - min || 1;
+    const stepX = width / (pts.length - 1);
+    const yFor = (v) => height - 3 - ((max - v) / span) * (height - 6);
+    const coords = pts
+      .map((v, i) => `${(i * stepX).toFixed(1)},${yFor(v).toFixed(1)}`)
+      .join(' ');
+    const parts = coords.split(' ');
+    const last = parts[parts.length - 1].split(',');
+    const html =
+      `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" ` +
+      `style="vertical-align:-7px;margin-right:7px;color:var(--green)">` +
+      `<polyline points="${coords}" fill="none" stroke="currentColor" stroke-width="2" ` +
+      `stroke-linecap="round" stroke-linejoin="round"/>` +
+      `<circle cx="${last[0]}" cy="${last[1]}" r="2.8" fill="currentColor"/></svg>` +
+      `${min}–${max}`;
+    return { __raw: true, html };
   }
   // ============================================================
   //  BLOCK 15 — RANGE PIPELINE
@@ -8792,6 +9770,7 @@ out geom;`;
       renderFcb();
       clearDispersionZone();
       tintTargetPin('neutral');
+      renderElevProfile({}, els.rangeBreakdown);
       return;
     }
     const w = getWeatherOrNeutral(), e = getElevationOrNeutral();
@@ -8881,7 +9860,9 @@ out geom;`;
     let verdict = 'neutral';
 
     if (useGreenStrategy) {
-      smart = recommendSmart(calc.playsLikeYd, geo, bearing, accYd);
+      smart = recommendSmart(calc.playsLikeYd, geo, bearing, accYd, {
+        strokeIndex: getCurrentHoleData()?.strokeIndex || null,
+      });
 
       rec = {
         main: smart.main,
@@ -8898,6 +9879,16 @@ out geom;`;
       const greenContextTip = hasGreen ? targetToGreenTip() : null;
       if (greenContextTip) smartTips.push(greenContextTip);
     }
+
+    // Hazard awareness: imported bunkers/water projected onto THIS line.
+    hazardTips(calc.horizontalYd).forEach((t) => smartTips.push(t));
+
+    // Named-club layup coaching when the target is beyond the bag.
+    const longestClub = sortedClubsDesc()[0];
+    if (longestClub && calc.playsLikeYd > longestClub.yards * 1.08) {
+      const lay = smartLayupTip(geo);
+      if (lay) smartTips.push(lay);
+    }
     // Use the optimizer's actual winning club when green strategy is active.
     // Otherwise use the selected-target recommendation.
     const recClub =
@@ -8910,13 +9901,59 @@ out geom;`;
       ? recClub.id
       : state.lastRecClubId;
 
+    // Standing on a fresh tee? Lead with the hole brief and tuck the club
+    // recommendation underneath it.
+    const brief = holeBrief();
+    const kickerEl = $('recKicker');
+    if (brief) {
+      rec = {
+        main: brief.main,
+        sub: rec.main
+          ? `${brief.sub} · Suggested opener: ${rec.main}`
+          : brief.sub,
+      };
+      if (kickerEl) kickerEl.textContent = brief.kicker;
+      verdict = 'neutral';
+    } else if (kickerEl) {
+      kickerEl.textContent = 'Recommended shot';
+    }
+
     els.clubRecommendation.textContent = rec.main;
     let sub = rec.sub;
     if (calc.extended)
       sub = 'Beyond calibrated carry — estimate for layup planning. ' + sub;
     const g = selectedClubGuidance(calc.playsLikeYd);
     if (g) sub += ' · ' + g;
-    els.clubRecommendationSub.textContent = sub;
+
+    // Gust-aware club range: when gusts materially exceed the sustained
+    // number, the honest recommendation is a RANGE, not one club.
+    let gustRangeTxt = '';
+    if (
+      Number.isFinite(w.gustMph) &&
+      w.windMph >= 5 &&
+      w.gustMph > w.windMph + 4 &&
+      calc.gustYd >= 4
+    ) {
+      const ascAll = sortedClubsAsc();
+      const pick = (yd) => {
+        const hit = ascAll.find((c) => c.yards >= yd);
+        return hit ? hit.name : null;
+      };
+      const loName = pick(Math.max(20, calc.playsLikeYd - calc.gustYd));
+      const hiName = pick(calc.playsLikeYd + calc.gustYd);
+      if (loName && hiName && loName !== hiName)
+        gustRangeTxt = ` Gusts to ${Math.round(
+          w.gustMph
+        )} mph: anywhere from ${loName} to ${hiName} depending on timing.`;
+      else if (loName)
+        gustRangeTxt = ` Gusts to ${Math.round(
+          w.gustMph
+        )} mph — take the ${loName} and swing easy; timing is worth ±${Math.round(
+          calc.gustYd
+        )} yd.`;
+    }
+
+    els.clubRecommendationSub.textContent = sub + gustRangeTxt;
     setVerdict(verdict);
     renderShotPlan({
       calc,
@@ -8926,6 +9963,42 @@ out geom;`;
       smart,
       verdict,
     });
+
+    // Front / Middle / Back club trio — deep greens solved at a glance.
+    // Yardages are converted to the plays-like scale before picking clubs so
+    // the trio agrees with the headline recommendation in the same wind.
+    if (
+      els.shotPlanChips &&
+      geo &&
+      Number.isFinite(geo.front) &&
+      Number.isFinite(geo.center) &&
+      Number.isFinite(geo.back)
+    ) {
+      const scale =
+        horizontalYd > 0 ? calc.playsLikeYd / horizontalYd : 1;
+      const clubFor = (yd) => {
+        const hit = sortedClubsAsc().find((c) => c.yards >= yd * scale);
+        return hit ? hit.name : null;
+      };
+      const trio = [
+        ['F', clubFor(geo.front)],
+        ['M', clubFor(geo.center)],
+        ['B', clubFor(geo.back)],
+      ];
+      if (trio.every(([, n]) => n)) {
+        els.shotPlanChips.insertAdjacentHTML(
+          'beforeend',
+          trio
+            .map(
+              ([k, n]) =>
+                `<span class="rec-chip">${k}&nbsp;<b style="font-weight:900">${escapeHtml(
+                  n
+                )}</b></span>`
+            )
+            .join('')
+        );
+      }
+    }
     const ascC = sortedClubsAsc();
     const longerC = ascC.find((c) => c.yards >= calc.playsLikeYd);
     const longestC = sortedClubsDesc()[0];
@@ -8944,6 +10017,8 @@ out geom;`;
       tempAdjYd: calc.tempAdjYd, altitudeAdjYd: calc.altitudeAdjYd,
       densityRatio: calc.densityRatio, apexFt: calc.apexFt,
       descentDeg: calc.descentDeg, blindFt: e.blindFt,
+      lateralBiasYd: recClub ? clubLateralBiasYd(recClub.id) : null,
+      biasClubName: recClub ? recClub.name : '',
     }, 3);
 
     if (state.prefs.mode === 'range') {
@@ -8968,6 +10043,7 @@ out geom;`;
     }
 
     renderBreakdown(calc, els.rangeBreakdown);
+    renderElevProfile(e, els.rangeBreakdown);
     els.rangeStamp.textContent = stampText();
     renderClubChips(calc.playsLikeYd);
 
@@ -9011,6 +10087,47 @@ out geom;`;
     el.innerHTML = rows
       .map(([k, v]) => `<div class="break-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`)
       .join('');
+  }
+
+  // Mini terrain profile along the CURRENT shot line (Pro Mode breakdown).
+  // Consumes the 9-point open-meteo profile that was fetched but never shown.
+  function renderElevProfile(e, el) {
+    if (!el) return;
+    const old = document.getElementById('elevProfileChart');
+    if (old) old.remove();
+    const prof = Array.isArray(e.profileFt) ? e.profileFt : null;
+    if (!prof || prof.length < 3) return;
+
+    const W = 240, H = 46;
+    const min = Math.min(...prof);
+    const max = Math.max(...prof);
+    const span = max - min || 1;
+    const stepX = W / (prof.length - 1);
+    const coords = prof
+      .map(
+        (v, i) =>
+          `${(i * stepX).toFixed(1)},${(
+            H - 4 -
+            ((v - min) / span) * (H - 10)
+          ).toFixed(1)}`
+      )
+      .join(' ');
+    const diff = prof[prof.length - 1] - prof[0];
+    const blindTxt =
+      Number.isFinite(e.blindFt) && e.blindFt > BLIND_CLEARANCE_FT
+        ? ` · blind +${Math.round(e.blindFt)} ft`
+        : '';
+
+    const wrap = document.createElement('div');
+    wrap.id = 'elevProfileChart';
+    wrap.innerHTML =
+      `<div class="break-row" style="border-bottom:0"><span>Terrain profile</span>` +
+      `<b>${diff >= 0 ? '+' : ''}${Math.round(diff)} ft${blindTxt}</b></div>` +
+      `<svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" ` +
+      `style="color:var(--green);background:rgba(15,122,67,.06);border-radius:10px;display:block">` +
+      `<polyline points="${coords}" fill="none" stroke="currentColor" stroke-width="2" ` +
+      `stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+    el.appendChild(wrap);
   }
   // ============================================================
   //  BLOCK 16 — MANUAL CALCULATOR

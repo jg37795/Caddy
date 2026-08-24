@@ -1539,6 +1539,22 @@ body.dark #roundScoreValue.over {
   color: #6cb2ff;
 }
 
+#roundSummaryScore.under {
+  color: #d63939;
+}
+
+#roundSummaryScore.over {
+  color: #1677ff;
+}
+
+body.dark #roundSummaryScore.under {
+  color: #ff8f8f;
+}
+
+body.dark #roundSummaryScore.over {
+  color: #6cb2ff;
+}
+
 .round-score-stepper {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1587,6 +1603,10 @@ body.dark #roundScoreValue.over {
 
 #roundGirOptions {
   grid-template-columns: repeat(2, 1fr);
+}
+
+#roundPenOptions {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .round-score-options button {
@@ -3838,6 +3858,62 @@ body[data-detent='full']:not([data-dragging='1']) .leaflet-bottom.leaflet-right 
   display: none;
 }
 
+/* Auto hole-change prompt: blue so it never reads as the amber reset chip
+   or the green action FABs around it. */
+.hole-advance-chip {
+  pointer-events: auto;
+  border-radius: 999px;
+  padding: 8px 12px 8px 15px;
+  font-size: 12.5px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: #fff;
+  background: rgba(22, 119, 255, 0.95);
+  box-shadow: 0 8px 20px rgba(22, 119, 255, 0.35);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  transition: transform 0.15s var(--spring-snappy), opacity 0.25s ease;
+}
+
+.hole-advance-chip:active {
+  transform: scale(0.96);
+}
+
+.hole-advance-chip[hidden] {
+  display: none;
+}
+
+.hole-advance-x {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.24);
+  display: inline-grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+/* Distance tag riding each finished-shot trail line. */
+.shot-trail-label {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #0c1410;
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+}
+
+body.dark .shot-trail-label {
+  background: rgba(16, 22, 19, 0.85);
+  color: #edf7ef;
+}
+
 /* Rangefinder distance rings (50/100/150/200 yd). */
 .ring-label {
   padding: 2px 0;
@@ -3891,6 +3967,61 @@ body.dark .ring-label {
 /* Dispersion landing zone: subtle shadow so the ring reads on satellite. */
 path.dispersion-zone {
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));
+}
+
+/* ===== Gapping band chart (Practice card) ===== */
+.gap-chart {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.gap-chart-row {
+  display: grid;
+  grid-template-columns: 46px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.gap-chart-name {
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gap-chart-yd {
+  font-size: 11px;
+  font-weight: 850;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gap-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.16);
+  overflow: hidden;
+}
+
+.gap-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--green-2);
+  opacity: 0.78;
+}
+
+body.dark .gap-band {
+  background: #37e07f;
+}
+
+/* Clubs involved in a detected gap/overlap wear amber bands. */
+.gap-chart-row.flag .gap-band {
+  background: #f59e0b;
 }
 
 .stat-big {

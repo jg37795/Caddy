@@ -275,6 +275,10 @@
               ↺ Reset start
             </button>
             <div class="round-club-pop glass" id="roundClubPop" hidden></div>
+            <button class="hole-advance-chip" id="holeAdvanceChip" type="button" hidden>
+              <span id="holeAdvanceText">Near next tee</span>
+              <span class="hole-advance-x" aria-label="Dismiss">✕</span>
+            </button>
             <div class="round-fab-row">
               <button class="round-fab" id="roundFab" type="button" aria-live="polite">
                 <span class="round-fab-ic" id="roundFabIc" aria-hidden="true"></span>
@@ -430,7 +434,7 @@
 
               <div class="detail-block">
                 <div class="card rec-card" id="recCard" style="margin-top: 6px">
-                  <div class="rec-kicker">Recommended shot</div>
+                  <div class="rec-kicker" id="recKicker">Recommended shot</div>
 
                   <div class="rec-main" id="clubRecommendation">
                     No target selected
@@ -949,6 +953,16 @@
       </div>
     </div>
 
+    <div class="round-score-section">
+      <div class="round-score-label">Penalty strokes</div>
+
+      <div class="round-score-options" id="roundPenOptions">
+        <button data-pen="0" type="button">0</button>
+        <button data-pen="1" type="button">+1</button>
+        <button data-pen="2" type="button">+2</button>
+      </div>
+    </div>
+
     <div class="round-score-actions">
       <button class="ghost-btn" id="roundScoreSaveBtn" type="button">
         Save hole
@@ -956,6 +970,41 @@
 
       <button class="primary-btn" id="roundScoreSaveNextBtn" type="button">
         Save &amp; Next
+      </button>
+    </div>
+  </section>
+
+  <!-- Round-end summary -->
+  <div class="modal-scrim" id="roundSummaryScrim"></div>
+
+  <section class="round-score-sheet glass" id="roundSummarySheet" aria-label="Round summary" aria-hidden="true">
+    <div class="sheet-handle" style="margin: 6px auto 12px"></div>
+
+    <div class="round-score-head">
+      <div>
+        <h2 id="roundSummaryTitle">Round complete</h2>
+        <p id="roundSummaryMeta"></p>
+      </div>
+
+      <button class="icon-btn" id="roundSummaryCloseBtn" type="button" aria-label="Close round summary">
+        ×
+      </button>
+    </div>
+
+    <div class="round-score-current">
+      <span>Total</span>
+      <strong id="roundSummaryScore">—</strong>
+    </div>
+
+    <div class="breakdown" id="roundSummaryBody" style="margin-top: 14px"></div>
+
+    <div class="round-score-actions">
+      <button class="ghost-btn" id="roundSummaryFinishBtn" type="button">
+        Finish
+      </button>
+
+      <button class="primary-btn" id="roundSummarySaveBtn" type="button">
+        Save to history
       </button>
     </div>
   </section>
@@ -1022,6 +1071,36 @@
         Reset
       </button>
     </div>
+    <div class="settings-row">
+      <div>
+        <div class="lbl">Backup &amp; restore</div>
+        <div class="desc">
+          Export everything — clubs, tracked shots, courses, scorecards and
+          history — as one file, or restore from a previous backup.
+        </div>
+      </div>
+      <div style="display: flex; gap: 7px; flex: 0 0 auto">
+        <button class="ghost-btn" id="backupBtn" type="button">
+          Export
+        </button>
+        <button class="ghost-btn" id="restoreBtn" type="button">
+          Import
+        </button>
+      </div>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="lbl">Shot log CSV</div>
+        <div class="desc">
+          Every tracked shot with date, total, carry, lateral offset and GPS
+          accuracy.
+        </div>
+      </div>
+      <button class="ghost-btn" id="exportCsvBtn" type="button">
+        Export
+      </button>
+    </div>
+    <input type="file" id="restoreInput" accept="application/json,.json" hidden />
     <div class="settings-row">
       <div>
         <div class="lbl">Precise Location help</div>

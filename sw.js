@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.26'; // in-round tee editor row, uncapped plays-like, detent memory, condition-tinted plays-like, chip yardages
+const CACHE_VERSION = 'v1.0.29'; // JSON backup/restore, shot-log CSV, remembered putts default, haptic vocabulary
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
