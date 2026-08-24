@@ -245,6 +245,12 @@
     planDetailBody: $('planDetailBody'),
     // Course name search (round setup)
     courseSearchInput: $('courseSearchInput'),
+    // Group scoring
+    groupCountChip: $('groupCountChip'),
+    groupEditorList: $('groupEditorList'),
+    addPartnerBtn: $('addPartnerBtn'),
+    groupTableWrap: $('groupTableWrap'),
+    roundScoreChips: $('roundScoreChips'),
   };
 
   const savedLoc = (() => {
@@ -609,6 +615,11 @@
       pending: null,
       chosenClubId: null,
       shots: [],
+
+      // Group scoring. Lives ONLY on the session — it never merges into
+      // state.round, so personal stats/history stay untouched by design.
+      groupPlayers: [],
+      groupScores: {},
     };
   }
   function saveRoundSession() {
@@ -2455,6 +2466,7 @@
   function renderRound() {
     const course = getCurrentCourse();
     const scoreRows = getScorecardRows();
+    renderGroupUI();
 
 
     els.roundRows.innerHTML = scoreRows
@@ -2515,6 +2527,8 @@
         renderStats();
         renderRoundHoleHeader();
         renderRoundMapHud();
+        // Keep the group table's "You" row + totals in step with edits.
+        renderGroupTable();
       };
       row
         .querySelectorAll('input,select')
@@ -2815,6 +2829,16 @@
         `#${sum.best.hole} (${sum.best.d >= 0 ? '+' : ''}${sum.best.d})`,
       ]);
     rows.push(['Penalties', String(sum.totalPen)]);
+
+    // Side-by-side group card. Session-only data — shown here for the
+    // post-round compare, never written into your history.
+    const gt = groupTotals().filter((g) => g.thru > 0);
+    if (gt.length) {
+      rows.push(['— Group —', '']);
+      gt.forEach((g) =>
+        rows.push([g.name, `${g.total} · thru ${g.thru}`])
+      );
+    }
 
     els.roundSummaryBody.innerHTML = rows
       .map(
@@ -4783,10 +4807,23 @@ out geom;`;
   }
   function getRoundScoreDraft() {
     const holeNumber = getCurrentHoleNumber();
-    const row = getScorecardRows()[holeNumber - 1] || {};
-
     const hole = getCurrentHoleData();
     const fallbackScore = Math.max(1, Number(hole.par) || 4);
+
+    // Partner draft: score only — putts/FIR/GIR are yours alone.
+    const pid = state._scorePartnerId || '';
+    if (pid) {
+      const arr = partnerScoreArray(pid);
+      const cur = Number(arr[holeNumber - 1]);
+      return {
+        hole: holeNumber,
+        score:
+          Number.isFinite(cur) && cur > 0 ? Math.round(cur) : fallbackScore,
+        partnerId: pid,
+      };
+    }
+
+    const row = getScorecardRows()[holeNumber - 1] || {};
 
     return {
       hole: holeNumber,
@@ -4814,7 +4851,10 @@ out geom;`;
     const draft = state.roundScoreDraft;
     const hole = getCurrentHoleData();
 
-    els.roundScoreTitle.textContent = `Score Hole ${draft.hole}`;
+    const partnerName = scoreDraftPartnerName();
+    els.roundScoreTitle.textContent = partnerName
+      ? `${partnerName} · Hole ${draft.hole}`
+      : `Score Hole ${draft.hole}`;
 
     const course = getCurrentCourse();
     els.roundScoreMeta.textContent = [
@@ -4914,6 +4954,7 @@ out geom;`;
       return;
     }
 
+    state._scorePartnerId = ''; // every open starts on your own card
     state.roundScoreDraft = getRoundScoreDraft();
 
     renderRoundScoreSheet();
@@ -4943,24 +4984,31 @@ out geom;`;
 
     const holeIndex = draft.hole - 1;
 
-    state.round[holeIndex] = {
-      ...state.round[holeIndex],
-      hole: draft.hole,
-      score: String(Math.max(1, Math.round(draft.score))),
-      putts:
-        draft.putts === ''
-          ? ''
-          : String(Math.max(0, Math.round(draft.putts))),
-      fir: draft.fir || '',
-      gir: draft.gir || '',
-      penalties: Math.max(0, Math.round(draft.penalties || 0)),
-    };
+    if (draft.partnerId) {
+      // Partner write: isolated lane, session-only storage.
+      const arr = partnerScoreArray(draft.partnerId);
+      arr[holeIndex] = String(Math.max(1, Math.round(draft.score)));
+      saveRoundSession();
+    } else {
+      state.round[holeIndex] = {
+        ...state.round[holeIndex],
+        hole: draft.hole,
+        score: String(Math.max(1, Math.round(draft.score))),
+        putts:
+          draft.putts === ''
+            ? ''
+            : String(Math.max(0, Math.round(draft.putts))),
+        fir: draft.fir || '',
+        gir: draft.gir || '',
+        penalties: Math.max(0, Math.round(draft.penalties || 0)),
+      };
 
-    syncRoundScorecard();
+      syncRoundScorecard();
 
-    // Remember for the next hole's pre-fill.
-    if (draft.putts !== '')
-      save(LAST_PUTTS_KEY, Math.max(0, Math.round(draft.putts)));
+      // Remember for the next hole's pre-fill.
+      if (draft.putts !== '')
+        save(LAST_PUTTS_KEY, Math.max(0, Math.round(draft.putts)));
+    }
 
     const shouldAdvance =
       andNext &&
@@ -4981,13 +5029,18 @@ out geom;`;
     renderRoundMapHud();
     renderStats();
 
+    const who = draft.partnerId
+      ? scoreDraftPartnerName() || 'Partner'
+      : `Hole ${draft.hole}`;
     if (shouldAdvance) {
       setNotice(
-        `Hole ${draft.hole} saved. Now playing Hole ${rs.hole}.`,
+        `${who} saved${
+          draft.partnerId ? ` for hole ${draft.hole}` : ''
+        }. Now playing Hole ${rs.hole}.`,
         'greenish'
       );
     } else {
-      setNotice(`Hole ${draft.hole} saved.`, 'greenish');
+      setNotice(`${who} saved.`, 'greenish');
     }
 
     haptic(10);
@@ -5085,6 +5138,22 @@ out geom;`;
         });
       });
     }
+
+    // Partner mode: putts / FIR / GIR / penalties are yours-only, so the
+    // whole sheet collapses to the score stepper for a partner.
+    const draftingPartner = !!draft.partnerId;
+    [
+      'roundPuttsOptions',
+      'roundFirOptions',
+      'roundGirOptions',
+      'roundPenOptions',
+    ].forEach((key) => {
+      const el = els[key];
+      if (!el) return;
+      const section = el.closest('.round-score-section');
+      if (section) section.style.display = draftingPartner ? 'none' : '';
+    });
+    renderScoreSheetChips();
 
     if (els.roundPenOptions) {
       els.roundPenOptions.querySelectorAll('button').forEach((button) => {
@@ -5220,6 +5289,7 @@ out geom;`;
       }
     });
 
+    initGroupEvents();
     renderRoundShotUI();
   }
 
@@ -6258,6 +6328,18 @@ out geom;`;
     );
 
     state.roundSession.currentHole = state.roundSession.hole;
+
+    // Sessions saved before group scoring existed get the fields here, so
+    // every downstream reader can assume they exist.
+    if (!Array.isArray(state.roundSession.groupPlayers)) {
+      state.roundSession.groupPlayers = [];
+    }
+    if (
+      !state.roundSession.groupScores ||
+      typeof state.roundSession.groupScores !== 'object'
+    ) {
+      state.roundSession.groupScores = {};
+    }
 
     state.round = state.roundSession.scorecard;
 
@@ -10842,6 +10924,240 @@ out geom;`;
       haptic(5);
     });
     renderPlanner();
+  }
+  // ============================================================
+  //  BLOCK 16c — GROUP SCORING
+  //  Partners + their scores ride on roundSession (groupPlayers /
+  //  groupScores). Player 1 is ALWAYS the user and is implicit — only
+  //  partners are stored. Nothing here ever writes to state.round, which
+  //  is what keeps the personal stats pipeline clean.
+  // ============================================================
+
+  const GROUP_MAX_PARTNERS = 3; // 3 partners + you = a standard foursome
+
+  function groupPartners() {
+    const rs = state.roundSession;
+    return rs && Array.isArray(rs.groupPlayers) ? rs.groupPlayers : [];
+  }
+
+  // Lazily create (and size to the course) a partner's score array.
+  function partnerScoreArray(partnerId) {
+    const rs = state.roundSession;
+    if (!rs) return [];
+    if (
+      !rs.groupScores ||
+      typeof rs.groupScores !== 'object'
+    ) {
+      rs.groupScores = {};
+    }
+    const n = getCourseHoleCount();
+    let arr = rs.groupScores[partnerId];
+    if (!Array.isArray(arr)) arr = [];
+    while (arr.length < n) arr.push('');
+    rs.groupScores[partnerId] = arr;
+    return arr;
+  }
+
+  function scoreDraftPartnerName() {
+    const pid = state._scorePartnerId || '';
+    if (!pid) return '';
+    const p = groupPartners().find((x) => x.id === pid);
+    return p ? p.name : '';
+  }
+
+  function groupTotals() {
+    const out = [];
+    for (const p of groupPartners()) {
+      const arr = partnerScoreArray(p.id);
+      let total = 0;
+      let thru = 0;
+      arr.forEach((v) => {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) {
+          total += n;
+          thru += 1;
+        }
+      });
+      out.push({ id: p.id, name: p.name, total: thru ? total : null, thru });
+    }
+    return out;
+  }
+
+  function renderGroupUI() {
+    if (!els.groupTableWrap) return;
+    const partners = groupPartners();
+    if (els.groupCountChip) {
+      els.groupCountChip.textContent = partners.length
+        ? `${1 + partners.length} players`
+        : 'Solo';
+    }
+    renderGroupEditor();
+    renderGroupTable();
+  }
+
+  function renderGroupEditor() {
+    if (!els.groupEditorList) return;
+    const partners = groupPartners();
+    els.groupEditorList.innerHTML = partners
+      .map(
+        (p) => `
+        <div class="group-editor-row" data-id="${escapeHtml(p.id)}">
+          <input type="text" maxlength="24" value="${escapeHtml(p.name)}"
+            aria-label="Partner name" />
+          <button class="group-editor-remove" type="button"
+            aria-label="Remove ${escapeHtml(p.name)}">✕</button>
+        </div>`
+      )
+      .join('');
+
+    els.groupEditorList
+      .querySelectorAll('.group-editor-row')
+      .forEach((row) => {
+        const id = row.dataset.id;
+        const input = row.querySelector('input');
+        input.addEventListener('change', () => {
+          const p = groupPartners().find((x) => x.id === id);
+          if (!p) return;
+          p.name = input.value.trim() || 'Player';
+          saveRoundSession();
+          renderGroupUI();
+        });
+        row
+          .querySelector('.group-editor-remove')
+          .addEventListener('click', () => {
+            const p = groupPartners().find((x) => x.id === id);
+            if (
+              !p ||
+              !confirm(`Remove ${p.name} and their scores from this round?`)
+            ) {
+              return;
+            }
+            const rs = state.roundSession;
+            rs.groupPlayers = rs.groupPlayers.filter((x) => x.id !== id);
+            delete rs.groupScores[id];
+            if (state._scorePartnerId === id) state._scorePartnerId = '';
+            saveRoundSession();
+            renderGroupUI();
+            renderRound();
+            haptic(8);
+          });
+      });
+  }
+
+  function renderGroupTable() {
+    if (!els.groupTableWrap) return;
+    const partners = groupPartners();
+    const n = getCourseHoleCount();
+    const mine = getScorecardRows();
+
+    if (!partners.length) {
+      els.groupTableWrap.innerHTML =
+        '<div class="hint">No partners yet — add them above and their scores will appear beside yours.</div>';
+      return;
+    }
+
+    const holeHeads = Array.from({ length: n }, (_, i) => `<th>${i + 1}</th>`).join('');
+
+    const sumRow = (cells, cls) =>
+      `<tr>${cells}</tr>`.replace('<tr>', `<tr${cls ? ` class="${cls}"` : ''}>`);
+
+    // Your row: read-only mirror of the main scorecard.
+    const yourCells = [
+      '<td>You</td>',
+      ...Array.from({ length: n }, (_, i) => {
+        const v = mine[i] ? mine[i].score : '';
+        return `<td>${v === '' ? '·' : escapeHtml(v)}</td>`;
+      }),
+    ].join('');
+    const yourTotal = summarizeRound(mine).totalScore;
+
+    const partnerRows = partners
+      .map((p) => {
+        const arr = partnerScoreArray(p.id);
+        const cells = [
+          `<td>${escapeHtml(p.name)}</td>`,
+          ...arr.map(
+            (v, i) =>
+              `<td><input type="number" inputmode="numeric" min="1" max="15"
+                value="${escapeHtml(v)}" data-pid="${escapeHtml(p.id)}"
+                data-i="${i}" aria-label="${escapeHtml(p.name)} hole ${i + 1}" /></td>`
+          ),
+        ].join('');
+        return sumRow(cells);
+      })
+      .join('');
+
+      const yourTotalCells =
+      yourCells + `<td class="group-total">${yourTotal || '·'}</td>`;
+
+    els.groupTableWrap.innerHTML = `
+      <div class="group-table-scroll">
+        <table class="group-table">
+          <thead><tr><th>Hole</th>${holeHeads}<th>Tot</th></tr></thead>
+          <tbody>
+            ${sumRow(yourTotalCells)}
+            ${partnerRows}
+          </tbody>
+        </table>
+      </div>`;
+
+    els.groupTableWrap.querySelectorAll('input[data-pid]').forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const arr = partnerScoreArray(inp.dataset.pid);
+        arr[Number(inp.dataset.i)] = sanitizeInt(inp.value);
+        saveRoundSession();
+        renderGroupTable();
+      });
+    });
+  }
+
+  function renderScoreSheetChips() {
+    if (!els.roundScoreChips) return;
+    const partners = groupPartners();
+    if (!partners.length) {
+      els.roundScoreChips.hidden = true;
+      els.roundScoreChips.innerHTML = '';
+      return;
+    }
+    els.roundScoreChips.hidden = false;
+    const cur = state._scorePartnerId || '';
+    const chip = (label, pid) =>
+      `<button class="club-chip${cur === pid ? ' active' : ''}"
+        data-pid="${escapeHtml(pid)}" type="button">${escapeHtml(label)}</button>`;
+    els.roundScoreChips.innerHTML =
+      chip('You', '') + partners.map((p) => chip(p.name, p.id)).join('');
+
+    els.roundScoreChips
+      .querySelectorAll('.club-chip')
+      .forEach((b) => {
+        b.addEventListener('click', () => {
+          state._scorePartnerId = b.dataset.pid || '';
+          state.roundScoreDraft = getRoundScoreDraft();
+          renderRoundScoreSheet();
+          haptic(5);
+        });
+      });
+  }
+
+  function initGroupEvents() {
+    if (!els.addPartnerBtn) return;
+    els.addPartnerBtn.addEventListener('click', () => {
+      const rs = state.roundSession;
+      if (!rs) {
+        setNotice('Start a round before adding playing partners.', 'greenish');
+        return;
+      }
+      if (groupPartners().length >= GROUP_MAX_PARTNERS) {
+        alert(`Maximum ${GROUP_MAX_PARTNERS} partners (foursome).`);
+        return;
+      }
+      const name = (prompt('Partner name:') || '').trim();
+      if (!name) return;
+      rs.groupPlayers.push({ id: cryptoId(), name: name.slice(0, 24) });
+      saveRoundSession();
+      renderGroupUI();
+      haptic(8);
+    });
   }
   // ============================================================
   //  BLOCK 17 — SELF-CHECK (dev only; safe to ship, costs nothing until called)

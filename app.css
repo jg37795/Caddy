@@ -4507,3 +4507,87 @@ body.dark .plan-green-tile {
       rgba(24, 164, 91, 0.88));
   color: #fff;
 }
+
+/* ===== Group scoring ===== */
+.group-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.group-editor-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-editor-remove {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(214, 69, 69, 0.12);
+  color: var(--danger);
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.group-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 2px -2px 4px;
+  padding-bottom: 4px;
+}
+
+table.group-table {
+  border-collapse: collapse;
+  min-width: max-content;
+  font-size: 13px;
+}
+
+.group-table th,
+.group-table td {
+  padding: 5px 6px;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.group-table th {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+/* Sticky first column so player names stay visible while scrolling holes */
+.group-table th:first-child,
+.group-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 68px;
+  text-align: left;
+  font-weight: 850;
+  background: var(--card-solid);
+}
+
+body.dark .group-table th:first-child,
+body.dark .group-table td:first-child {
+  background: #101613;
+}
+
+.group-table input {
+  width: 46px;
+  padding: 6px 4px;
+  border-radius: 9px;
+  text-align: center;
+}
+
+.group-total {
+  font-weight: 900;
+  color: var(--green);
+}
+
+body.dark .group-total {
+  color: #63e89a;
+}
