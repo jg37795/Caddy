@@ -16,6 +16,15 @@
   const LAST_ROUND_SETUP_KEY = 'caddy:lastRoundSetup:v1';
   const NEARBY_COURSES_CACHE_KEY = 'caddy:nearbyCourses:v3';
   const NEARBY_COURSES_TTL = 6 * 60 * 60 * 1000;
+  // Course name search (round setup): Overpass regex lookup around the last
+  // known location. Radius-bounded on purpose — unbounded name queries
+  // reliably time out on public Overpass mirrors.
+  const COURSE_SEARCH_RADIUS_M = 100000;
+  const COURSE_SEARCH_MIN_CHARS = 3;
+  const COURSE_SEARCH_DEBOUNCE_MS = 500;
+  const COURSE_SEARCH_TTL_MS = 24 * 60 * 60 * 1000;
+  const COURSE_SEARCH_FETCH_LIMIT = 60;   // fetched, sorted by distance, then trimmed…
+  const COURSE_SEARCH_MAX_RESULTS = 12;   // …to this many displayed
   const LAST_PUTTS_KEY = 'caddy:lastPutts';
   const NEARBY_COURSE_RADIUS_M = 12000;
   const MAX_GPS_SPEED_MPS = 18;
@@ -234,6 +243,8 @@
     planDetailCard: $('planDetailCard'),
     planDetailTitle: $('planDetailTitle'),
     planDetailBody: $('planDetailBody'),
+    // Course name search (round setup)
+    courseSearchInput: $('courseSearchInput'),
   };
 
   const savedLoc = (() => {
@@ -264,6 +275,11 @@
       rangeRings: true,
     }),
     nearbyCourses: [],
+    courseSearchActive: false,
+    courseSearchLoading: false,
+    courseSearchResults: [],
+    courseSearchError: null,
+    _courseSearchSeq: 0,
     nearbyCourseLoading: false,
     nearbyCourseLoadingScorecard: false,
     nearbySearchRequested: false,
@@ -3803,8 +3819,54 @@
     };
   }
 
+  // Shared option-button markup for BOTH the geo-nearby list and the
+  // name-search list, so saved/selected styling stays identical everywhere.
+  function courseButtonHtml(course, index) {
+    const saved = getSavedCourseMatch(course.name);
+    const distance = formatNearbyCourseDistance(course);
+
+    const selected =
+      state.selectedNearbyCourse &&
+      state.selectedNearbyCourse.id === course.id;
+
+    const label = saved
+      ? 'Saved scorecard'
+      : selected
+        ? 'Selected'
+        : 'Tap to select';
+
+    return `
+          <button
+            class="nearby-course-option${selected ? ' selected' : ''}"
+            type="button"
+            data-index="${index}"
+            aria-pressed="${selected ? 'true' : 'false'}"
+          >
+            <span class="nearby-course-name">
+              ${escapeHtml(course.name)}
+            </span>
+  
+            <span class="nearby-course-meta">
+              ${escapeHtml(distance)}
+              ${distance ? ' · ' : ''}
+              ${escapeHtml(label)}
+            </span>
+          </button>
+        `;
+  }
+
+  // Click handlers must resolve indices against whichever list is on screen.
+  function courseListForIndex(index) {
+    return state.courseSearchActive
+      ? state.courseSearchResults[index]
+      : state.nearbyCourses[index];
+  }
+
   function renderNearbyCourses() {
     if (!els.nearbyCourseList || !els.nearbyCourseStatus) return;
+
+    // While a name search is active, the list shows search results instead.
+    if (state.courseSearchActive) return renderCourseSearchResults();
 
     const courses = Array.isArray(state.nearbyCourses)
       ? state.nearbyCourses
@@ -3842,47 +3904,13 @@
     }
     // fall through to render the list either way
 
-    els.nearbyCourseList.innerHTML = courses
-      .map((course, index) => {
-        const saved = getSavedCourseMatch(course.name);
-        const distance = formatNearbyCourseDistance(course);
-
-        const selected =
-          state.selectedNearbyCourse &&
-          state.selectedNearbyCourse.id === course.id;
-
-        const label = saved
-          ? 'Saved scorecard'
-          : selected
-            ? 'Selected'
-            : 'Tap to select';
-
-        return `
-          <button
-            class="nearby-course-option${selected ? ' selected' : ''}"
-            type="button"
-            data-index="${index}"
-            aria-pressed="${selected ? 'true' : 'false'}"
-          >
-            <span class="nearby-course-name">
-              ${escapeHtml(course.name)}
-            </span>
-  
-            <span class="nearby-course-meta">
-              ${escapeHtml(distance)}
-              ${distance ? ' · ' : ''}
-              ${escapeHtml(label)}
-            </span>
-          </button>
-        `;
-      })
-      .join('');
+    els.nearbyCourseList.innerHTML = courses.map(courseButtonHtml).join('');
 
     els.nearbyCourseList
       .querySelectorAll('.nearby-course-option')
       .forEach((button) => {
         button.addEventListener('click', () => {
-          const course = state.nearbyCourses[Number(button.dataset.index)];
+          const course = courseListForIndex(Number(button.dataset.index));
 
           if (course) {
             selectNearbyCourse(course);
@@ -4623,7 +4651,26 @@ out geom;`;
     els.roundSetupScrim.addEventListener('click', closeRoundSetup);
 
     if (els.findNearbyCoursesBtn) {
-      els.findNearbyCoursesBtn.addEventListener('click', findNearbyCourses);
+      els.findNearbyCoursesBtn.addEventListener('click', () => {
+        // A manual nearby refresh exits any active name-search filter so
+        // the two lists never fight over the same viewport.
+        state.courseSearchActive = false;
+        state.courseSearchResults = [];
+        state.courseSearchError = null;
+        if (els.courseSearchInput) els.courseSearchInput.value = '';
+        findNearbyCourses();
+      });
+    }
+
+    if (els.courseSearchInput) {
+      let searchTimer = null;
+      els.courseSearchInput.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(
+          runCourseSearch,
+          COURSE_SEARCH_DEBOUNCE_MS
+        );
+      });
     }
 
     const nineBtn = document.getElementById('setupNineBtn');
@@ -10249,6 +10296,186 @@ out geom;`;
       els.manualRecSub.textContent = sub;
       renderBreakdown(calc, els.manualBreakdown);
     });
+  }
+  // ============================================================
+  //  BLOCK 16a — COURSE NAME SEARCH (round setup)
+  //  Case-insensitive substring match on golf-course names within a fixed
+  //  radius of the last known location. Feeds the SAME select-and-import
+  //  pipeline as the nearby list, so scorecard fetching is identical.
+  // ============================================================
+
+  // Escape a user string for safe embedding in an Overpass QL regex
+  // literal: QL string-quoting first (backslash, quote), then regex
+  // metacharacters. Prevents both query breakage and regex injection.
+  function osmEscapeQueryString(s) {
+    return String(s)
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/([.*+?^${}()\[\]])/g, '\\$1');
+  }
+
+  function renderCourseSearchResults() {
+    if (!els.nearbyCourseList || !els.nearbyCourseStatus) return;
+
+    if (state.courseSearchLoading) {
+      const q = els.courseSearchInput
+        ? els.courseSearchInput.value.trim()
+        : '';
+      els.nearbyCourseStatus.textContent = `Searching courses named “${q}”…`;
+      els.nearbyCourseList.innerHTML = '';
+      return;
+    }
+
+    const results = Array.isArray(state.courseSearchResults)
+      ? state.courseSearchResults
+      : [];
+
+    if (!results.length) {
+      els.nearbyCourseStatus.textContent =
+        state.courseSearchError ||
+        `No matches within ${Math.round(COURSE_SEARCH_RADIUS_M / 1000)} km.`;
+      els.nearbyCourseList.innerHTML = '';
+      return;
+    }
+
+    const sel = state.selectedNearbyCourse;
+    if (
+      sel &&
+      results.some((c) => c.id === sel.id) &&
+      state.nearbyCourseLoadingScorecard
+    ) {
+      els.nearbyCourseStatus.textContent =
+        'Course selected — loading mapped scorecard data…';
+    } else {
+      els.nearbyCourseStatus.textContent = `${results.length} match${
+        results.length === 1 ? '' : 'es'
+      } — tap one to load its scorecard.`;
+    }
+
+    els.nearbyCourseList.innerHTML = results
+      .map((course, index) => courseButtonHtml(course, index))
+      .join('');
+
+    els.nearbyCourseList
+      .querySelectorAll('.nearby-course-option')
+      .forEach((button) => {
+        button.addEventListener('click', () => {
+          const course =
+            state.courseSearchResults[Number(button.dataset.index)];
+          if (course) selectNearbyCourse(course);
+        });
+      });
+  }
+
+  async function runCourseSearch() {
+    if (!els.courseSearchInput) return;
+    const term = els.courseSearchInput.value.trim();
+
+    // Below minimum length: exit search mode and restore the nearby view.
+    if (term.length < COURSE_SEARCH_MIN_CHARS) {
+      state.courseSearchActive = false;
+      state.courseSearchLoading = false;
+      state.courseSearchError = null;
+      state.courseSearchResults = [];
+      state._courseSearchSeq++;
+      renderNearbyCourses();
+      return;
+    }
+
+    state.courseSearchActive = true;
+    const mySeq = ++state._courseSearchSeq;
+
+    if (!state.loc) {
+      state.courseSearchLoading = false;
+      state.courseSearchError = null;
+      state.courseSearchResults = [];
+      renderCourseSearchResults(); // prints the needs-location message
+      return;
+    }
+
+    state.courseSearchLoading = true;
+    state.courseSearchError = null;
+    renderCourseSearchResults();
+
+    const { lat, lng } = state.loc;
+    const pat = osmEscapeQueryString(term);
+    const query = `
+    [out:json][timeout:20];
+    (
+      nwr["leisure"="golf_course"]["name"~"${pat}",i](around:${COURSE_SEARCH_RADIUS_M},${lat},${lng});
+      nwr["golf"="course"]["name"~"${pat}",i](around:${COURSE_SEARCH_RADIUS_M},${lat},${lng});
+    );
+    out center tags ${COURSE_SEARCH_FETCH_LIMIT};
+  `;
+
+    try {
+      const data = await overpassFetch(query, {
+        timeoutMs: 25000,
+        cacheKey:
+          OSM_CACHE_PREFIX +
+          `search:${COURSE_SEARCH_RADIUS_M}:${lat.toFixed(2)},${lng.toFixed(
+            2
+          )}:${term.toLowerCase()}`,
+        cacheTtlMs: COURSE_SEARCH_TTL_MS,
+      });
+
+      const seen = new Set();
+      const results = (Array.isArray(data) ? data : [])
+        .map((item) => {
+          const name = String(item.tags?.name || '').trim();
+          const point = item.center || item;
+
+          if (
+            !name ||
+            !Number.isFinite(Number(point.lat)) ||
+            !Number.isFinite(Number(point.lon))
+          ) {
+            return null;
+          }
+
+          return {
+            id: `osm:${item.type}:${item.id}`,
+            osmType: item.type,
+            osmId: Number(item.id),
+            name,
+            lat: Number(point.lat),
+            lng: Number(point.lon),
+            source: 'openstreetmap',
+          };
+        })
+        .filter(Boolean)
+        .filter((course) => {
+          const key = `${course.name.toLowerCase()}|${course.lat.toFixed(
+            4
+          )}|${course.lng.toFixed(4)}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            haversineMeters(state.loc, a) - haversineMeters(state.loc, b)
+        )
+        .slice(0, COURSE_SEARCH_MAX_RESULTS);
+
+      // Drop the answer if the query it belongs to is no longer current.
+      if (mySeq !== state._courseSearchSeq) return;
+      state.courseSearchResults = results;
+      state.courseSearchError = null;
+    } catch (error) {
+      console.warn('Course name search failed:', error);
+      if (mySeq !== state._courseSearchSeq) return;
+      state.courseSearchResults = [];
+      state.courseSearchError =
+        error && error.name === 'AbortError'
+          ? 'Name search timed out — try again.'
+          : 'Name search is unavailable right now.';
+    } finally {
+      if (mySeq === state._courseSearchSeq) {
+        state.courseSearchLoading = false;
+        if (state.courseSearchActive) renderCourseSearchResults();
+      }
+    }
   }
   // ============================================================
   //  BLOCK 16b — HOLE PLANNER (prep mode)

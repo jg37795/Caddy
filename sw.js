@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.32'; // feat: hole planner on the Plan tab (offline prep), manual calc collapsed beneath it
+const CACHE_VERSION = 'v1.0.33'; // feat: course search by name in round setup (100 km radius, debounced, cached)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
