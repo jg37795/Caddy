@@ -714,9 +714,10 @@
     try {
       if (navigator.vibrate && !reduceMotion) navigator.vibrate(ms);
     } catch { }
-    // iOS has no Vibration API (Safari never shipped it), so a whisper-
-    // quiet audio tick carries the confirmation there. Muted by the
-    // phone's silent switch; toggle in Settings.
+    // iOS: no Vibration API, but Safari 17.4+ fires a native Taptic tick
+    // when a <input type="checkbox" switch> toggles — so we click a
+    // hidden one (technique from the ios-haptics/web-haptics libs).
+    if (!navigator.vibrate) iosHaptics.feedback(ms >= 20);
     tickSound.play(ms >= 20 ? 'thock' : 'tick');
   }
 
@@ -739,8 +740,72 @@
       go: 'tick', manage: 'thock', bail: 'double',
       shotStart: 'double', shotFinish: 'thock',
     }[name];
+    const gaps = {
+      go: [], manage: [110], bail: [110, 110],
+      shotStart: [60, 40], shotFinish: [],
+    }[name];
+    if (!navigator.vibrate) iosHaptics.pattern(gaps);
     tickSound.play(sound);
   }
+
+  // Real haptics on iOS via Safari's switch-control tick. A hidden
+  // <label for>+<input type=checkbox switch> pair is created once;
+  // clicking the label toggles the switch and iOS pulses the Taptic
+  // Engine. Repeated clicks are rate-limited (iOS ignores faster than
+  // ~16ms); multi-tick patterns space clicks to read as distinct pulses.
+  const iosHaptics = (() => {
+    let label = null;
+    let lastAt = 0;
+
+    function ensure() {
+      if (label) return label;
+      if (typeof document === 'undefined' || !document.body) return null;
+      try {
+        const id = 'caddy-haptic-switch';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.setAttribute('switch', '');
+        input.id = id;
+        input.style.all = 'initial';
+        input.style.appearance = 'auto';
+        input.style.display = 'none';
+        label = document.createElement('label');
+        label.setAttribute('for', id);
+        label.style.display = 'none';
+        label.appendChild(input);
+        document.body.appendChild(label);
+      } catch {
+        label = null;
+      }
+      return label;
+    }
+
+    function tick() {
+      if (state.prefs.tapSounds === false || reduceMotion) return;
+      const now = performance.now();
+      if (now - lastAt < 16) return; // iOS drops faster clicks anyway
+      const l = ensure();
+      if (!l) return;
+      lastAt = now;
+      try { l.click(); } catch { /* garnish, never load-bearing */ }
+    }
+
+    function feedback(strong) {
+      if (strong) pattern([110]);
+      else tick();
+    }
+
+    function pattern(gaps) {
+      tick();
+      let at = 0;
+      (gaps || []).forEach((g) => {
+        at += g;
+        setTimeout(tick, at);
+      });
+    }
+
+    return { feedback, pattern };
+  })();
 
   // Sub-30ms filtered ticks at very low gain — felt more than heard.
   // Created lazily on first gesture (autoplay policies), inert when the
