@@ -1680,7 +1680,14 @@ body[data-dragging='1'] .round-fab-wrap {
 
 body[data-detent='full']:not([data-dragging='1']) .round-fab-wrap {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  /* Children (Start shot FAB, club picker, chips) declare
+     pointer-events:auto, which re-enables them inside a pointer-events:none
+     parent. visibility — delayed until the fade ends — is what actually
+     blocks taps and keyboard focus. */
+  transition: transform 0.42s var(--spring), opacity 0.3s ease,
+    visibility 0s linear 0.32s;
 }
 
 .round-fab-wrap[hidden] {
@@ -1896,7 +1903,10 @@ body[data-dragging='1'] .advice-pill {
 
 body[data-detent='full']:not([data-dragging='1']) .advice-pill {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  transition: transform 0.42s var(--spring), opacity 0.3s ease,
+    visibility 0s linear 0.32s;
 }
 
 /* Verdict ring around the bulb */
@@ -2367,13 +2377,18 @@ body[data-detent='full'] .sheet-scroll {
   max-height: 0;
   opacity: 0;
   overflow: hidden;
-  transition: max-height 0.42s var(--spring), opacity 0.3s ease;
+  visibility: hidden;
+  transition: max-height 0.42s var(--spring), opacity 0.3s ease,
+    visibility 0s linear 0.42s;
 }
 
 body[data-detent='half'] .fcb-block,
 body[data-detent='full'] .fcb-block {
   max-height: 400px;
   opacity: 1;
+  visibility: visible;
+  transition: max-height 0.42s var(--spring), opacity 0.3s ease,
+    visibility 0s;
 }
 
 body[data-dragging='1'] .fcb-block {
@@ -2855,7 +2870,10 @@ body.dark .aim-chip.over {
    open (the sheet's own Wind metric takes over there). */
 body[data-detent='full']:not([data-dragging='1']) .wind-pill {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.15s var(--spring-snappy),
+    visibility 0s linear 0.32s;
 }
 
 body[data-dragging='1'] .wind-pill {
@@ -2957,6 +2975,8 @@ body[data-detent='collapsed'] .detail-block,
 body[data-detent='half'] .detail-block {
   opacity: 0;
   pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0s linear 0.3s;
 }
 
 body[data-detent='full'] .detail-block {
@@ -3704,7 +3724,13 @@ body[data-dragging='1'] .leaflet-bottom.leaflet-right {
 
 body[data-detent='full']:not([data-dragging='1']) .leaflet-bottom.leaflet-right {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  /* Leaflet's own stylesheet sets .leaflet-control { pointer-events: auto },
+     which resurrects the invisible zoom buttons unless visibility hides
+     the whole corner. */
+  transition: transform 0.42s var(--spring), opacity 0.3s ease,
+    visibility 0s linear 0.32s;
 }
 
 .user-pulse {

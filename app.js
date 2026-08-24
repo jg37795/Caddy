@@ -618,7 +618,8 @@
 
       // Group scoring. Lives ONLY on the session — it never merges into
       // state.round, so personal stats/history stay untouched by design.
-      groupPlayers: [],
+      // Seeded from the saved roster so your usual group is preloaded.
+      groupPlayers: loadGroupRoster().map((p) => ({ ...p })),
       groupScores: {},
     };
   }
@@ -1122,6 +1123,13 @@
     save('caddy:prefs', state.prefs);
     updateAimColor();
     restyleShotLines();
+    if (state.loc && state.target) {
+      renderRangeRings();
+      renderDispersionZone(
+        initialBearingDeg(state.loc, state.target),
+        state.clubs.find((c) => c.id === state.lastRecClubId) || null
+      );
+    }
   }
   function updateAimColor() {
     const imagery = state.prefs.mapLayer === 'satellite';
@@ -2869,6 +2877,9 @@
       state.history.push({ date: new Date().toISOString(), ...s });
       save('caddy:history', state.history);
     }
+    // Keep this round's partners for next time (and for pre-round editing).
+    if (state.roundSession)
+      mergePartnersIntoRoster(state.roundSession.groupPlayers);
     state.roundSession = null;
     state.holeGeoKey = null;
     // The tee editor only exists inside a live round — drop any on-map tee
@@ -6341,6 +6352,9 @@ out geom;`;
     ) {
       state.roundSession.groupScores = {};
     }
+    // Adopt any existing session partners into the persistent roster so
+    // upgrading doesn't orphan your current group.
+    mergePartnersIntoRoster(state.roundSession.groupPlayers);
 
     state.round = state.roundSession.scorecard;
 
@@ -6356,6 +6370,16 @@ out geom;`;
       'touchend',
       (e) => {
         if (e.target.closest && e.target.closest('#map')) return;
+        // Never swallow taps on controls: preventing touchend cancels the
+        // synthetic click, so rapid +/− taps on the score stepper were
+        // being silently dropped.
+        if (
+          e.target.closest &&
+          e.target.closest(
+            'button, input, select, textarea, label, a, summary, [role="button"]'
+          )
+        )
+          return;
         const now = Date.now();
         if (now - _lastTouch <= 320) e.preventDefault();
         _lastTouch = now;
@@ -10931,9 +10955,53 @@ out geom;`;
 
   const GROUP_MAX_PARTNERS = 3; // 3 partners + you = a standard foursome
 
+  // Persisted playing-partner roster. Lives OUTSIDE any round so partners
+  // can be managed before starting and survive between rounds.
+  const GROUP_ROSTER_KEY = 'caddy:groupRoster:v1';
+
+  function loadGroupRoster() {
+    const v = load(GROUP_ROSTER_KEY, []);
+    return Array.isArray(v)
+      ? v.filter(
+          (p) =>
+            p &&
+            typeof p.id === 'string' &&
+            typeof p.name === 'string'
+        )
+      : [];
+  }
+
+  function saveGroupRoster(list) {
+    save(
+      GROUP_ROSTER_KEY,
+      Array.isArray(list) ? list.slice(0, GROUP_MAX_PARTNERS) : []
+    );
+  }
+
+  // Pull a current/finished session's partners into the roster so the next
+  // round — and pre-round editing — keeps the same group.
+  function mergePartnersIntoRoster(players) {
+    if (!Array.isArray(players) || !players.length) return;
+    const roster = loadGroupRoster();
+    const seen = new Set(roster.map((p) => p.id));
+    for (const p of players) {
+      if (!p || typeof p.id !== 'string' || seen.has(p.id)) continue;
+      if (roster.length >= GROUP_MAX_PARTNERS) break;
+      roster.push({
+        id: p.id,
+        name: String(p.name || 'Player').slice(0, 24),
+      });
+      seen.add(p.id);
+    }
+    saveGroupRoster(roster);
+  }
+
   function groupPartners() {
     const rs = state.roundSession;
-    return rs && Array.isArray(rs.groupPlayers) ? rs.groupPlayers : [];
+    if (rs && Array.isArray(rs.groupPlayers)) return rs.groupPlayers;
+    // No live round: fall back to the saved roster so partners can be
+    // added/removed/renamed before starting and aren't lost between rounds.
+    return loadGroupRoster();
   }
 
   // Lazily create (and size to the course) a partner's score array.
@@ -11012,10 +11080,22 @@ out geom;`;
         const id = row.dataset.id;
         const input = row.querySelector('input');
         input.addEventListener('change', () => {
-          const p = groupPartners().find((x) => x.id === id);
-          if (!p) return;
-          p.name = input.value.trim() || 'Player';
-          saveRoundSession();
+          const name = input.value.trim() || 'Player';
+          const rs = state.roundSession;
+          const inSession =
+            rs && Array.isArray(rs.groupPlayers)
+              ? rs.groupPlayers.find((x) => x.id === id)
+              : null;
+          if (inSession) {
+            inSession.name = name;
+            saveRoundSession();
+          }
+          const roster = loadGroupRoster();
+          const inRoster = roster.find((x) => x.id === id);
+          if (inRoster) {
+            inRoster.name = name;
+            saveGroupRoster(roster);
+          }
           renderGroupUI();
         });
         row
@@ -11024,15 +11104,25 @@ out geom;`;
             const p = groupPartners().find((x) => x.id === id);
             if (
               !p ||
-              !confirm(`Remove ${p.name} and their scores from this round?`)
+              !confirm(
+                `Remove ${p.name}${
+                  state.roundSession ? ' and their scores from this round' : ''
+                }?`
+              )
             ) {
               return;
             }
-            const rs = state.roundSession;
-            rs.groupPlayers = rs.groupPlayers.filter((x) => x.id !== id);
-            delete rs.groupScores[id];
-            if (state._scorePartnerId === id) state._scorePartnerId = '';
-            saveRoundSession();
+            if (
+              state.roundSession &&
+              Array.isArray(state.roundSession.groupPlayers)
+            ) {
+              state.roundSession.groupPlayers =
+                state.roundSession.groupPlayers.filter((x) => x.id !== id);
+              delete state.roundSession.groupScores[id];
+              if (state._scorePartnerId === id) state._scorePartnerId = '';
+              saveRoundSession();
+            }
+            saveGroupRoster(loadGroupRoster().filter((x) => x.id !== id));
             renderGroupUI();
             renderRound();
             haptic(8);
@@ -11052,6 +11142,11 @@ out geom;`;
       return;
     }
 
+    const inRound = !!state.roundSession;
+    const totalsById = {};
+    if (inRound)
+      groupTotals().forEach((g) => (totalsById[g.id] = g));
+
     const holeHeads = Array.from({ length: n }, (_, i) => `<th>${i + 1}</th>`).join('');
 
     const sumRow = (cells, cls) =>
@@ -11069,17 +11164,22 @@ out geom;`;
 
     const partnerRows = partners
       .map((p) => {
-        const arr = partnerScoreArray(p.id);
-        const cells = [
-          `<td>${escapeHtml(p.name)}</td>`,
-          ...arr.map(
-            (v, i) =>
-              `<td><input type="number" inputmode="numeric" min="1" max="15"
+        const arr = inRound ? partnerScoreArray(p.id) : [];
+        const tot = totalsById[p.id];
+        // Every row needs the trailing Tot cell or the columns misalign
+        // against the header and your row.
+        const totalCell =
+          inRound && tot && tot.thru
+            ? `<td class="group-total">${tot.total}</td>`
+            : '<td>·</td>';
+        const scoreCells = Array.from({ length: n }, (_, i) => {
+          if (!inRound) return '<td>·</td>';
+          const v = arr[i];
+          return `<td><input type="number" inputmode="numeric" min="1" max="15"
                 value="${escapeHtml(v)}" data-pid="${escapeHtml(p.id)}"
-                data-i="${i}" aria-label="${escapeHtml(p.name)} hole ${i + 1}" /></td>`
-          ),
-        ].join('');
-        return sumRow(cells);
+                data-i="${i}" aria-label="${escapeHtml(p.name)} hole ${i + 1}" /></td>`;
+        }).join('');
+        return sumRow(`<td>${escapeHtml(p.name)}</td>${scoreCells}${totalCell}`);
       })
       .join('');
 
@@ -11095,7 +11195,12 @@ out geom;`;
             ${partnerRows}
           </tbody>
         </table>
-      </div>`;
+      </div>
+      ${
+        inRound
+          ? ''
+          : '<div class="hint" style="margin-top:6px">Start a round to enter partner scores.</div>'
+      }`;
 
     els.groupTableWrap.querySelectorAll('input[data-pid]').forEach((inp) => {
       inp.addEventListener('change', () => {
@@ -11129,6 +11234,9 @@ out geom;`;
         b.addEventListener('click', () => {
           state._scorePartnerId = b.dataset.pid || '';
           state.roundScoreDraft = getRoundScoreDraft();
+          // Repaint the chips so the tapped name gets the green .active
+          // state — the sheet re-render alone never touched these buttons.
+          renderScoreSheetChips();
           renderRoundScoreSheet();
           haptic(5);
         });
@@ -11138,19 +11246,28 @@ out geom;`;
   function initGroupEvents() {
     if (!els.addPartnerBtn) return;
     els.addPartnerBtn.addEventListener('click', () => {
-      const rs = state.roundSession;
-      if (!rs) {
-        setNotice('Start a round before adding playing partners.', 'greenish');
-        return;
-      }
       if (groupPartners().length >= GROUP_MAX_PARTNERS) {
         alert(`Maximum ${GROUP_MAX_PARTNERS} partners (foursome).`);
         return;
       }
       const name = (prompt('Partner name:') || '').trim();
       if (!name) return;
-      rs.groupPlayers.push({ id: cryptoId(), name: name.slice(0, 24) });
-      saveRoundSession();
+
+      const player = { id: cryptoId(), name: name.slice(0, 24) };
+
+      // Live round: add to the session (giving them a score lane)…
+      if (state.roundSession) {
+        if (!Array.isArray(state.roundSession.groupPlayers))
+          state.roundSession.groupPlayers = [];
+        state.roundSession.groupPlayers.push(player);
+        saveRoundSession();
+      }
+
+      // …and always remember them for future rounds.
+      const roster = loadGroupRoster();
+      roster.push(player);
+      saveGroupRoster(roster);
+
       renderGroupUI();
       haptic(8);
     });
@@ -11590,6 +11707,13 @@ out geom;`;
       save('caddy:prefs', state.prefs);
       updateAimColor();
       restyleShotLines();
+      if (state.loc && state.target) {
+        renderRangeRings();
+        renderDispersionZone(
+          initialBearingDeg(state.loc, state.target),
+          state.clubs.find((c) => c.id === state.lastRecClubId) || null
+        );
+      }
       ['lineCasing', 'lineHalo', 'line', 'target', 'user'].forEach((k) => {
         if (state.markers[k] && state.markers[k].bringToFront)
           state.markers[k].bringToFront();

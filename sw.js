@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.34'; // fix: startup ReferenceError in initRoundMode killed round/advice/planner UI
+const CACHE_VERSION = 'v1.0.35'; // fix: partner roster/chip selection, ghost taps on faded UI, misc polish
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
