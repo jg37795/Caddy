@@ -4921,6 +4921,21 @@ out geom;`;
       });
     }
 
+    // Partner mode: putts / FIR / GIR / penalties are yours-only, so the
+    // whole sheet collapses to the score stepper for a partner.
+    const draftingPartner = !!draft.partnerId;
+    [
+      'roundPuttsOptions',
+      'roundFirOptions',
+      'roundGirOptions',
+      'roundPenOptions',
+    ].forEach((key) => {
+      const el = els[key];
+      if (!el) return;
+      const section = el.closest('.round-score-section');
+      if (section) section.style.display = draftingPartner ? 'none' : '';
+    });
+
     const totalHoles = getCourseHoleCount();
     const canAdvance =
       getCurrentHoleNumber() < totalHoles &&
@@ -4957,6 +4972,7 @@ out geom;`;
     state._scorePartnerId = ''; // every open starts on your own card
     state.roundScoreDraft = getRoundScoreDraft();
 
+    renderScoreSheetChips();
     renderRoundScoreSheet();
 
     els.roundScoreScrim.classList.add('open');
@@ -5034,8 +5050,7 @@ out geom;`;
       : `Hole ${draft.hole}`;
     if (shouldAdvance) {
       setNotice(
-        `${who} saved${
-          draft.partnerId ? ` for hole ${draft.hole}` : ''
+        `${who} saved${draft.partnerId ? ` for hole ${draft.hole}` : ''
         }. Now playing Hole ${rs.hole}.`,
         'greenish'
       );
@@ -5139,20 +5154,6 @@ out geom;`;
       });
     }
 
-    // Partner mode: putts / FIR / GIR / penalties are yours-only, so the
-    // whole sheet collapses to the score stepper for a partner.
-    const draftingPartner = !!draft.partnerId;
-    [
-      'roundPuttsOptions',
-      'roundFirOptions',
-      'roundGirOptions',
-      'roundPenOptions',
-    ].forEach((key) => {
-      const el = els[key];
-      if (!el) return;
-      const section = el.closest('.round-score-section');
-      if (section) section.style.display = draftingPartner ? 'none' : '';
-    });
     renderScoreSheetChips();
 
     if (els.roundPenOptions) {
@@ -10429,9 +10430,8 @@ out geom;`;
       els.nearbyCourseStatus.textContent =
         'Course selected — loading mapped scorecard data…';
     } else {
-      els.nearbyCourseStatus.textContent = `${results.length} match${
-        results.length === 1 ? '' : 'es'
-      } — tap one to load its scorecard.`;
+      els.nearbyCourseStatus.textContent = `${results.length} match${results.length === 1 ? '' : 'es'
+        } — tap one to load its scorecard.`;
     }
 
     els.nearbyCourseList.innerHTML = results
@@ -10823,21 +10823,19 @@ out geom;`;
     const green = planGreenInfo(hole);
 
     let html = '';
-    html += `<div class="plan-meta">${
-      metaBits.length
+    html += `<div class="plan-meta">${metaBits.length
         ? metaBits.map(escapeHtml).join(' · ')
         : 'Unmapped hole — add par/yards in round setup.'
-    }</div>`;
+      }</div>`;
 
     if (yd) {
       if (seq) {
         html +=
           `<div class="plan-section">` +
           `<div class="plan-section-title">Suggested sequence</div>` +
-          `<div class="plan-seq">${
-            seq.seq.length
-              ? escapeHtml(seq.seq.join(' → ')) + ' → '
-              : ''
+          `<div class="plan-seq">${seq.seq.length
+            ? escapeHtml(seq.seq.join(' → ')) + ' → '
+            : ''
           }<b>${escapeHtml(seq.finisherName)}</b></div>` +
           `</div>`;
       } else {
@@ -10856,8 +10854,7 @@ out geom;`;
         hazards
           .map(
             (hz) =>
-              `<div class="plan-hazard${
-                hz.type === 'water' ? ' water' : ''
+              `<div class="plan-hazard${hz.type === 'water' ? ' water' : ''
               }">` +
               `<span class="plan-hazard-dot"></span>` +
               `<span>${escapeHtml(hz.label)}</span>` +
@@ -10878,8 +10875,7 @@ out geom;`;
 
     if (green && (green.front != null || green.center != null || green.back != null)) {
       const tile = (k, v) =>
-        `<div class="plan-green-tile"><i>${k}</i>${
-          v != null ? v + ' yd' : '—'
+        `<div class="plan-green-tile"><i>${k}</i>${v != null ? v + ' yd' : '—'
         }</div>`;
       html +=
         `<div class="plan-section">` +
@@ -11087,7 +11083,7 @@ out geom;`;
       })
       .join('');
 
-      const yourTotalCells =
+    const yourTotalCells =
       yourCells + `<td class="group-total">${yourTotal || '·'}</td>`;
 
     els.groupTableWrap.innerHTML = `
