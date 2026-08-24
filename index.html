@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-  <meta charset="utf-8" />
+  <meta charset="UTF-8" />
   <title>Caddy</title>
   <meta name="application-name" content="Caddy" />
   <meta name="apple-mobile-web-app-title" content="Caddy" />
@@ -688,15 +688,14 @@
               <span id="roundHoleMeta">Par 4</span>
             </div>
           </div>
-          <div class="card-title">
-            <h2>Round mode</h2>
-            <span class="chip" id="roundStatusChip">Not started</span>
+          <div class="round-hero" id="roundHero">
+            <h3>Ready when you are</h3>
+            <p>
+              Pick a course and Caddy tracks score, putts, fairways and
+              greens — and learns your true club distances from GPS-measured
+              shots.
+            </p>
           </div>
-          <div class="hint" id="roundShotHint">
-            Start a round to track your shots. Caddy measures each shot's
-            distance from GPS and learns how far you really hit each club.
-          </div>
-          <div class="metric" id="roundShotReadout" style="margin-top: 12px; display: none"></div>
           <button class="primary-btn" id="roundActionBtn" type="button" style="width: 100%; margin-top: 12px">
             Start round
           </button>
@@ -720,19 +719,21 @@
             <button class="danger-btn" id="roundEndBtn" type="button" style="width: 100%; margin-top: 8px; display: none">
             End round
           </button>
-          <div id="roundShotList" style="margin-top: 12px"></div>
+          <div class="metric" id="roundShotReadout" style="margin-top: 12px; display: none"></div>
+          <div class="hint" id="roundShotHint" style="margin-top: 10px"></div>
+          <details id="roundShotListWrap" style="margin-top: 10px" hidden>
+            <summary>Shots this round</summary>
+            <div id="roundShotList" style="margin-top: 10px"></div>
+          </details>
         </div>
-        <div class="card">
+        <div class="card" id="scorecardCard" hidden>
           <div class="card-title">
             <h2>Scorecard</h2>
-            <button class="danger-btn" id="clearRoundBtn">Clear</button>
+            <button class="quiet-btn" id="clearRoundBtn" type="button">Clear</button>
           </div>
-          <div class="hint">
-            Track score, putts, fairways (FIR) and greens in regulation (GIR)
-            for 9 or 18 holes. Saved locally.
-          </div>
+          <div id="roundRows"></div>
         </div>
-        <div class="card" id="groupCard">
+        <div class="card" id="groupCard" hidden>
           <div class="card-title">
             <h3>Group</h3>
             <span class="chip" id="groupCountChip">Solo</span>
@@ -916,62 +917,8 @@
       </button>
     </div>
 
-    <div class="setup-section-label">Course</div>
-    <div class="saved-course-list" id="savedCourseList"></div>
-
-    <label class="field" hidden>
-      Saved course
-      <select id="roundSetupCourseSelect">
-        <option value="">New casual round</option>
-      </select>
-    </label>
-
-    <div class="form-row" style="margin-top: 14px">
-      <label class="field">
-        Course name
-        <input id="roundSetupCourseName" type="text" maxlength="80" placeholder="e.g. Pine Valley Golf Club" />
-      </label>
-    </div>
-
-    <div class="form-row">
-      <label class="field" id="teeNameField">
-        Tee box
-        <input id="roundSetupTeeName" type="text" maxlength="40" placeholder="e.g. Blue tees" />
-      </label>
-
-      <label class="field" id="teeSetPickerWrap" hidden>
-        Tee box
-        <div id="teeSetPicker" class="tee-chip-row"></div>
-      </label>
-
-      <label class="field">
-        Start on hole
-        <select id="roundSetupStartHole"></select>
-      </label>
-    </div>
-
-    <div class="seg-holes" role="group" aria-label="Course length">
-      <button class="holes-opt active" id="setupEighteenBtn" type="button" aria-pressed="true">
-        18 holes
-      </button>
-      <button class="holes-opt" id="setupNineBtn" type="button" aria-pressed="false">
-        9 holes
-      </button>
-    </div>
-
-    <details id="scorecardEditor" style="margin-top: 12px">
-      <summary>Edit pars &amp; yardages</summary>
-      <div class="round-setup-title-row">
-        <div>
-          <strong>Course scorecard</strong>
-          <span>Set par and optional tee yardage for each hole.</span>
-        </div>
-      </div>
-      <div class="round-setup-holes" id="roundSetupPars"></div>
-    </details>
-
-    <details class="course-recognition" id="courseRecognition" style="margin-top: 10px">
-      <summary>Find a nearby course</summary>
+    <div class="setup-section-label">Find a course</div>
+    <div class="course-recognition" id="courseRecognition">
       <div class="course-recognition-head">
         <div>
           <strong>Nearby courses</strong>
@@ -990,6 +937,66 @@
       </label>
 
       <div class="nearby-course-list" id="nearbyCourseList"></div>
+    </div>
+
+    <details id="savedCoursesWrap" style="margin-top: 10px">
+      <summary>Your saved courses<span class="saved-count" id="savedCourseCount"></span></summary>
+      <div class="saved-course-list" id="savedCourseList"></div>
+    </details>
+
+    <label class="field" hidden>
+      Saved course
+      <select id="roundSetupCourseSelect">
+        <option value="">New casual round</option>
+      </select>
+    </label>
+
+    <details id="manualRoundWrap" style="margin-top: 10px">
+      <summary>Course details</summary>
+
+      <div class="form-row" style="margin-top: 12px">
+        <label class="field">
+          Course name
+          <input id="roundSetupCourseName" type="text" maxlength="80" placeholder="e.g. Pine Valley Golf Club" />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label class="field" id="teeNameField">
+          Tee box
+          <input id="roundSetupTeeName" type="text" maxlength="40" placeholder="e.g. Blue tees" />
+        </label>
+
+        <label class="field" id="teeSetPickerWrap" hidden>
+          Tee box
+          <div id="teeSetPicker" class="tee-chip-row"></div>
+        </label>
+
+        <label class="field">
+          Start on hole
+          <select id="roundSetupStartHole"></select>
+        </label>
+      </div>
+
+      <div class="seg-holes" role="group" aria-label="Course length">
+        <button class="holes-opt active" id="setupEighteenBtn" type="button" aria-pressed="true">
+          18 holes
+        </button>
+        <button class="holes-opt" id="setupNineBtn" type="button" aria-pressed="false">
+          9 holes
+        </button>
+      </div>
+
+      <details id="scorecardEditor" style="margin-top: 12px">
+        <summary>Edit pars &amp; yardages</summary>
+        <div class="round-setup-title-row">
+          <div>
+            <strong>Course scorecard</strong>
+            <span>Set par and optional tee yardage for each hole.</span>
+          </div>
+        </div>
+        <div class="round-setup-holes" id="roundSetupPars"></div>
+      </details>
     </details>
 
     <label class="toggle round-save-course-toggle">

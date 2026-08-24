@@ -2572,11 +2572,29 @@
     return '';
   }
 
+  // Two-state tab: no round → hero + CTA only; live round → full tools.
+  // Called from BOTH renderRound and renderRoundShotUI so ending/starting
+  // a round through either path re-flips the layout immediately.
+  function syncRoundTabState() {
+    const roundLive = !!state.roundSession;
+    // The session card stays visible in BOTH states: with no round it's
+    // just the hero + Start button; hiding it orphaned the CTA.
+    const scorecardCard = document.getElementById('scorecardCard');
+    const groupCard = document.getElementById('groupCard');
+    const hero = document.getElementById('roundHero');
+    if (scorecardCard && groupCard && hero) {
+      scorecardCard.hidden = !roundLive;
+      groupCard.hidden = !roundLive;
+      hero.hidden = roundLive;
+    }
+  }
+
   function renderRound() {
     const course = getCurrentCourse();
     const scoreRows = getScorecardRows();
     renderGroupUI();
 
+    syncRoundTabState();
 
     // Scorecard, Apple-style: OUT/IN nine structure with per-nine vs-par,
     // live total row, current-hole highlight, tap-to-cycle chips instead of
@@ -2644,6 +2662,17 @@
       ? totalScore - scoreParPlayed(course, scoreRows)
       : null;
 
+    // Quiet Clear: only meaningful once something is on the card.
+    const hasEntries = scoreRows.some(
+      (r) =>
+        (r.score !== '' && r.score != null) ||
+        (r.putts !== '' && r.putts != null) ||
+        r.fir !== '' ||
+        r.gir !== ''
+    );
+    els.clearRoundBtn.classList.toggle('disabled', !hasEntries);
+    els.clearRoundBtn.setAttribute('aria-disabled', String(!hasEntries));
+
     els.roundRows.innerHTML = `
       <div class="round-row round-head-row">
         <div class="round-cell hole">Hole</div>
@@ -2659,13 +2688,20 @@
         <b>${totalPlayed ? `${totalScore} (${toPar > 0 ? '+' + toPar : toPar})` : '—'}</b>
       </div>`;
 
-    // Tap-to-cycle: one delegated listener per row, no rebinding churn.
+    // Tap behavior: score & putts open the full score sheet for THAT hole
+    // (steppers + putts/FIR/GIR/penalties — one tap fixes any mis-tap);
+    // FIR/GIR are two-state marks, so they stay quick-cycle.
     els.roundRows.querySelectorAll('.round-row[data-i]').forEach((row) => {
       const i = Number(row.dataset.i);
       row.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-act]');
         if (!btn) return;
-        cycleRoundCell(i, btn.dataset.act);
+        if (btn.dataset.act === 'score' || btn.dataset.act === 'putts') {
+          openRoundScoreSheet(i + 1);
+          haptic(6);
+        } else {
+          cycleRoundCell(i, btn.dataset.act);
+        }
       });
     });
   }
@@ -2734,6 +2770,8 @@
   }
   function initRoundEvents() {
     els.clearRoundBtn.addEventListener('click', () => {
+      // Disabled until something is actually on the card.
+      if (els.clearRoundBtn.classList.contains('disabled')) return;
       if (!confirm('Clear all scorecard entries for this round?')) return;
 
       state.round = emptyRound();
@@ -3427,18 +3465,21 @@
     if (!els.roundActionBtn) return;
     const rs = state.roundSession;
     const status = roundStatus();
+    syncRoundTabState();
     renderRoundHoleHeader();
     syncHoleGeometry();
     renderRoundTeePicker();
 
-    // Status chip
-    const chipText =
-      status === 'idle'
-        ? 'Not started'
-        : status === 'pending'
-          ? `Hole ${rs.hole} · shot in flight`
-          : `Hole ${rs.hole} · ready`;
-    els.roundStatusChip.textContent = chipText;
+    // Status chip was retired with the top bar; keep a safe guard in case
+    // any theme re-adds it.
+    if (els.roundStatusChip) {
+      els.roundStatusChip.textContent =
+        status === 'idle'
+          ? 'Not started'
+          : status === 'pending'
+            ? `Hole ${rs.hole} · shot in flight`
+            : `Hole ${rs.hole} · ready`;
+    }
 
     // Primary morphing button
     if (status === 'idle') {
@@ -3677,12 +3718,17 @@
 
   function renderRoundShotList() {
     const rs = state.roundSession;
+    // The shot list lives in a collapsed <details>; hide it entirely when
+    // there's nothing to show.
+    const wrap = document.getElementById('roundShotListWrap');
     // Legacy sessions (saved before shot tracking shipped) may have no
     // `shots` array at all — guard before touching .length.
     if (!rs || !Array.isArray(rs.shots) || !rs.shots.length) {
       els.roundShotList.innerHTML = '';
+      if (wrap) wrap.hidden = true;
       return;
     }
+    if (wrap) wrap.hidden = false;
     const rows = [...rs.shots]
       .slice(-12)
       .reverse()
@@ -3747,11 +3793,14 @@
     renderRoundSetupStartHoleOptions();
     renderSavedCourseList();
 
-    // Fresh sheet: nothing pre-selected. Saved-course cards are the
-    // primary path; typing a name is the casual path.
+    // Fresh sheet: nothing pre-selected. Course finding is the primary
+    // path; saved courses and manual entry live below it.
     state.selectedCourseTemplate = null;
     els.roundSetupCourseName.value = '';
     els.roundSetupTeeName.value = 'Default tees';
+
+    const manual = document.getElementById('manualRoundWrap');
+    if (manual) manual.open = false;
 
     els.roundSetupStartHole.value = String(
       clamp(Math.round(num(savedSetup.startHole, 1)), 1, 18)
@@ -3826,9 +3875,14 @@
       ? state.courseProfiles
       : [];
 
+    // The saved-courses section only exists when there's something in it.
+    const wrap = document.getElementById('savedCoursesWrap');
+    const count = document.getElementById('savedCourseCount');
+    if (count) count.textContent = profiles.length ? String(profiles.length) : '';
+    if (wrap) wrap.hidden = !profiles.length;
+
     if (!profiles.length) {
-      list.innerHTML =
-        '<div class="saved-courses-empty">No saved courses yet — find one below or just type a name.</div>';
+      list.innerHTML = '';
       return;
     }
 
@@ -3905,6 +3959,11 @@
     els.roundSetupCourseSelect.value = course.id;
     els.roundSetupCourseName.value = course.name;
     els.roundSetupSaveCourse.checked = true;
+
+    // Reveal the details section that carries the tee chips + start hole
+    // so the selection is visible, not hidden inside a collapsed drawer.
+    const manual = document.getElementById('manualRoundWrap');
+    if (manual) manual.open = true;
 
     renderRoundSetupHoles(course.holes);
     renderTeeSetPicker(course);
@@ -4818,6 +4877,10 @@ out geom;`;
     els.roundSetupTeeName.value = 'Default tees';
     els.roundSetupSaveCourse.checked = true;
 
+    // Show the tee chips / start hole as soon as a course is chosen.
+    const manual = document.getElementById('manualRoundWrap');
+    if (manual) manual.open = true;
+
     state.nearbyCourseLoadingScorecard = true;
     renderNearbyCourses();
 
@@ -5141,9 +5204,10 @@ out geom;`;
       }
     });
   }
-  function getRoundScoreDraft() {
-    const holeNumber = getCurrentHoleNumber();
-    const hole = getCurrentHoleData();
+  function getRoundScoreDraftForHole(holeNumber) {
+    const course = getCurrentCourse();
+    const hole =
+      course?.holes?.[holeNumber - 1] || defaultHole(holeNumber);
     const fallbackScore = Math.max(1, Number(hole.par) || 4);
 
     // Partner draft: score only — putts/FIR/GIR are yours alone.
@@ -5181,18 +5245,25 @@ out geom;`;
     };
   }
 
+  function getRoundScoreDraft() {
+    return getRoundScoreDraftForHole(getCurrentHoleNumber());
+  }
+
   function renderRoundScoreSheet() {
     if (!els.roundScoreSheet || !state.roundScoreDraft) return;
 
     const draft = state.roundScoreDraft;
-    const hole = getCurrentHoleData();
+    // Meta reflects the hole being EDITED (may differ from the current
+    // hole when the player taps an earlier row on the scorecard).
+    const course = getCurrentCourse();
+    const hole =
+      course?.holes?.[draft.hole - 1] || defaultHole(draft.hole);
 
     const partnerName = scoreDraftPartnerName();
     els.roundScoreTitle.textContent = partnerName
       ? `${partnerName} · Hole ${draft.hole}`
       : `Score Hole ${draft.hole}`;
 
-    const course = getCurrentCourse();
     els.roundScoreMeta.textContent = [
       course?.name || 'Casual Round',
       `Par ${hole.par || 4}`,
@@ -5273,13 +5344,20 @@ out geom;`;
     });
 
     const totalHoles = getCourseHoleCount();
+    // "Save & Next" only makes sense when editing the hole you're on.
+    const editingCurrentHole =
+      (state._scoreSheetHole || draft.hole) === getCurrentHoleNumber();
     const canAdvance =
+      editingCurrentHole &&
       getCurrentHoleNumber() < totalHoles &&
       roundStatus() !== 'pending';
 
     if (els.roundScoreSaveNextBtn) {
       els.roundScoreSaveNextBtn.disabled = !canAdvance;
       els.roundScoreSaveNextBtn.style.opacity = canAdvance ? '1' : '0.5';
+      els.roundScoreSaveNextBtn.style.display = editingCurrentHole
+        ? ''
+        : 'none';
       els.roundScoreSaveNextBtn.textContent =
         getCurrentHoleNumber() >= totalHoles
           ? `Save Hole ${totalHoles}`
@@ -5287,7 +5365,7 @@ out geom;`;
     }
   }
 
-  function openRoundScoreSheet() {
+  function openRoundScoreSheet(holeNumber = null) {
     if (
       !els.roundScoreSheet ||
       !els.roundScoreScrim ||
@@ -5306,7 +5384,10 @@ out geom;`;
     }
 
     state._scorePartnerId = ''; // every open starts on your own card
-    state.roundScoreDraft = getRoundScoreDraft();
+    state.roundScoreDraft = getRoundScoreDraftForHole(
+      holeNumber || getCurrentHoleNumber()
+    );
+    state._scoreSheetHole = state.roundScoreDraft.hole;
 
     renderScoreSheetChips();
     renderRoundScoreSheet();
@@ -5364,6 +5445,7 @@ out geom;`;
 
     const shouldAdvance =
       andNext &&
+      draft.hole === rs.hole &&
       rs.hole < getCourseHoleCount() &&
       rs.status !== 'pending';
 
@@ -11698,7 +11780,10 @@ out geom;`;
       .forEach((b) => {
         b.addEventListener('click', () => {
           state._scorePartnerId = b.dataset.pid || '';
-          state.roundScoreDraft = getRoundScoreDraft();
+          // Stay on the hole being edited, not the current hole.
+          state.roundScoreDraft = getRoundScoreDraftForHole(
+            state._scoreSheetHole || getCurrentHoleNumber()
+          );
           // Repaint the chips so the tapped name gets the green .active
           // state — the sheet re-render alone never touched these buttons.
           renderScoreSheetChips();

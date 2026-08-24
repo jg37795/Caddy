@@ -1271,12 +1271,16 @@ body[data-dragging='1'] .gps-chip {
 
 /* Collapsible sections in the New-round sheet */
 #scorecardEditor,
-#courseRecognition {
+#courseRecognition,
+#savedCoursesWrap,
+#manualRoundWrap {
   border-radius: 18px;
 }
 
 #scorecardEditor > summary,
-#courseRecognition > summary {
+#courseRecognition > summary,
+#savedCoursesWrap > summary,
+#manualRoundWrap > summary {
   cursor: pointer;
   list-style: none;
   display: flex;
@@ -1288,12 +1292,16 @@ body[data-dragging='1'] .gps-chip {
 }
 
 #scorecardEditor > summary::-webkit-details-marker,
-#courseRecognition > summary::-webkit-details-marker {
+#courseRecognition > summary::-webkit-details-marker,
+#savedCoursesWrap > summary::-webkit-details-marker,
+#manualRoundWrap > summary::-webkit-details-marker {
   display: none;
 }
 
 #scorecardEditor > summary::after,
-#courseRecognition > summary::after {
+#courseRecognition > summary::after,
+#savedCoursesWrap > summary::after,
+#manualRoundWrap > summary::after {
   content: '';
   margin-left: auto;
   width: 8px;
@@ -1305,13 +1313,79 @@ body[data-dragging='1'] .gps-chip {
 }
 
 #scorecardEditor[open] > summary::after,
-#courseRecognition[open] > summary::after {
+#courseRecognition[open] > summary::after,
+#savedCoursesWrap[open] > summary::after,
+#manualRoundWrap[open] > summary::after {
   transform: rotate(225deg);
 }
 
 #scorecardEditor[open] > summary,
-#courseRecognition[open] > summary {
+#courseRecognition[open] > summary,
+#savedCoursesWrap[open] > summary,
+#manualRoundWrap[open] > summary {
   margin-bottom: 10px;
+}
+
+/* Saved-courses summary carries a count badge */
+.saved-count {
+  margin-left: auto;
+  margin-right: 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--chip-bg, rgba(120, 130, 125, 0.14));
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* Quiet destructive affordance — fades in only when there's something
+   to clear; no big red block shouting over an empty card. */
+.quiet-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.quiet-btn:active {
+  transform: scale(0.96);
+}
+
+.quiet-btn.disabled {
+  opacity: 0.35;
+}
+
+.quiet-btn:not(.disabled) {
+  color: var(--danger);
+}
+
+/* No-round hero: one calm card, one obvious action */
+.round-hero {
+  text-align: center;
+  padding: 26px 18px 6px;
+}
+
+.round-hero h3 {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.round-hero p {
+  margin: 0 auto;
+  max-width: 300px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 
 .nearby-course-list {

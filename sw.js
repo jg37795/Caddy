@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.44'; // haptics: sound layer removed entirely — pure Taptic feedback only
+const CACHE_VERSION = 'v1.0.47'; // round tab two-state layout, sheet restructured around course-finding, tap-opens-score-sheet, quiet Clear, SW cache-bypass
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
@@ -111,7 +111,10 @@ async function handleNavigation(request) {
   const shellRequest = new Request('./index.html');
 
   try {
-    const response = await fetch(request);
+    // cache:'reload' bypasses the HTTP cache — python's http.server (and
+    // some hosts) send no Cache-Control, and heuristic caching otherwise
+    // serves stale app.js/app.css against fresh HTML after an update.
+    const response = await fetch(request, { cache: 'reload' });
 
     if (cacheable(response)) {
       await cache.put(shellRequest, response.clone());
@@ -142,7 +145,8 @@ async function networkFirstAsset(request, cacheName) {
   const cache = await caches.open(cacheName);
 
   try {
-    const response = await fetch(request);
+    // See handleNavigation — always revalidate shell assets from network.
+    const response = await fetch(request, { cache: 'reload' });
 
     if (cacheable(response)) {
       await cache.put(request, response.clone());
