@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.12.0'; // wind rose + popover, distance rings, live shot line, draggable shot start
+  const APP_VERSION = '1.13.0'; // 9/18-hole courses, tee marking, persistent FCB lit state, one-line aim chip, HUD layout
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -200,6 +200,7 @@
     setFrontBtn: $('setFrontBtn'),
     setCenterBtn: $('setCenterBtn'),
     setBackBtn: $('setBackBtn'),
+    setTeeBtn: $('setTeeBtn'),
     restoreGreenBtn: $('restoreGreenBtn'),
     clearFbBtn: $('clearFbBtn'),
     modeToggle: $('modeToggle'),
@@ -239,6 +240,7 @@
     nearbySearchError: null,
     selectedNearbyCourse: null,
     selectedCourseTemplate: null,
+    setupHolesCount: 18,
     courseProfiles: load(COURSE_PROFILES_KEY, []),
     clubs: load('caddy:clubs', DEFAULT_CLUBS),
     round: load('caddy:round', emptyRound()),
@@ -260,6 +262,7 @@
     greenCenter: null, // {lat,lng} — persistent green center for the hole
     frontPt: null,
     backPt: null,
+    teePt: null,
     twoTapA: null,
     twoTapComplete: false,
     placeMode: null,
@@ -328,6 +331,7 @@
     return {
       id: 'casual',
       name: 'Casual Round',
+      holesCount: 18,
       teeName: 'Default tees',
       source: 'manual',
       updatedAt: Date.now(),
@@ -358,11 +362,15 @@
         : null;
 
     const rawHoles = Array.isArray(raw.holes) ? raw.holes : [];
+    // Only 9- and 18-hole layouts are supported; anything else → 18.
+    const holesCount = Number(raw.holesCount) === 9 ? 9 : 18;
 
     return {
       // Preserve importer-added keys (teeSets, activeTeeSet, importReport,
       // osmType, osmId). The explicit keys below still override these.
       ...raw,
+
+      holesCount,
 
       id:
         typeof raw.id === 'string' && raw.id.trim()
@@ -403,7 +411,7 @@
 
       location,
 
-      holes: Array.from({ length: 18 }, (_, index) => {
+      holes: Array.from({ length: holesCount }, (_, index) => {
         const sourceHole =
           rawHoles[index] && typeof rawHoles[index] === 'object'
             ? rawHoles[index]
@@ -439,7 +447,8 @@
   }
 
   function scorecardForCourse(course) {
-    return Array.from({ length: 18 }, (_, i) => ({
+    const n = course && Number(course.holesCount) === 9 ? 9 : 18;
+    return Array.from({ length: n }, (_, i) => ({
       hole: i + 1,
       score: '',
       putts: '',
@@ -559,6 +568,11 @@
   }
   function roundStatus() {
     return state.roundSession ? state.roundSession.status : 'idle';
+  }
+  // Active round's layout (9 or 18); defaults to 18 outside a round.
+  function getCourseHoleCount() {
+    const c = getCurrentCourse();
+    return c && Number(c.holesCount) === 9 ? 9 : 18;
   }
   // Club the next shot will log against: explicit override wins,
   // otherwise follow the live recommendation, otherwise longest club.
@@ -899,7 +913,7 @@
       range: 'Tap map for live yardage',
       clubs: 'Stock carry distances',
       shot: 'Plays-like calculator',
-      round: '18-hole scorecard',
+      round: 'Scorecard',
       stats: 'Local round stats',
     };
     els.topSubtitle.textContent = titles[tab] || 'Personal golf caddy';
@@ -1076,6 +1090,13 @@
       iconSize: [15, 15],
       iconAnchor: [7.5, 7.5],
     });
+  const teeIcon = () =>
+    L.divIcon({
+      className: '',
+      html: "<div class='tee-marker'></div>",
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
 
 
 
@@ -1199,6 +1220,21 @@
             zIndexOffset: 840,
           }).addTo(state.map);
         else state.markers.greenCenter.setLatLng([latlng.lat, latlng.lng]);
+      } else if (state.placeMode === 'tee') {
+        if (
+          state.teePt &&
+          haversineMeters(state.teePt, latlng) * M_TO_YD < 10
+        ) {
+          // Tapping on the existing tee removes it.
+          state.teePt = null;
+          setHoleTeePoint(null);
+          setNotice('Tee removed.', 'greenish');
+        } else {
+          state.teePt = { lat: latlng.lat, lng: latlng.lng };
+          setHoleTeePoint(state.teePt);
+          setNotice('Tee set for this hole. Tap Tee, then the tee again, to remove it.', 'greenish');
+        }
+        renderTeeMarker();
       }
       disarmPlaceMode();
       renderFcb();
@@ -1286,6 +1322,8 @@
     els.setFrontBtn.classList.toggle('armed', state.placeMode === 'front');
     els.setCenterBtn.classList.toggle('armed', state.placeMode === 'center');
     els.setBackBtn.classList.toggle('armed', state.placeMode === 'back');
+    if (els.setTeeBtn)
+      els.setTeeBtn.classList.toggle('armed', state.placeMode === 'tee');
     if (state.sheet) state.sheet.half();
     haptic(6);
   }
@@ -1294,6 +1332,7 @@
     els.setFrontBtn.classList.remove('armed');
     els.setCenterBtn.classList.remove('armed');
     els.setBackBtn.classList.remove('armed');
+    if (els.setTeeBtn) els.setTeeBtn.classList.remove('armed');
   }
 
   function clearTwoTapMarkers(keepA) {
@@ -1955,6 +1994,13 @@
     });
   }
   function renderFcb() {
+    // Persistent lit state: a segment stays tinted while its point is set,
+    // distinct from the solid .armed fill used while placing.
+    els.setFrontBtn.classList.toggle('lit', !!state.frontPt);
+    els.setCenterBtn.classList.toggle('lit', !!state.greenCenter);
+    els.setBackBtn.classList.toggle('lit', !!state.backPt);
+    if (els.setTeeBtn) els.setTeeBtn.classList.toggle('lit', !!state.teePt);
+
     // Tiles become tappable when their green reference exists; tapping
     // snaps the aim target there. The currently-aimed-at tile gets a ring.
     const markTile = (el, pt) => {
@@ -2094,7 +2140,7 @@
     if (!off) {
       // No marked green middle: the tap is simply the pin target.
       els.aimChip.className = 'aim-chip pin';
-      els.aimChip.innerHTML = '<b>Pin target</b><span>no green middle marked</span>';
+      els.aimChip.innerHTML = '<b>Pin</b><span>no middle marked</span>';
       els.aimChip.hidden = false;
       return;
     }
@@ -2111,20 +2157,20 @@
       if (lateralAbs >= 8) {
         cls = 'pin';
         head = 'Pin';
-        caption = `${Math.round(lateralAbs)} yd ${off.lateralYd > 0 ? 'right' : 'left'} of middle`;
+        caption = `${Math.round(lateralAbs)} yd ${off.lateralYd > 0 ? 'right' : 'left'} of mid`;
       } else {
         cls = 'middle';
-        head = 'Middle of green';
+        head = 'Middle';
         caption = 'on your line';
       }
     } else if (off.state === 'short') {
       cls = 'layup';
-      head = 'Layup target';
-      caption = `leaves ${Math.round(off.yards)} yd to middle`;
+      head = 'Layup';
+      caption = `${Math.round(off.yards)} yd to middle`;
     } else {
       cls = 'over';
-      head = `${Math.round(off.yards)} yd beyond middle`;
-      caption = 'move target onto the green';
+      head = 'Past middle';
+      caption = `${Math.round(off.yards)} yd`;
     }
 
     els.aimChip.className = 'aim-chip ' + cls;
@@ -2463,9 +2509,10 @@
       return;
     }
 
-    if (rs.hole >= 18) {
+    const totalHoles = getCourseHoleCount();
+    if (rs.hole >= totalHoles) {
       setNotice(
-        'You are already on Hole 18. End the round when you are finished.',
+        `You are already on Hole ${totalHoles}. End the round when you are finished.`,
         'greenish'
       );
       return;
@@ -2548,6 +2595,50 @@
         `${formatToPar(score.toPar)} through ${score.holesPlayed}`;
     }
   }
+  // Persist a manual tee for the current hole into the live round course.
+  // Returns true when the edit could be stored (i.e., a round is active);
+  // otherwise the marker is map-only for the session.
+  function setHoleTeePoint(pt) {
+    const course = getCurrentCourse();
+    if (!course || !state.roundSession) return false;
+    const idx = getCurrentHoleNumber() - 1;
+    if (!course.holes[idx]) return false;
+    course.holes[idx].teePoint = pt
+      ? { lat: pt.lat, lng: pt.lng }
+      : null;
+    course.holes[idx].teeSource = pt ? 'manual' : undefined;
+    state.roundSession.course = course;
+    saveRoundSession();
+    // Keep the setup template in sync so saving this course later
+    // retains the manual tee.
+    if (
+      state.selectedCourseTemplate &&
+      state.selectedCourseTemplate.id === course.id
+    ) {
+      state.selectedCourseTemplate = course;
+    }
+    return true;
+  }
+
+  function renderTeeMarker() {
+    if (!state.mapReady) return;
+    if (!state.teePt) {
+      if (state.markers.teeMarker) {
+        try { state.map.removeLayer(state.markers.teeMarker); } catch { }
+        state.markers.teeMarker = null;
+      }
+      return;
+    }
+    const ll = [state.teePt.lat, state.teePt.lng];
+    if (!state.markers.teeMarker)
+      state.markers.teeMarker = L.marker(ll, {
+        icon: teeIcon(),
+        interactive: false,
+        zIndexOffset: 830,
+      }).addTo(state.map);
+    else state.markers.teeMarker.setLatLng(ll);
+  }
+
   // Push the current hole's imported geometry onto the map: green centre,
   // front/back edges, and an initial aim target. Keyed so it runs once per
   // hole change, not on every GPS tick.
@@ -2565,8 +2656,11 @@
     const center = pt(hole.greenCenter);
     const front = pt(hole.front);
     const back = pt(hole.back);
+    const tee = pt(hole.teePoint);
 
-    if (!center && !front && !back) return;
+    if (!center && !front && !back && !tee) return;
+
+    state.teePt = tee;
 
     disarmPlaceMode();
     clearFbMarkers();
@@ -2599,6 +2693,7 @@
       }
     }
 
+    renderTeeMarker();
     renderFcb();
     updateLine();
     updateRestoreGreenBtn();
@@ -2713,7 +2808,7 @@
     const rightCol = document.querySelector('.top-right-col');
     const rightW = rightCol ? rightCol.offsetWidth : 0;
     const available = window.innerWidth - rightW - 12 - 8 - 12;
-    hud.style.maxWidth = `${Math.max(150, Math.round(available))}px`;
+    hud.style.maxWidth = `${Math.max(176, Math.round(available))}px`;
     if (!_roundHudResizeBound) {
       _roundHudResizeBound = true;
       window.addEventListener('resize', constrainRoundHud);
@@ -2771,7 +2866,7 @@
     }
 
     if (els.roundMapNextBtn) {
-      els.roundMapNextBtn.disabled = pending || rs.hole >= 18;
+      els.roundMapNextBtn.disabled = pending || rs.hole >= getCourseHoleCount();
     }
 
     if (els.roundMapScoreBtn) {
@@ -2905,6 +3000,25 @@
       `<div class="hint" style="margin:4px 0 6px;font-weight:800">Shots this round · ${rs.shots.length} (${counted} logged)</div>` +
       rows;
   }
+  // Reflect a template/course's hole layout (9 or 18) onto the setup UI.
+  function applyTemplateHoleCount(course) {
+    state.setupHolesCount =
+      course && Number(course.holesCount) === 9 ? 9 : 18;
+    syncHolesCountUI();
+    renderRoundSetupStartHoleOptions();
+  }
+
+  function syncHolesCountUI() {
+    const nine = state.setupHolesCount === 9;
+    const nb = document.getElementById('setupNineBtn');
+    const eb = document.getElementById('setupEighteenBtn');
+    if (!nb || !eb) return;
+    nb.classList.toggle('active', nine);
+    eb.classList.toggle('active', !nine);
+    nb.setAttribute('aria-pressed', String(nine));
+    eb.setAttribute('aria-pressed', String(!nine));
+  }
+
   function openRoundSetup() {
     state.selectedNearbyCourse = null;
     state.selectedCourseTemplate = null;
@@ -2918,6 +3032,10 @@
       startHole: 1,
       holes: defaultCourseHoles(),
     });
+
+    state.setupHolesCount =
+      Number(savedSetup.holesCount) === 9 ? 9 : 18;
+    syncHolesCountUI();
 
     renderRoundSetupCourseSelect();
     renderRoundSetupStartHoleOptions();
@@ -2968,8 +3086,9 @@
   function renderRoundSetupStartHoleOptions() {
     if (!els.roundSetupStartHole) return;
 
+    const n = state.setupHolesCount === 9 ? 9 : 18;
     els.roundSetupStartHole.innerHTML = Array.from(
-      { length: 18 },
+      { length: n },
       (_, i) =>
         `<option value="${i + 1}">Hole ${i + 1}</option>`
     ).join('');
@@ -3001,7 +3120,7 @@
       name: 'Temporary',
       teeName: 'Temporary',
       holes,
-    }).holes;
+    }).holes.slice(0, state.setupHolesCount === 9 ? 9 : 18);
 
     els.roundSetupPars.innerHTML = normalized
       .map((hole) => {
@@ -3041,6 +3160,41 @@
       .join('');
   }
 
+  // Read the currently displayed setup rows back into hole objects so
+  // switching 9↔18 (or re-rendering) never wipes typed pars/yardages.
+  function readCurrentSetupHoles() {
+    const template = state.selectedCourseTemplate;
+    const templateHoles = Array.isArray(template?.holes)
+      ? template.holes
+      : [];
+
+    return [
+      ...els.roundSetupPars.querySelectorAll('.round-setup-hole'),
+    ].map((row, index) => {
+      const base =
+        templateHoles[index] && typeof templateHoles[index] === 'object'
+          ? templateHoles[index]
+          : {};
+
+      const parInput = row.querySelector('.setup-hole-par');
+      const yardsInput = row.querySelector('.setup-hole-yards');
+
+      return {
+        ...base,
+        number: index + 1,
+        par: clamp(
+          Math.round(num(parInput.value, num(base.par, 4))),
+          3,
+          6
+        ),
+        yards:
+          yardsInput.value.trim() === ''
+            ? ''
+            : Math.max(1, Math.round(num(yardsInput.value, 0))),
+      };
+    });
+  }
+
   function readRoundSetupCourse() {
     const template = state.selectedCourseTemplate;
     const nearby = state.selectedNearbyCourse;
@@ -3049,35 +3203,7 @@
       ? template.holes
       : [];
 
-    const holes = [...els.roundSetupPars.querySelectorAll('.round-setup-hole')]
-      .map((row, index) => {
-        const parInput = row.querySelector('.setup-hole-par');
-        const yardsInput = row.querySelector('.setup-hole-yards');
-
-        // Start from the imported hole so geometry survives, then let the
-        // visible inputs win for par / yards only.
-        const base =
-          templateHoles[index] && typeof templateHoles[index] === 'object'
-            ? templateHoles[index]
-            : {};
-
-        return {
-          ...base,
-
-          number: index + 1,
-
-          par: clamp(
-            Math.round(num(parInput.value, num(base.par, 4))),
-            3,
-            6
-          ),
-
-          yards:
-            yardsInput.value.trim() === ''
-              ? ''
-              : Math.max(1, Math.round(num(yardsInput.value, 0))),
-        };
-      });
+    const holes = readCurrentSetupHoles();
 
     const location =
       template?.location ||
@@ -3092,6 +3218,8 @@
 
     return normalizeCourse({
       ...(template || {}),
+
+      holesCount: state.setupHolesCount === 9 ? 9 : 18,
 
       id: template?.id || `local:${cryptoId()}`,
 
@@ -3673,6 +3801,14 @@
       holes.push(h);
     }
 
+    // Auto-detect a 9-hole layout: every mapped hole lives in 1–9 and
+    // nothing is mapped past 9.
+    const mappedNums = [...byNum.keys()];
+    const isNine =
+      mappedNums.length > 0 &&
+      mappedNums.every((n) => n >= 1 && n <= 9);
+    const finalHoles = isNine ? holes.slice(0, 9) : holes;
+
     const candPt = osmFeaturePoint(candidate);
 
     return normalizeCourse({
@@ -3691,7 +3827,8 @@
       teeSets: teeSetList,
       activeTeeSet: bestSet ? bestSet.name : null,
       importReport: report,
-      holes,
+      holesCount: isNine ? 9 : 18,
+      holes: finalHoles,
     });
   }
 
@@ -3826,6 +3963,7 @@ out geom;`;
       });
 
       state.selectedCourseTemplate = course;
+      applyTemplateHoleCount(course);
 
       els.roundSetupCourseSelect.value = course.id;
       els.roundSetupCourseName.value = course.name;
@@ -3856,6 +3994,7 @@ out geom;`;
       const course = buildAutoCourse(candidate, elements);
 
       state.selectedCourseTemplate = course;
+      applyTemplateHoleCount(course);
 
       els.roundSetupCourseName.value = course.name;
       els.roundSetupTeeName.value = course.teeName;
@@ -4056,6 +4195,22 @@ out geom;`;
       els.findNearbyCoursesBtn.addEventListener('click', findNearbyCourses);
     }
 
+    const nineBtn = document.getElementById('setupNineBtn');
+    const eighteenBtn = document.getElementById('setupEighteenBtn');
+    if (nineBtn && eighteenBtn) {
+      const setCount = (n) => {
+        state.setupHolesCount = n;
+        syncHolesCountUI();
+        renderRoundSetupStartHoleOptions();
+        // Re-render visible rows from live input values so typed
+        // pars/yardages survive the flip.
+        renderRoundSetupHoles(readCurrentSetupHoles());
+        haptic(6);
+      };
+      nineBtn.addEventListener('click', () => setCount(9));
+      eighteenBtn.addEventListener('click', () => setCount(18));
+    }
+
     els.roundSetupCourseSelect.addEventListener('change', () => {
       const selectedId = els.roundSetupCourseSelect.value;
 
@@ -4066,6 +4221,10 @@ out geom;`;
         els.roundSetupCourseName.value = 'Casual Round';
         els.roundSetupTeeName.value = 'Default tees';
         els.roundSetupSaveCourse.checked = false;
+
+        state.setupHolesCount = 18;
+        syncHolesCountUI();
+        renderRoundSetupStartHoleOptions();
 
         renderRoundSetupHoles(defaultCourseHoles());
         renderTeeSetPicker(null);
@@ -4082,6 +4241,7 @@ out geom;`;
       const course = normalizeCourse(selected);
 
       state.selectedCourseTemplate = course;
+      applyTemplateHoleCount(course);
 
       els.roundSetupCourseName.value = course.name;
       els.roundSetupTeeName.value = course.teeName;
@@ -4110,6 +4270,7 @@ out geom;`;
         courseName: course.name,
         teeName: course.teeName,
         startHole,
+        holesCount: course.holesCount,
         holes: course.holes,
       });
 
@@ -4218,16 +4379,17 @@ out geom;`;
       });
     }
 
+    const totalHoles = getCourseHoleCount();
     const canAdvance =
-      getCurrentHoleNumber() < 18 &&
+      getCurrentHoleNumber() < totalHoles &&
       roundStatus() !== 'pending';
 
     if (els.roundScoreSaveNextBtn) {
       els.roundScoreSaveNextBtn.disabled = !canAdvance;
       els.roundScoreSaveNextBtn.style.opacity = canAdvance ? '1' : '0.5';
       els.roundScoreSaveNextBtn.textContent =
-        getCurrentHoleNumber() >= 18
-          ? 'Save Hole 18'
+        getCurrentHoleNumber() >= totalHoles
+          ? `Save Hole ${totalHoles}`
           : 'Save & Next';
     }
   }
@@ -4295,7 +4457,7 @@ out geom;`;
 
     const shouldAdvance =
       andNext &&
-      rs.hole < 18 &&
+      rs.hole < getCourseHoleCount() &&
       rs.status !== 'pending';
 
     if (shouldAdvance) {
@@ -5158,6 +5320,8 @@ out geom;`;
     els.setFrontBtn.addEventListener('click', () => armPlaceMode('front'));
     els.setCenterBtn.addEventListener('click', () => armPlaceMode('center'));
     els.setBackBtn.addEventListener('click', () => armPlaceMode('back'));
+    if (els.setTeeBtn)
+      els.setTeeBtn.addEventListener('click', () => armPlaceMode('tee'));
     els.clearFbBtn.addEventListener('click', () => {
       state.frontPt = null;
       state.backPt = null;
@@ -5273,6 +5437,17 @@ out geom;`;
 
     if (!Array.isArray(state.roundSession.shots)) {
       state.roundSession.shots = [];
+    }
+
+    // Trim a legacy 18-row scorecard down to a 9-hole course layout.
+    const hcN =
+      Number(state.roundSession.course.holesCount) === 9 ? 9 : 18;
+    if (
+      Array.isArray(state.roundSession.scorecard) &&
+      state.roundSession.scorecard.length > hcN
+    ) {
+      state.roundSession.scorecard =
+        state.roundSession.scorecard.slice(0, hcN);
     }
 
     state.roundSession.hole = clamp(
@@ -8427,10 +8602,13 @@ out geom;`;
     const scores = played.map((r) => num(r.score, 0));
     const scoreSd = scores.length >= 2
       ? Math.sqrt(scores.reduce((a, b) => a + (b - totalScore / scores.length) ** 2, 0) / (scores.length - 1)) : null;
-    // Unbiased 18-hole projection with its own standard error, rather than a bare sum.
-    const proj = played.length ? (totalScore / played.length) * 18 : null;
+    // Unbiased full-round projection (over the course's hole count) with SE.
+    const roundLen = getCourseHoleCount();
+    const proj = played.length ? (totalScore / played.length) * roundLen : null;
     const projSe = played.length >= 2 && scoreSd != null
-      ? 18 * (scoreSd / Math.sqrt(played.length)) * Math.sqrt(Math.max(0, (18 - played.length) / 17)) : null;
+      ? roundLen * (scoreSd / Math.sqrt(played.length)) *
+      Math.sqrt(Math.max(0, (roundLen - played.length) / Math.max(1, roundLen - 1)))
+      : null;
 
     return {
       played: played.length, totalScore,
@@ -8465,7 +8643,7 @@ out geom;`;
       ['Holes entered', `${s.played} / 18`],
       ['Avg score / hole', avgScore === null ? '—' : fmt(avgScore, 2)],
       ['Score SD / hole', s.scoreSd === null ? '—' : fmt(s.scoreSd, 2)],
-      ['Projected 18', s.projected18 === null ? '—'
+      [`Projected ${roundLen}`, s.projected18 === null ? '—'
         : `${fmt(s.projected18, 1)}${s.projected18Se ? ` ± ${fmt(s.projected18Se, 1)}` : ''}`],
       ['Avg putts / hole', avgPutts === null ? '—' : fmt(avgPutts, 2)],
       ['Putts when GIR', s.puttsOnGir === null ? '—'

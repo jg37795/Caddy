@@ -236,20 +236,23 @@
                 Hole 1 · Par 4
               </div>
 
-              <div class="round-map-score" id="roundMapScore">E</div>
+              <div class="round-map-hud-row2">
+                <div class="round-map-score" id="roundMapScore">E</div>
 
-              <div class="round-map-actions">
-                <button class="round-map-score-btn" id="roundMapScoreBtn" type="button" aria-label="Score current hole">
-                  Score
-                </button>
+                <div class="round-map-actions">
+                  <button class="round-map-score-btn" id="roundMapScoreBtn" type="button"
+                    aria-label="Score current hole">
+                    Score
+                  </button>
 
-                <button class="round-map-mini-btn" id="roundMapPrevBtn" type="button" aria-label="Previous hole">
-                  ‹
-                </button>
+                  <button class="round-map-mini-btn" id="roundMapPrevBtn" type="button" aria-label="Previous hole">
+                    ‹
+                  </button>
 
-                <button class="round-map-mini-btn" id="roundMapNextBtn" type="button" aria-label="Next hole">
-                  ›
-                </button>
+                  <button class="round-map-mini-btn" id="roundMapNextBtn" type="button" aria-label="Next hole">
+                    ›
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -395,6 +398,9 @@
                   </button>
                   <button class="fcb-seg-btn" id="setBackBtn" type="button">
                     Back
+                  </button>
+                  <button class="fcb-seg-btn" id="setTeeBtn" type="button">
+                    Tee
                   </button>
                 </div>
                 <div class="fcb-actions" id="fcbActions">
@@ -683,7 +689,7 @@
           </div>
           <div class="hint">
             Track score, putts, fairways (FIR) and greens in regulation (GIR)
-            for 18 holes. Saved locally.
+            for 9 or 18 holes. Saved locally.
           </div>
         </div>
         <div class="card">
@@ -828,6 +834,15 @@
         Tee box
         <input id="roundSetupTeeName" type="text" maxlength="40" placeholder="e.g. Blue tees" />
       </label>
+    </div>
+
+    <div class="seg-holes" role="group" aria-label="Course length">
+      <button class="holes-opt active" id="setupEighteenBtn" type="button" aria-pressed="true">
+        18 holes
+      </button>
+      <button class="holes-opt" id="setupNineBtn" type="button" aria-pressed="false">
+        9 holes
+      </button>
     </div>
 
     <label class="field">
