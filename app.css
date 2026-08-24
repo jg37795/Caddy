@@ -176,6 +176,12 @@ select:focus {
   display: none; /* retired — tabs carry large titles now */
 }
 
+/* Play stays full-bleed: the map runs behind the status bar/Dynamic
+   Island, and its overlay controls clear the notch themselves. */
+body[data-tab='range'] .app {
+  padding-top: 0;
+}
+
 .brand {
   display: flex;
   align-items: center;
