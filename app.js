@@ -2487,71 +2487,154 @@
     renderGroupUI();
 
 
-    els.roundRows.innerHTML = scoreRows
-      .map(
-        (r, i) => `
-        <div class="round-row" data-i="${i}">
-                    <div style="font-weight:900;">
-            ${i + 1}
-            <div style="font-size:10px;color:var(--muted);margin-top:2px">
-              P${course?.holes?.[i]?.par || 4}
-            </div>
+    // Scorecard, Apple-style: OUT/IN nine structure with per-nine vs-par,
+    // live total row, current-hole highlight, tap-to-cycle chips instead of
+    // raw number inputs and native selects.
+    const n = scoreRows.length;
+    const front = scoreRows.slice(0, 9);
+    const back = n > 9 ? scoreRows.slice(9, 18) : [];
+    const nineSum = (rows) =>
+      rows.reduce(
+        (s, r) => s + (r.score !== '' && Number.isFinite(Number(r.score)) ? Number(r.score) : 0),
+        0
+      );
+    const ninePlayed = (rows) =>
+      rows.filter((r) => r.score !== '' && Number.isFinite(Number(r.score))).length;
+    const curHole = getCurrentHoleNumber();
+    const roundLive = !!state.roundSession;
+
+    const cell = (r, i) => {
+      const par = course?.holes?.[i]?.par || 4;
+      const tone = scoreToneClass(r.score, par);
+      const isCur = roundLive && i + 1 === curHole;
+      const fir = r.fir === 'Y' ? ' fir-y' : r.fir === 'N' ? ' fir-n' : '';
+      const gir = r.gir === 'Y' ? ' gir-y' : r.gir === 'N' ? ' gir-n' : '';
+      return `
+        <div class="round-row${isCur ? ' current' : ''}" data-i="${i}">
+          <div class="round-cell hole"><b>${i + 1}</b><span>${par}</span></div>
+          <button class="round-cell score-chip${tone}" data-act="score"
+            aria-label="Hole ${i + 1} score, tap to change">${escapeHtml(r.score) || '·'}</button>
+          <button class="round-cell putts-chip" data-act="putts"
+            aria-label="Hole ${i + 1} putts, tap to change">${escapeHtml(r.putts) || '·'}</button>
+          <button class="round-cell mark-chip${fir}" data-act="fir"
+            aria-label="Hole ${i + 1} fairway">${r.fir === 'Y' ? '●' : r.fir === 'N' ? '○' : '·'}</button>
+          <button class="round-cell mark-chip${gir}" data-act="gir"
+            aria-label="Hole ${i + 1} green">${r.gir === 'Y' ? '●' : r.gir === 'N' ? '○' : '·'}</button>
+        </div>`;
+    };
+
+    const nineBlock = (rows, offset, title) => {
+      if (!rows.length) return '';
+      const sum = nineSum(rows);
+      const played = ninePlayed(rows);
+      // vs-par over whichever holes in this nine actually carry scores
+      // (order-independent — a skipped hole can't skew the number).
+      const parPlayed = rows.reduce(
+        (s, r, k) =>
+          s + (r.score !== '' && Number.isFinite(Number(r.score))
+            ? course?.holes?.[offset + k]?.par || 4
+            : 0),
+        0
+      );
+      const vsPar = played ? sum - parPlayed : null;
+      return `
+        <div class="round-nine">
+          <div class="round-nine-head">
+            <span>${title}</span>
+            <b>${played ? sum : '·'}${vsPar != null ? `<i>${vsPar > 0 ? '+' + vsPar : vsPar}</i>` : ''}</b>
           </div>
-          <input class="round-score${scoreToneClass(
-          r.score,
-          course?.holes?.[i]?.par || 4
-        )}" type="number" inputmode="numeric" value="${escapeHtml(
-          r.score
-        )}" aria-label="Hole ${i + 1} score" />
-          <input class="round-putts" type="number" inputmode="numeric" value="${escapeHtml(
-          r.putts
-        )}" aria-label="Hole ${i + 1} putts" />
-          <select class="round-fir" aria-label="Hole ${i + 1} FIR">
-            <option value="" ${r.fir === '' ? 'selected' : ''}>—</option>
-            <option value="Y" ${r.fir === 'Y' ? 'selected' : ''}>Y</option>
-            <option value="N" ${r.fir === 'N' ? 'selected' : ''}>N</option>
-            <option value="NA" ${r.fir === 'NA' ? 'selected' : ''}>NA</option>
-          </select>
-          <select class="round-gir" aria-label="Hole ${i + 1} GIR">
-            <option value="" ${r.gir === '' ? 'selected' : ''}>—</option>
-            <option value="Y" ${r.gir === 'Y' ? 'selected' : ''}>Y</option>
-            <option value="N" ${r.gir === 'N' ? 'selected' : ''}>N</option>
-          </select>
-        </div>`
-      )
-      .join('');
-    els.roundRows.querySelectorAll('.round-row').forEach((row) => {
+          ${rows.map((r, k) => cell(r, offset + k)).join('')}
+        </div>`;
+    };
+
+    const totalPlayed = ninePlayed(scoreRows);
+    const totalScore = nineSum(scoreRows);
+    const toPar = totalPlayed
+      ? totalScore - scoreParPlayed(course, scoreRows)
+      : null;
+
+    els.roundRows.innerHTML = `
+      <div class="round-row round-head-row">
+        <div class="round-cell hole">Hole</div>
+        <div class="round-cell">Score</div>
+        <div class="round-cell">Putts</div>
+        <div class="round-cell">FIR</div>
+        <div class="round-cell">GIR</div>
+      </div>
+      ${nineBlock(front, 0, 'Front 9')}
+      ${back.length ? nineBlock(back, 9, 'Back 9') : ''}
+      <div class="round-total-row">
+        <span>Total${totalPlayed ? ` · ${totalPlayed} played` : ''}</span>
+        <b>${totalPlayed ? `${totalScore} (${toPar > 0 ? '+' + toPar : toPar})` : '—'}</b>
+      </div>`;
+
+    // Tap-to-cycle: one delegated listener per row, no rebinding churn.
+    els.roundRows.querySelectorAll('.round-row[data-i]').forEach((row) => {
       const i = Number(row.dataset.i);
-      const sync = () => {
-        state.round[i] = {
-          ...(state.round[i] || {}),
-          hole: i + 1,
-          score: sanitizeInt(row.querySelector('.round-score').value),
-          putts: sanitizeInt(row.querySelector('.round-putts').value),
-          fir: row.querySelector('.round-fir').value,
-          gir: row.querySelector('.round-gir').value,
-        };
-
-        // Restyle the score cell live (birdie red / bogey blue).
-        const scoreInput = row.querySelector('.round-score');
-        scoreInput.className =
-          'round-score' +
-          scoreToneClass(
-            scoreInput.value,
-            getCurrentCourse()?.holes?.[i]?.par || 4
-          );
-
-        syncRoundScorecard();
-        renderStats();
-        renderRoundHoleHeader();
-        renderRoundMapHud();
-        // Keep the group table's "You" row + totals in step with edits.
-        renderGroupTable();
-      };
-      row
-        .querySelectorAll('input,select')
-        .forEach((el) => el.addEventListener('change', sync));
+      row.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-act]');
+        if (!btn) return;
+        cycleRoundCell(i, btn.dataset.act);
+      });
     });
+  }
+
+  // Sum of par for only the holes actually played — the honest vs-par basis
+  // mid-round (a +2 through 5 holes shouldn't read against full-card par).
+  function scoreParPlayed(course, rows) {
+    return rows.reduce(
+      (s, r, i) =>
+        s + (r.score !== '' && Number.isFinite(Number(r.score))
+          ? course?.holes?.[i]?.par || 4
+          : 0),
+      0
+    );
+  }
+
+  // One tap = one step through the natural cycle for each scorecard cell.
+  // Score: +1 up to 15 then clear; Putts: 0→5 then clear;
+  // FIR: Y→N→NA→clear (par-3 holes skip the meaningless Y step);
+  // GIR: Y→N→clear.
+  function cycleRoundCell(i, act) {
+    const rows = getScorecardRows();
+    const r = { ...(rows[i] || {}) };
+    const course = getCurrentCourse();
+    if (act === 'score') {
+      const cur = r.score === '' ? null : Number(r.score);
+      r.score = cur === null ? 1 : cur >= 15 ? '' : cur + 1;
+    } else if (act === 'putts') {
+      const cur = r.putts === '' ? null : Number(r.putts);
+      r.putts = cur === null ? 0 : cur >= 5 ? '' : cur + 1;
+    } else if (act === 'fir') {
+      const par = course?.holes?.[i]?.par || 4;
+      const seq = par === 3 ? ['N', 'NA', ''] : ['Y', 'N', 'NA', ''];
+      const cur = seq.indexOf(r.fir === undefined ? '' : r.fir);
+      r.fir = seq[(cur + 1) % seq.length];
+    } else if (act === 'gir') {
+      const seq = ['Y', 'N', ''];
+      const cur = seq.indexOf(r.gir === undefined ? '' : r.gir);
+      r.gir = seq[(cur + 1) % seq.length];
+    }
+    state.round[i] = {
+      ...(state.round[i] || {}),
+      hole: i + 1,
+      score: r.score ?? '',
+      putts: r.putts ?? '',
+      fir: r.fir ?? '',
+      gir: r.gir ?? '',
+    };
+    save('caddy:round', state.round);
+    if (state.roundSession) {
+      state.roundSession.scorecard = state.round;
+      saveRoundSession();
+    }
+    haptic(4);
+    syncRoundScorecard();
+    renderRound();
+    renderStats();
+    renderRoundHoleHeader();
+    renderRoundMapHud();
+    renderGroupTable();
   }
   function sanitizeInt(v) {
     if (v === '' || v == null) return '';
@@ -11585,6 +11668,41 @@ out geom;`;
         JSON.stringify(wet.tips) !== JSON.stringify(dry.tips),
         `dry=${dry.main} / wet=${wet.main}`);
       state.clubs = sClubs; state.target = sTarget; state.loc = sLoc; state.lastCalc = sCalc;
+    }
+
+    // 15. Scorecard tap-cycle logic: score steps, FIR skips Y on par 3,
+    // played-par basis is honest mid-round.
+    {
+      const sRound = state.round, sSession = state.roundSession;
+      state.round = [
+        { hole: 1, score: '', putts: '', fir: '', gir: '' },
+        { hole: 2, score: '', putts: '', fir: '', gir: '' },
+        { hole: 3, score: '', putts: '', fir: '', gir: '' },
+      ];
+      state.roundSession = {
+        course: { id: 't', name: 'T', holesCount: 3, holes: [
+          { number: 1, par: 4 }, { number: 2, par: 4 }, { number: 3, par: 3 },
+        ] },
+        hole: 1, currentHole: 1, status: 'active', scorecard: state.round,
+      };
+      cycleRoundCell(0, 'score'); // '' → 1
+      cycleRoundCell(0, 'score'); // 1 → 2
+      ok('Score cycle steps upward', Number(state.round[0].score) === 2,
+        `score=${state.round[0].score}`);
+      cycleRoundCell(0, 'putts');
+      ok('Putts cycle starts at 0', Number(state.round[0].putts) === 0);
+      cycleRoundCell(1, 'fir'); // par-4: '' → Y
+      ok('FIR cycle on par 4 starts at Y', state.round[1].fir === 'Y');
+      // Par-3 hole must skip the meaningless Y step.
+      cycleRoundCell(2, 'fir');
+      ok('FIR cycle on par 3 skips Y', state.round[2].fir === 'N',
+        `fir=${state.round[2].fir}`);
+      // Score the second hole, then played-par must count holes 1+2 only.
+      cycleRoundCell(1, 'score'); // '' → 1
+      const played = scoreParPlayed(state.roundSession.course, state.round);
+      ok('Played-par basis counts only scored holes', played === 8,
+        `parPlayed=${played}`);
+      state.round = sRound; state.roundSession = sSession;
     }
 
     console.log(out.join('\n'));

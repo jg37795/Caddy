@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.38'; // ui: sheet drag-fade fix (visibility), dark-on-launch, rings removed, mid-round tee picker, hazard-aware club optimizer
+const CACHE_VERSION = 'v1.0.39'; // ui: Round-tab premium pass — OUT/IN scorecard chips, live nine totals, current-hole marker, sticky group names
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

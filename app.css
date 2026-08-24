@@ -3646,7 +3646,151 @@ body.dark .wind-compass {
 }
 
 .round-row {
-  grid-template-columns: 34px 1fr 1fr 0.8fr 0.8fr;
+  grid-template-columns: 34px 1fr 1fr 0.62fr 0.62fr;
+}
+
+/* ===== Scorecard: Apple-style chips, OUT/IN nines, live totals ===== */
+.round-row .round-cell {
+  min-width: 0;
+  text-align: center;
+}
+
+.round-head-row {
+  padding: 2px 0 6px;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.round-cell.hole {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  font-weight: 900;
+}
+
+.round-cell.hole span {
+  font-size: 9.5px;
+  font-weight: 750;
+  color: var(--muted);
+}
+
+/* Tap-to-cycle chips: quiet tiles, not form fields. */
+button.round-cell {
+  border: 0;
+  border-radius: 12px;
+  padding: 9px 4px;
+  min-height: 38px;
+  background: rgba(127, 127, 127, 0.09);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  transition: transform 0.15s var(--spring-snappy), background 0.18s ease;
+}
+
+button.round-cell:active {
+  transform: scale(0.94);
+}
+
+button.round-cell.mark-chip {
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+button.round-cell.mark-chip.fir-y,
+button.round-cell.mark-chip.gir-y {
+  color: var(--green-2);
+  background: rgba(24, 164, 91, 0.14);
+}
+
+button.round-cell.mark-chip.fir-n,
+button.round-cell.mark-chip.gir-n {
+  color: var(--danger);
+  background: rgba(214, 69, 69, 0.09);
+}
+
+/* Birdie red / bogey blue — classic convention, carried onto the chips. */
+button.round-cell.score-chip.under {
+  color: #d63939;
+  background: rgba(214, 57, 57, 0.12);
+}
+
+button.round-cell.score-chip.over {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.12);
+}
+
+/* The hole you're standing on. */
+.round-row.current {
+  position: relative;
+}
+
+.round-row.current::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--green-2);
+}
+
+.round-row.current button.round-cell {
+  background: rgba(24, 164, 91, 0.07);
+}
+
+.round-nine-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 14px 2px 2px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.round-nine-head b {
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.round-nine-head i {
+  font-style: normal;
+  font-weight: 850;
+  margin-left: 5px;
+  color: var(--green-2);
+}
+
+.round-total-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(24, 164, 91, 0.08);
+  border: 1px solid rgba(24, 164, 91, 0.14);
+}
+
+.round-total-row span {
+  font-size: 12px;
+  font-weight: 850;
+  color: var(--muted);
+}
+
+.round-total-row b {
+  font-size: 19px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .club-row:last-child,
@@ -4669,7 +4813,8 @@ body.dark .plan-green-tile {
 }
 
 .group-table-scroll {
-  overflow-x: auto;
+  max-height: 340px;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
   margin: 2px -2px 4px;
   padding-bottom: 4px;
@@ -4693,6 +4838,18 @@ table.group-table {
   font-size: 10.5px;
   font-weight: 900;
   letter-spacing: 0.04em;
+}
+
+/* Sticky name column: partners stay put while the hole columns scroll.
+   (Enhances the base sticky rule below with a scroll-edge shadow.) */
+.group-table th:first-child,
+.group-table td:first-child {
+  box-shadow: 6px 0 8px -6px rgba(20, 45, 30, 0.16);
+}
+
+body.dark .group-table th:first-child,
+body.dark .group-table td:first-child {
+  box-shadow: 6px 0 8px -6px rgba(0, 0, 0, 0.5);
 }
 
 /* Sticky first column so player names stay visible while scrolling holes */
