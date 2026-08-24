@@ -375,6 +375,10 @@
 
             <div class="sheet-scroll">
               <div class="fcb-block">
+                <div class="fcb-group-head">
+                  <span class="fcb-group-title">Green</span>
+                  <span class="fcb-group-hint">tap map to mark · tile to aim</span>
+                </div>
                 <div class="fcb-row" id="fcbRow">
                   <div class="fcb">
                     <div class="fcb-l">Front</div>
@@ -399,10 +403,21 @@
                   <button class="fcb-seg-btn" id="setBackBtn" type="button">
                     Back
                   </button>
-                  <button class="fcb-seg-btn" id="setTeeBtn" type="button">
-                    Tee
+                </div>
+
+                <!-- Dedicated tee-box editor. Exists ONLY during a live round,
+                     so the green segmented control stays a clean three-option
+                     iOS seg the rest of the time. -->
+                <div class="tee-row" id="teeRow" hidden>
+                  <div class="tee-row-info">
+                    <span class="tee-row-title">Tee box</span>
+                    <span class="tee-row-status" id="teeRowStatus">Not set</span>
+                  </div>
+                  <button class="tee-set-btn" id="setTeeBtn" type="button">
+                    Set tee
                   </button>
                 </div>
+
                 <div class="fcb-actions" id="fcbActions">
                   <button class="fcb-btn" id="restoreGreenBtn" type="button" disabled>
                     Restore Green
@@ -1015,6 +1030,12 @@
           Location Services ▸ Safari Websites (or this app) ▸ While Using ▸
           Precise Location → ON.
         </div>
+      </div>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="lbl">About</div>
+        <div class="desc" id="aboutVersion">Caddy</div>
       </div>
     </div>
     <button class="primary-btn" id="settingsDoneBtn" style="width: 100%; margin-top: 14px">

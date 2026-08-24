@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.25'; // 9/18-hole courses, tee marking, FCB lit state, one-line aim chip, HUD two-row layout
+const CACHE_VERSION = 'v1.0.26'; // in-round tee editor row, uncapped plays-like, detent memory, condition-tinted plays-like, chip yardages
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

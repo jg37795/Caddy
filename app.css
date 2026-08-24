@@ -1522,6 +1522,23 @@ body[data-mode='range'] #roundMapHud {
   font-variant-numeric: tabular-nums;
 }
 
+/* Live vs-par tinting while stepping the score (birdie red / bogey blue). */
+#roundScoreValue.under {
+  color: #d63939;
+}
+
+#roundScoreValue.over {
+  color: #1677ff;
+}
+
+body.dark #roundScoreValue.under {
+  color: #ff8f8f;
+}
+
+body.dark #roundScoreValue.over {
+  color: #6cb2ff;
+}
+
 .round-score-stepper {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2433,10 +2450,37 @@ body.dark .fcb.clickable:hover {
   padding: 0 4px 8px;
 }
 
-/* iOS-style segmented control for marking green edges. */
+/* Labelled group header for the green-marking cluster. */
+.fcb-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px 7px;
+}
+
+.fcb-group-title {
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.fcb-group-hint {
+  font-size: 10.5px;
+  font-weight: 750;
+  opacity: 0.42;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* iOS-style segmented control for marking green edges.
+   Three options — the tee editor graduated to its own dedicated row. */
 .fcb-seg {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   margin: 0 4px 8px;
   padding: 3px;
   border-radius: 14px;
@@ -2485,11 +2529,6 @@ body.dark .fcb-seg {
   color: #2a1c02;
 }
 
-#setTeeBtn.armed {
-  background: var(--blue);
-  color: #fff;
-}
-
 /* Persistent "set" state: a segment stays softly tinted while its point
    exists on the map — solid fill (.armed) still means "placing now". */
 #setFrontBtn.lit {
@@ -2507,11 +2546,6 @@ body.dark .fcb-seg {
   color: #a16207;
 }
 
-#setTeeBtn.lit {
-  background: rgba(22, 119, 255, 0.14);
-  color: var(--blue);
-}
-
 body.dark #setFrontBtn.lit {
   color: #34d399;
 }
@@ -2524,8 +2558,98 @@ body.dark #setBackBtn.lit {
   color: #f5b14a;
 }
 
-body.dark #setTeeBtn.lit {
+/* ===== Dedicated tee-box row (live rounds only) ===== */
+.tee-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 4px 8px;
+  padding: 10px 13px;
+  border-radius: 14px;
+  background: rgba(22, 119, 255, 0.07);
+  border: 1px solid rgba(22, 119, 255, 0.16);
+}
+
+.tee-row[hidden] {
+  display: none;
+}
+
+body.dark .tee-row {
+  background: rgba(108, 178, 255, 0.08);
+  border-color: rgba(108, 178, 255, 0.18);
+}
+
+.tee-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tee-row-title {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.tee-row-status {
+  font-size: 11px;
+  font-weight: 750;
+  opacity: 0.62;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tee-set-btn {
+  flex: 0 0 auto;
+  min-height: 37px;
+  border-radius: 11px;
+  padding: 8px 15px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+  transition: transform 0.15s var(--spring-snappy), background 0.2s ease,
+    color 0.2s ease;
+}
+
+.tee-set-btn:active {
+  transform: scale(0.95);
+}
+
+.tee-set-btn.lit {
+  background: rgba(22, 119, 255, 0.14);
+  color: var(--blue);
+}
+
+body.dark .tee-set-btn.lit {
+  background: rgba(108, 178, 255, 0.16);
   color: #6cb2ff;
+}
+
+.tee-set-btn.armed {
+  animation: teeArmPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes teeArmPulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(22, 119, 255, 0.42);
+  }
+
+  50% {
+    box-shadow: 0 0 0 7px rgba(22, 119, 255, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tee-set-btn.armed {
+    animation: none;
+  }
 }
 
 #restoreGreenBtn {
@@ -2874,6 +2998,42 @@ body[data-dragging='1'] .detail-block {
 body.dark .plays-like-num,
 .is-sat .plays-like-num {
   color: #37e07f;
+}
+
+/* Glanceable tint: amber when conditions stretch the shot (take more club),
+   blue when they shorten it — matching the app's manage/easy language. */
+.plays-like-num.pl-long {
+  color: #d38713;
+}
+
+.plays-like-num.pl-short {
+  color: var(--blue);
+}
+
+body.dark .plays-like-num.pl-long {
+  color: #f5b14a;
+}
+
+body.dark .plays-like-num.pl-short {
+  color: #6cb2ff;
+}
+
+/* Glanceable tint: amber when conditions stretch the shot (take more club),
+   blue when they shorten it — matching the app's manage/easy language. */
+.plays-like-num.pl-long {
+  color: #d38713;
+}
+
+.plays-like-num.pl-short {
+  color: var(--blue);
+}
+
+body.dark .plays-like-num.pl-long {
+  color: #f5b14a;
+}
+
+body.dark .plays-like-num.pl-short {
+  color: #6cb2ff;
 }
 
 .plays-like-unit {
@@ -3422,6 +3582,27 @@ body.dark .wind-compass {
 .club-chip.recommended {
   border-color: var(--green-2);
   box-shadow: 0 0 0 2px rgba(24, 164, 91, 0.25);
+}
+
+/* Stock carry printed under each chip name — pick clubs by number,
+   not by memory. */
+.club-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.club-chip i {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  opacity: 0.58;
+  font-variant-numeric: tabular-nums;
 }
 
 .notice {

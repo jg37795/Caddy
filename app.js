@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.13.0'; // 9/18-hole courses, tee marking, persistent FCB lit state, one-line aim chip, HUD layout
+  const APP_VERSION = '1.14.0'; // dedicated in-round tee editor, uncapped plays-like solve, sheet detent memory, plays-like condition tint, chip yardages
   const ACCURACY_WARN_YD = 25;
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
@@ -1228,13 +1228,14 @@
           // Tapping on the existing tee removes it.
           state.teePt = null;
           setHoleTeePoint(null);
-          setNotice('Tee removed.', 'greenish');
+          setNotice('Tee removed for this hole.', 'greenish');
         } else {
           state.teePt = { lat: latlng.lat, lng: latlng.lng };
           setHoleTeePoint(state.teePt);
-          setNotice('Tee set for this hole. Tap Tee, then the tee again, to remove it.', 'greenish');
+          setNotice('Tee saved for this hole. Tap Set tee, then the tee again, to remove it.', 'greenish');
         }
         renderTeeMarker();
+        renderTeeRow();
       }
       disarmPlaceMode();
       renderFcb();
@@ -1322,8 +1323,7 @@
     els.setFrontBtn.classList.toggle('armed', state.placeMode === 'front');
     els.setCenterBtn.classList.toggle('armed', state.placeMode === 'center');
     els.setBackBtn.classList.toggle('armed', state.placeMode === 'back');
-    if (els.setTeeBtn)
-      els.setTeeBtn.classList.toggle('armed', state.placeMode === 'tee');
+    renderTeeRow();
     if (state.sheet) state.sheet.half();
     haptic(6);
   }
@@ -1332,7 +1332,45 @@
     els.setFrontBtn.classList.remove('armed');
     els.setCenterBtn.classList.remove('armed');
     els.setBackBtn.classList.remove('armed');
-    if (els.setTeeBtn) els.setTeeBtn.classList.remove('armed');
+    renderTeeRow();
+  }
+
+  // Dedicated tee-box row: rendered only while a round is live, so the
+  // green-edge segmented control stays a clean Front/Middle/Back trio
+  // outside of play. Central updater for visibility, status copy, and the
+  // armed/lit states of the Set-tee button.
+  function renderTeeRow() {
+    const row = document.getElementById('teeRow');
+    const status = document.getElementById('teeRowStatus');
+    if (!row) return;
+
+    const inRound = !!state.roundSession;
+    row.hidden = !inRound;
+    if (!inRound || !status) return;
+
+    if (state.placeMode === 'tee') {
+      status.textContent = state.teePt
+        ? 'Tap the tee on the map again to remove it'
+        : 'Tap your tee box on the map';
+    } else if (state.teePt) {
+      status.textContent = 'Set for this hole';
+    } else {
+      status.textContent = 'Not set for this hole';
+    }
+
+    if (els.setTeeBtn) {
+      els.setTeeBtn.classList.toggle('armed', state.placeMode === 'tee');
+      els.setTeeBtn.classList.toggle(
+        'lit',
+        !!state.teePt && state.placeMode !== 'tee'
+      );
+      els.setTeeBtn.textContent =
+        state.placeMode === 'tee'
+          ? 'Cancel'
+          : state.teePt
+            ? 'Edit tee'
+            : 'Set tee';
+    }
   }
 
   function clearTwoTapMarkers(keepA) {
@@ -1995,11 +2033,12 @@
   }
   function renderFcb() {
     // Persistent lit state: a segment stays tinted while its point is set,
-    // distinct from the solid .armed fill used while placing.
+    // distinct from the solid .armed fill used while placing. The tee has
+    // its own dedicated row and is managed entirely by renderTeeRow().
     els.setFrontBtn.classList.toggle('lit', !!state.frontPt);
     els.setCenterBtn.classList.toggle('lit', !!state.greenCenter);
     els.setBackBtn.classList.toggle('lit', !!state.backPt);
-    if (els.setTeeBtn) els.setTeeBtn.classList.toggle('lit', !!state.teePt);
+    renderTeeRow();
 
     // Tiles become tappable when their green reference exists; tapping
     // snaps the aim target there. The currently-aimed-at tile gets a ring.
@@ -2189,7 +2228,9 @@
             }${state.lastRecClubId === c.id && state.prefs.selectedClubId !== c.id
               ? ' recommended'
               : ''
-            }" data-id="${escapeHtml(c.id)}">${escapeHtml(c.name)}</button>`
+            }" data-id="${escapeHtml(c.id)}">${escapeHtml(c.name)}<i>${fmt(
+              c.yards
+            )} yd</i></button>`
         )
         .join('');
     els.clubChips.querySelectorAll('.club-chip').forEach((chip) => {
@@ -2448,6 +2489,11 @@
       return;
     state.roundSession = null;
     state.holeGeoKey = null;
+    // The tee editor only exists inside a live round — drop any on-map tee
+    // state with it so nothing leaks into the next session.
+    state.teePt = null;
+    renderTeeMarker();
+    renderTeeRow();
     saveRoundSession();
     renderRoundShotUI();
     releaseWakeLock();
@@ -2694,6 +2740,7 @@
     }
 
     renderTeeMarker();
+    renderTeeRow();
     renderFcb();
     updateLine();
     updateRestoreGreenBtn();
@@ -2855,11 +2902,19 @@
     else if (score.holesPlayed && score.toPar > 0)
       els.roundMapScore.classList.add('to-par-over');
 
+    // Status line doubles as a last-shot recall: the most recent logged
+    // distance rides along so you can sanity-check club choice mid-hole.
+    const lastShot = Array.isArray(rs.shots)
+      ? [...rs.shots].reverse().find((s) => s.counted)
+      : null;
     els.roundMapStatus.textContent = pending
       ? 'Shot in flight'
-      : score.holesPlayed
-        ? `Ready · thru ${score.holesPlayed}`
-        : 'Ready for next shot';
+      : [
+        score.holesPlayed ? `Thru ${score.holesPlayed}` : 'Ready',
+        lastShot ? `last ${lastShot.distanceYd} yd` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
 
     if (els.roundMapPrevBtn) {
       els.roundMapPrevBtn.disabled = pending || rs.hole <= 1;
@@ -4346,6 +4401,17 @@ out geom;`;
 
     els.roundScoreValue.textContent = String(draft.score);
 
+    // Live vs-par tint (birdie red / bogey blue) while stepping the number.
+    const parNow = clamp(Math.round(num(hole.par, 4)), 3, 6);
+    els.roundScoreValue.classList.toggle(
+      'under',
+      draft.score < parNow
+    );
+    els.roundScoreValue.classList.toggle(
+      'over',
+      draft.score > parNow
+    );
+
     if (els.roundPuttsOptions) {
       els.roundPuttsOptions.querySelectorAll('button').forEach((button) => {
         const value = Number(button.dataset.putts);
@@ -4914,6 +4980,10 @@ out geom;`;
       setY(d[name], !wasDragging);
       applyDetentAttr(name);
 
+      // Remember the chosen detent so the sheet reopens where you left it.
+      state.prefs.sheetDetent = name;
+      save('caddy:prefs', state.prefs);
+
       if (wasDragging) {
         const r = revealForDetent(name);
         sheet.style.setProperty('--fcb-reveal', String(r.fcb));
@@ -5073,7 +5143,12 @@ out geom;`;
       half: () => snapTo('half', true),
       collapse: () => snapTo('collapsed', true),
     };
-    applyDetentAttr('collapsed');
+    // Reopen at the detent last used (premium apps remember your state).
+    applyDetentAttr(
+      ['collapsed', 'half', 'full'].includes(state.prefs.sheetDetent)
+        ? state.prefs.sheetDetent
+        : 'collapsed'
+    );
     requestAnimationFrame(() => requestAnimationFrame(measure));
   }
 
@@ -5547,6 +5622,13 @@ out geom;`;
       window.navigator.standalone
     ) {
       els.topSubtitle.textContent = 'Standalone PWA';
+    }
+    const aboutEl = $('aboutVersion');
+    if (aboutEl) {
+      aboutEl.textContent =
+        'Caddy ' +
+        APP_VERSION +
+        ' · every calculation runs on-device; nothing leaves your phone but weather & elevation.';
     }
   }
 
@@ -6281,6 +6363,8 @@ out geom;`;
       { carryYd: 460, seedMps: 104 },
       { carryYd: 560, seedMps: 118 },
       { carryYd: 650, seedMps: 132 },
+      { carryYd: 780, seedMps: 147 },
+      { carryYd: 950, seedMps: 164 },
     ];
     for (const { carryYd: targetYd, seedMps } of EXT_ANCHORS) {
       let speed = seedMps;
@@ -6332,7 +6416,10 @@ out geom;`;
   // Launch conditions for a player whose standard-condition carry is `carryYd`.
   function launchForStandardCarry(carryYd) {
     const F = referenceLaunchFamily();
-    const c = clamp(num(carryYd, 100), 8, 650);
+    // Track the family's calibrated ceiling instead of a hard-coded 650 yd
+    // cap, so plays-like keeps scaling with the real tapped distance no
+    // matter how far the target sits.
+    const c = clamp(num(carryYd, 100), 8, Math.max(650, Math.round(F.maxCarry)));
     return {
       speedMps: Math.max(8, F.speed(c)),
       launchDeg: clamp(F.launch(c), 4, 42),
@@ -6439,8 +6526,9 @@ out geom;`;
     if (hit) return hit;
 
     const env = buildEnv(cond);
-    let lo = 5, hi = 650;
-    let P = clamp(D - num(cond.elevDiffFt, 0) / 3, 8, 600);   // legacy linear rule used ONLY as the Newton seed
+    const famMax = Math.max(650, Math.round(referenceLaunchFamily().maxCarry));
+    let lo = 5, hi = famMax;
+    let P = clamp(D - num(cond.elevDiffFt, 0) / 3, 8, famMax); // legacy linear rule used ONLY as the Newton seed
     let f = carryUnder(P, env) - D;
     for (let i = 0; i < PHYSICS.SOLVER_MAX_ITER; i++) {
       if (Math.abs(f) < PHYSICS.SOLVER_TOL_YD) break;
@@ -8737,6 +8825,17 @@ out geom;`;
     }
     setAimChip();
     els.playsLikeYards.textContent = fmt(calc.playsLikeYd);
+
+    // Condition tint on the plays-like tile: amber when the environment
+    // stretches the shot past the raw number, blue when it shortens it —
+    // readable at cart-distance without parsing either number.
+    if (horizontalYd >= 25) {
+      const plDeltaPct = (calc.playsLikeYd - horizontalYd) / horizontalYd;
+      els.playsLikeYards.classList.toggle('pl-long', plDeltaPct >= 0.03);
+      els.playsLikeYards.classList.toggle('pl-short', plDeltaPct <= -0.03);
+    } else {
+      els.playsLikeYards.classList.remove('pl-long', 'pl-short');
+    }
 
     els.playsLikeYards.title = calc.extended
       ? 'Approximate yardage beyond the calibrated carry range'
