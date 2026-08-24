@@ -2439,6 +2439,11 @@ body[data-detent='full'] .fcb-block {
 body[data-dragging='1'] .fcb-block {
   max-height: calc(400px * var(--fcb-reveal, 0));
   opacity: var(--fcb-reveal, 0);
+  /* The detent rules keep the block visibility:hidden until release — that
+     gate, not opacity, is what made content stay blank mid-drag. Lift it
+     for the duration of the drag and frame-lock everything. */
+  visibility: visible;
+  transition: none !important;
 }
 
 .fcb-row {
@@ -3105,12 +3110,9 @@ body[data-detent='full'] .detail-block {
 
 body[data-dragging='1'] .detail-block {
   opacity: var(--detail-reveal, 0);
-  /* Frame-lock the fade: keeping the 0.3s opacity transition here made the
-     content chase the sheet and pop in late mid-drag. */
-  transition: none !important;
-}
-
-body[data-dragging='1'] .fcb-block {
+  visibility: visible;
+  /* Frame-lock the fade: the 0.3s opacity chase AND the delayed
+     visibility flip both made content pop in only after release. */
   transition: none !important;
 }
 
@@ -4045,24 +4047,6 @@ body[data-detent='full']:not([data-dragging='1']) .leaflet-bottom.leaflet-right 
 
 body.dark .shot-trail-label {
   background: rgba(16, 22, 19, 0.85);
-  color: #edf7ef;
-}
-
-/* Rangefinder distance rings (50/100/150/200 yd). */
-.ring-label {
-  padding: 2px 0;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  color: #0c1410;
-  font-size: 9.5px;
-  font-weight: 900;
-  text-align: center;
-  letter-spacing: -0.01em;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-}
-
-body.dark .ring-label {
-  background: rgba(16, 22, 19, 0.88);
   color: #edf7ef;
 }
 

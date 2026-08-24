@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.37'; // ui: Play-tab premium pass — sliding-thumb green segment, set-dots, drag-fade fix, geocoder course search, Score tab renamed Round
+const CACHE_VERSION = 'v1.0.38'; // ui: sheet drag-fade fix (visibility), dark-on-launch, rings removed, mid-round tee picker, hazard-aware club optimizer
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

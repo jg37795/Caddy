@@ -272,7 +272,7 @@
 
   const state = {
     prefs: load('caddy:prefs', {
-      dark: false,
+      dark: true,
       pro: false,
       selectedClubId: '',
       activeTab: 'range',
@@ -280,7 +280,6 @@
       gpsEnabled: false,
       mode: 'golf',
       dispersionZone: true,
-      rangeRings: true,
     }),
     nearbyCourses: [],
     courseSearchActive: false,
@@ -880,10 +879,6 @@
     if (dispersionToggle) {
       dispersionToggle.checked = state.prefs.dispersionZone !== false;
     }
-    const rangeRingsToggle = $('rangeRingsToggle');
-    if (rangeRingsToggle) {
-      rangeRingsToggle.checked = state.prefs.rangeRings !== false;
-    }
     els.proBreakdownWrap.style.display = state.prefs.pro ? 'block' : 'none';
     els.themeColorMeta.setAttribute(
       'content',
@@ -1000,7 +995,6 @@
       initMap();
       closeWindPop();
       renderPendingShot();
-      renderRangeRings();
       setTimeout(() => {
         if (state.map) {
           state.map.invalidateSize();
@@ -1067,7 +1061,6 @@
     state.map.on('click', (e) =>
       handleMapTap({ lat: e.latlng.lat, lng: e.latlng.lng })
     );
-    state.map.on('zoomend', () => renderRangeRings());
     state.map.on('dragstart', () => {
       if (state.followMode !== FollowMode.IDLE) {
         state.followMode = FollowMode.IDLE;
@@ -1126,7 +1119,6 @@
     updateAimColor();
     restyleShotLines();
     if (state.loc && state.target) {
-      renderRangeRings();
       renderDispersionZone(
         initialBearingDeg(state.loc, state.target),
         state.clubs.find((c) => c.id === state.lastRecClubId) || null
@@ -1280,7 +1272,6 @@
       state.markers.accuracy.setStyle({ color: col, fillColor: col });
     }
     updateLine();
-    renderRangeRings();
   }
 
   let ignoreNextClick = false;
@@ -3036,6 +3027,41 @@
 
     haptic(6);
   }
+
+  // Mid-round tee-set switcher: re-applies an imported tee set onto the
+  // LIVE round course (per-hole yardages, tee points, per-tee pars), then
+  // refreshes everything that displays them. Only rendered when the course
+  // actually carries 2+ imported tee sets.
+  function renderRoundTeePicker() {
+    const wrap = document.getElementById('roundTeePickerWrap');
+    const sel = document.getElementById('roundTeePicker');
+    if (!wrap || !sel) return;
+    const course = getCurrentCourse();
+    const sets = course && Array.isArray(course.teeSets) ? course.teeSets : [];
+    if (!state.roundSession || sets.length < 2) {
+      wrap.hidden = true;
+      sel.onchange = null;
+      return;
+    }
+    wrap.hidden = false;
+    sel.innerHTML = sets
+      .map(
+        (t) =>
+          `<option value="${escapeHtml(t.name)}"${t.name === course.activeTeeSet ? ' selected' : ''
+          }>${escapeHtml(t.name)}</option>`
+      )
+      .join('');
+    sel.onchange = () => {
+      const updated = applyTeeSet(course, sel.value);
+      state.roundSession.course = updated;
+      saveRoundSession();
+      state.holeGeoKey = null; // force this hole's geometry to re-apply
+      renderRoundShotUI();
+      renderRound();
+      setNotice(`Playing from ${updated.teeName}.`, 'greenish');
+      haptic(6);
+    };
+  }
   function renderRoundHoleHeader() {
     if (!els.roundHoleStrip) return;
 
@@ -3223,6 +3249,7 @@
     const status = roundStatus();
     renderRoundHoleHeader();
     syncHoleGeometry();
+    renderRoundTeePicker();
 
     // Status chip
     const chipText =
@@ -5421,15 +5448,6 @@ out geom;`;
         save('caddy:prefs', state.prefs);
         if (state.target && state.loc) calculateRange();
         else clearDispersionZone();
-        haptic(5);
-      });
-    }
-    const rangeRingsToggle = $('rangeRingsToggle');
-    if (rangeRingsToggle) {
-      rangeRingsToggle.addEventListener('change', () => {
-        state.prefs.rangeRings = rangeRingsToggle.checked;
-        save('caddy:prefs', state.prefs);
-        renderRangeRings();
         haptic(5);
       });
     }
@@ -8553,6 +8571,36 @@ out geom;`;
   const VERDICT_GO_PGREEN = 0.55;      // ≥55% green with the best club => commit
   const VERDICT_BAIL_PGREEN = 0.22;    // <22% green with the best club => the target itself is wrong
   const VERDICT_BAIL_ES = 3.35;        // expected strokes above which the shot is not worth attempting as aimed
+  /* ---- Hazard cost model (strokes) ---- */
+  const HAZ_WATER_PENALTY = 1.8;   // ≈ stroke-and-dropped: penalty + replay distance
+  const HAZ_BUNKER_PENALTY = 0.55; // typical bunker recovery vs adjacent grass
+  const HAZ_HALF_WIDTH_YD = 7;     // modeled half-width of a mapped hazard
+  const HAZ_CLEAR_MARGIN_YD = 4;   // carry margin demanded over water before "clear"
+
+  // Expected stroke cost of the hazard field for one sampled landing point.
+  // Landed SHORT of the hazard = failed carry → full penalty if on its line.
+  // Landed AT the hazard = in it (full) or graded proximity beside it.
+  // Landed WELL PAST = cleanly carried → free.
+  function hazardCostStrokes(along, lateral, hazards) {
+    let cost = 0;
+    for (const h of hazards) {
+      const pen = h.type === 'water' ? HAZ_WATER_PENALTY : HAZ_BUNKER_PENALTY;
+      const dCross = Math.abs(lateral - h.crossYd);
+      const dAlong = along - h.alongYd; // + = past the hazard
+      if (dAlong < -HAZ_CLEAR_MARGIN_YD) {
+        // Short of the hazard: it had to be carried, and wasn't.
+        if (dCross < HAZ_HALF_WIDTH_YD) cost += pen;
+      } else if (Math.abs(dAlong) <= HAZ_HALF_WIDTH_YD + 6) {
+        // At the hazard: in it, or close enough to cost recovery strokes.
+        const edge = dCross - HAZ_HALF_WIDTH_YD;
+        if (edge < 0) cost += pen;
+        else if (edge < 10) cost += pen * (1 - edge / 10) * 0.5;
+      }
+      // else: cleanly carried — no cost.
+    }
+    return cost;
+  }
+
   function recommendSmart(playsTarget, geo, bearing, accYd, opts = {}) {
     const asc = sortedClubsAsc();
     const desc = sortedClubsDesc();
@@ -8618,17 +8666,41 @@ out geom;`;
         }
         : null;
 
+    /* ---- Hazard-aware optimization ----
+       Imported water/bunkers projected onto THIS line now price directly
+       into the club decision: every candidate is re-scored over the same
+       Gauss–Hermite landing samples with the expected hazard cost added,
+       and the optimizer also scans lateral aim shifts to find the line
+       that plays cheapest against the trouble. */
+    const haz = Array.isArray(opts.hazards) ? opts.hazards : hazardsOnLine();
+    const scan = haz.length ? [-12, -6, 0, 6, 12] : [0];
+
     let best = null, alternatives = [];
     for (const c of desc) {
       for (let k = 0; k < EFFORT_LEVELS.length; k++) {
         const eff = EFFORT_LEVELS[k];
-        const r = clubExpectedStrokes(c, playsTarget, pinPlays, model, {
-          effort: eff, surround: 'rough', aimLateral: 0,
-        });
-        const score = r.es + Math.abs(eff - 1) * 0.02;
-        const cand = { club: c, eff, effName: EFFORT_NAMES[k], score, ...r };
-        alternatives.push(cand);
-        if (!best || score < best.score - 1e-9) best = cand;
+        for (const aim of scan) {
+          const r = clubExpectedStrokes(c, playsTarget, pinPlays, model, {
+            effort: eff, surround: 'rough', aimLateral: aim,
+          });
+          // Re-sample the same quadrature nodes with hazard cost folded in,
+          // so the expectation stays exact rather than bolted on after.
+          let hz = 0;
+          if (haz.length && Number.isFinite(r.muEff)) {
+            const nodes = NORM_NODES;
+            for (let i = 0; i < nodes.zs.length; i++) {
+              const along = r.muEff + nodes.zs[i] * r.sigD;
+              for (let j = 0; j < nodes.zs.length; j++) {
+                const lateral = nodes.zs[j] * r.sigL + aim;
+                hz += nodes.ws[i] * nodes.ws[j] * hazardCostStrokes(along, lateral, haz);
+              }
+            }
+          }
+          const score = r.es + hz + Math.abs(eff - 1) * 0.02 + Math.abs(aim) * 0.0015;
+          const cand = { club: c, eff, effName: EFFORT_NAMES[k], score, aimLateral: aim, hz, ...r };
+          alternatives.push(cand);
+          if (!best || score < best.score - 1e-9) best = cand;
+        }
       }
     }
     alternatives.sort((a, b) => a.score - b.score);
@@ -8659,6 +8731,13 @@ out geom;`;
     }
 
     // Hardest-third stroke index: keep the commitment but soften the target line.
+    if (best && haz.length && Math.abs(best.aimLateral || 0) >= 3) {
+      const side = best.aimLateral > 0 ? 'right' : 'left';
+      const kind = haz.some((h) => h.type === 'water') ? 'the water' : 'the trouble';
+      tips.unshift(
+        `Aim ${Math.abs(Math.round(best.aimLateral))} yd ${side} of your target — against ${kind}, that line saves about ${fmt(best.hz, 2)} strokes.`
+      );
+    }
     if (strokeIndex && strokeIndex <= 6) {
       tips.push(
         `#${strokeIndex} handicap hole — the numbers say commit, but favour the fat side of the green over any corner pin.`
@@ -11479,6 +11558,35 @@ out geom;`;
     ok('Fused accuracy respects correlated-error floor', fused.accuracy >= GPS_CORRELATED_FRAC * 10,
       `±${fused.accuracy.toFixed(2)} m from ten ±10 m fixes`);
 
+    // 13. Hazard cost model: carry pricing, off-line falloff.
+    const hzLine = [{ type: 'water', alongYd: 130, crossYd: 0 }];
+    ok('Hazard cost is positive over water', hazardCostStrokes(135, 0, hzLine) > 0);
+    ok('Hazard cost is zero once carried', hazardCostStrokes(160, 0, hzLine) === 0);
+    ok('Hazard cost fades off-line',
+      hazardCostStrokes(135, 0, hzLine) > hazardCostStrokes(135, 25, hzLine));
+
+    // 14. End-to-end: water guarding a 150 yd target at 130 yd must change
+    // the plan (different club, effort, aim, or advice) vs dry ground.
+    {
+      const sClubs = state.clubs, sTarget = state.target, sLoc = state.loc, sCalc = state.lastCalc;
+      state.clubs = [
+        { id: 't1', name: '8-iron', yards: 145 },
+        { id: 't2', name: '7-iron', yards: 160 },
+      ];
+      state.target = { lat: 33.5, lng: -84.4 };
+      state.loc = { lat: 33.49782, lng: -84.4 }; // ≈150 yd south of target
+      state.lastCalc = null;
+      const dry = recommendSmart(150, null, 0, 0, {});
+      const wet = recommendSmart(150, null, 0, 0, { hazards: hzLine });
+      ok('Water changes the plan vs dry ground',
+        wet.main !== dry.main ||
+        wet.eff !== dry.eff ||
+        (wet.aimLateral || 0) !== (dry.aimLateral || 0) ||
+        JSON.stringify(wet.tips) !== JSON.stringify(dry.tips),
+        `dry=${dry.main} / wet=${wet.main}`);
+      state.clubs = sClubs; state.target = sTarget; state.loc = sLoc; state.lastCalc = sCalc;
+    }
+
     console.log(out.join('\n'));
     return out;
   };
@@ -11819,7 +11927,6 @@ out geom;`;
       updateAimColor();
       restyleShotLines();
       if (state.loc && state.target) {
-        renderRangeRings();
         renderDispersionZone(
           initialBearingDeg(state.loc, state.target),
           state.clubs.find((c) => c.id === state.lastRecClubId) || null
@@ -11942,56 +12049,6 @@ out geom;`;
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && windPopIsOpen()) closeWindPop();
     });
-  }
-
-  /* ---------- Rangefinder distance rings ---------- */
-  const RANGE_RINGS_YD = [50, 100, 150, 200];
-  const RANGE_RINGS_MIN_ZOOM = 16;
-  function ringLabelIcon(text) {
-    return L.divIcon({
-      className: '',
-      html: `<div class="ring-label">${text}</div>`,
-      iconSize: [34, 16],
-      iconAnchor: [17, 8],
-    });
-  }
-  function renderRangeRings() {
-    clearRangeRings();
-    if (!state.mapReady || !state.loc || state.prefs.rangeRings === false)
-      return;
-    if (state.map.getZoom() < RANGE_RINGS_MIN_ZOOM) return;
-    const img = isImagery();
-    const color = img ? '#ffffff' : '#1677ff';
-    const group = L.layerGroup();
-    for (const yd of RANGE_RINGS_YD) {
-      const ring = L.circle([state.loc.lat, state.loc.lng], {
-        radius: yd * YD_TO_M,
-        color,
-        weight: 1.4,
-        opacity: 0.5,
-        dashArray: '3 8',
-        fill: false,
-        interactive: false,
-        pane: 'coursePane',
-      });
-      const lp = geodesicDirect(state.loc, 45, yd * YD_TO_M);
-      const label = L.marker([lp.lat, lp.lng], {
-        icon: ringLabelIcon(String(yd)),
-        interactive: false,
-        zIndexOffset: 700,
-      });
-      group.addLayer(ring).addLayer(label);
-    }
-    group.addTo(state.map);
-    state.layers.rangeRings = group;
-  }
-  function clearRangeRings() {
-    if (state.layers.rangeRings && state.map) {
-      try {
-        state.map.removeLayer(state.layers.rangeRings);
-      } catch { }
-    }
-    state.layers.rangeRings = null;
   }
 
   /* ---------- Live shot line + draggable start flag ---------- */
@@ -12120,6 +12177,11 @@ out geom;`;
   initWindPop();
   if (els.roundResetStart)
     els.roundResetStart.addEventListener('click', resetPendingStart);
+
+  // Dark is the house look: EVERY launch starts dark. The settings toggle
+  // is a per-session override and is deliberately never persisted.
+  state.prefs.dark = true;
+  save('caddy:prefs', state.prefs);
 
   bootstrap();
 })();

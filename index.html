@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="theme-color" content="#0f7a43" id="themeColorMeta" />
+  <meta name="theme-color" content="#07100b" id="themeColorMeta" />
   <meta name="color-scheme" content="light dark" />
   <meta name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -739,8 +739,12 @@
             <button class="ghost-btn" id="roundNextHoleBtn" type="button">
               Next
             </button>
-          </div>
-          <button class="danger-btn" id="roundEndBtn" type="button" style="width: 100%; margin-top: 8px; display: none">
+            </div>
+            <label class="field" id="roundTeePickerWrap" style="margin-top: 10px" hidden>
+            Tee set
+            <select id="roundTeePicker"></select>
+            </label>
+            <button class="danger-btn" id="roundEndBtn" type="button" style="width: 100%; margin-top: 8px; display: none">
             End round
           </button>
           <div id="roundShotList" style="margin-top: 12px"></div>
@@ -1157,7 +1161,8 @@
       <div>
         <div class="lbl">Dark appearance</div>
         <div class="desc">
-          Switches the app chrome. Map style is set separately on the map.
+          Per-session — Caddy always launches dark. Map style is set
+          separately on the map.
         </div>
       </div>
       <label class="toggle" title="Dark mode"><input id="darkToggleSheet" type="checkbox" /><span
@@ -1171,16 +1176,6 @@
         </div>
       </div>
       <label class="toggle" title="Dispersion zone"><input id="dispersionToggle" type="checkbox" /><span
-          class="switch"></span></label>
-    </div>
-    <div class="settings-row">
-      <div>
-        <div class="lbl">Distance rings</div>
-        <div class="desc">
-          Shows 50 / 100 / 150 / 200 yd rings around you when zoomed in.
-        </div>
-      </div>
-      <label class="toggle" title="Distance rings"><input id="rangeRingsToggle" type="checkbox" /><span
           class="switch"></span></label>
     </div>
     <div class="settings-row">
