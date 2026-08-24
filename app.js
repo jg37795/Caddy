@@ -1,8 +1,12 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.17.0'; // JSON backup/restore via share sheet, shot-log CSV export, remembered putts default, verdict & shot-capture haptic vocabulary
+  const APP_VERSION = '1.17.0'; // JSON backup/restore via share sheet, shot-log CSV, remembered putts default, verdict & shot-capture haptic vocabulary
   const ACCURACY_WARN_YD = 25;
+  // Range-recalculation throttle (perf): GPS ticks only trigger the full
+  // plays-like solve when the player has genuinely moved. Sub-yard drift in
+  // the smoothed position can't change a golf number.
+  const RANGE_RECALC_MOVE_YD = 3; // movement (yd) required before a GPS-triggered recalculation runs
   const USABLE_ACC_M = 30;
   const APPROX_ACC_M = 500;
   const WEATHER_TTL = 10 * 60 * 1000;
@@ -292,6 +296,8 @@
     },
     contextSeq: 0,
     lastCalc: null,
+    lastCalcLoc: null, // position the last range calculation ran against (throttle reference)
+    lastCalcAt: 0,     // timestamp of the last range calculation
     lastRecClubId: null,
     roundSession: load('caddy:roundSession', null),
     roundScoreDraft: null,
@@ -6284,6 +6290,17 @@ out geom;`;
         APP_VERSION +
         ' · every calculation runs on-device; nothing leaves your phone but weather & elevation.';
     }
+
+    // Pre-warm the trajectory model. referenceLaunchFamily() integrates the
+    // entire baseline launch table on first use (hundreds of RK4 solves),
+    // which previously landed on the first calculation after boot and
+    // surfaced as multi-second lag on the first hole change. Building it
+    // during idle time moves that burst somewhere invisible.
+    setTimeout(() => {
+      try {
+        referenceLaunchFamily();
+      } catch { /* non-fatal: the lazy build path still works */ }
+    }, 600);
   }
 
   // ============================================================
@@ -7105,7 +7122,7 @@ out geom;`;
     HUMIDITY_BASELINE_RH: STD_RH,         // reference relative humidity, % — TrackMan/USGA test conditions
     ALTITUDE_BASELINE_FT: STD_ALT_FT,     // reference altitude, ft — quoted carry numbers assume sea level
     MIN_CROSSWIND_MPH: 1.0,               // below this the aim correction is inside GPS/aim noise; report "minimal"
-    SOLVER_TOL_YD: 0.05,                  // inverse-solve tolerance, yd — far below GPS resolution
+    SOLVER_TOL_YD: 0.25,                 // inverse-solve tolerance, yd — GPS error is ±10–30 yd; tighter tolerances burn iterations for nothing
     SOLVER_MAX_ITER: 14,                  // Newton + bisection safeguard iteration cap
     // Legacy linear coefficients, retained ONLY so any external reader of PHYSICS.* keeps working.
     // The solver no longer uses them; they are superseded by the trajectory model.
@@ -7771,7 +7788,18 @@ out geom;`;
     } else if (state.map && state.followMode === FollowMode.LOCKED) {
       holdLockedView({ lat: state.loc.lat, lng: state.loc.lng }, !reduceMotion);
     }
-    if (state.target) calculateRange();
+    if (state.target) {
+      // GPS ticks fire ~once per second and each fix nudges the smoothed
+      // position slightly, which used to run the FULL inverse-trajectory
+      // solve every time. Recalculate only when you've actually moved far
+      // enough for the number to change. Taps, aim changes, green marks
+      // and weather/elevation refreshes all call calculateRange()
+      // themselves and are never delayed by this gate.
+      const movedYd = state.lastCalcLoc
+        ? haversineMeters(state.lastCalcLoc, state.loc) * M_TO_YD
+        : Infinity;
+      if (movedYd >= RANGE_RECALC_MOVE_YD) calculateRange();
+    }
 
     if (roundStatus() !== 'idle') {
       renderRoundShotUI();
@@ -8960,8 +8988,12 @@ out geom;`;
 
     // --- Elevation: 9-point profile along the shot line ---
     if (user && target) {
-      const eKey = `elev:${user.lat.toFixed(4)},${user.lng.toFixed(4)}:` +
-        `${target.lat.toFixed(4)},${target.lng.toFixed(4)}`;
+      // Key rounded to ~110 m (toFixed(3)) instead of ~11 m: terrain deltas
+      // at that scale are a few feet, irrelevant next to shot dispersion,
+      // and the coarse grid lets adjacent holes share cached profiles
+      // instead of triggering a fresh fetch on every hole change.
+      const eKey = `elev:${user.lat.toFixed(3)},${user.lng.toFixed(3)}:` +
+        `${target.lat.toFixed(3)},${target.lng.toFixed(3)}`;
       const g = geodesicInverse(user, target);
       const pts = [];
       for (let i = 0; i < ELEV_PROFILE_N; i++)
@@ -9791,6 +9823,10 @@ out geom;`;
       latDeg: state.loc.lat, lieYd: 0,
     });
     state.lastCalc = calc;
+    // Stamp the throttle reference so GPS ticks know this position is
+    // already covered (see the gate in onPosition).
+    state.lastCalcLoc = { lat: state.loc.lat, lng: state.loc.lng };
+    state.lastCalcAt = Date.now();
 
     els.rawYards.textContent = fmt(horizontalYd);
     // Short, static label — the aim and bearing chips carry the detail so
