@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.43'; // haptics: real iOS Taptic via hidden switch toggle (Safari 17.4 trick); sound now companion
+const CACHE_VERSION = 'v1.0.44'; // haptics: sound layer removed entirely — pure Taptic feedback only
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

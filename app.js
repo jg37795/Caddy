@@ -270,7 +270,6 @@
     prefs: load('caddy:prefs', {
       theme: 'dark',
       pro: false,
-      tapSounds: true,
       selectedClubId: '',
       activeTab: 'range',
       mapLayer: '',
@@ -718,7 +717,6 @@
     // when a <input type="checkbox" switch> toggles — so we click a
     // hidden one (technique from the ios-haptics/web-haptics libs).
     if (!navigator.vibrate) iosHaptics.feedback(ms >= 20);
-    tickSound.play(ms >= 20 ? 'thock' : 'tick');
   }
 
   // Named vibration vocabulary so state changes are FEELABLE without
@@ -736,16 +734,11 @@
     try {
       if (navigator.vibrate && !reduceMotion) navigator.vibrate(p);
     } catch { }
-    const sound = {
-      go: 'tick', manage: 'thock', bail: 'double',
-      shotStart: 'double', shotFinish: 'thock',
-    }[name];
     const gaps = {
       go: [], manage: [110], bail: [110, 110],
       shotStart: [60, 40], shotFinish: [],
     }[name];
     if (!navigator.vibrate) iosHaptics.pattern(gaps);
-    tickSound.play(sound);
   }
 
   // Real haptics on iOS via Safari's switch-control tick. A hidden
@@ -781,7 +774,7 @@
     }
 
     function tick() {
-      if (state.prefs.tapSounds === false || reduceMotion) return;
+      if (reduceMotion) return;
       const now = performance.now();
       if (now - lastAt < 16) return; // iOS drops faster clicks anyway
       const l = ensure();
@@ -805,71 +798,6 @@
     }
 
     return { feedback, pattern };
-  })();
-
-  // Sub-30ms filtered ticks at very low gain — felt more than heard.
-  // Created lazily on first gesture (autoplay policies), inert when the
-  // browser has no WebAudio (headless tests) or the player opts out.
-  const tickSound = (() => {
-    let ctx = null;
-    let lastAt = 0;
-    const enabled = () => state.prefs.tapSounds !== false;
-
-    function ensure() {
-      if (ctx) return ctx;
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      try {
-        ctx = new AC();
-      } catch {
-        ctx = null;
-      }
-      return ctx;
-    }
-
-    // One shared noise burst through a bandpass reads as a "tick",
-    // not a beep. Lower center = thock (a save), higher = tick.
-    function burst(centerHz, durS, gainPeak, when) {
-      const c = ctx;
-      const len = Math.max(1, Math.floor(c.sampleRate * durS));
-      const buf = c.createBuffer(1, len, c.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) {
-        data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-      }
-      const src = c.createBufferSource();
-      src.buffer = buf;
-      const bp = c.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = centerHz;
-      bp.Q.value = 1.1;
-      const g = c.createGain();
-      g.gain.setValueAtTime(gainPeak, when);
-      g.gain.exponentialRampToValueAtTime(0.0001, when + durS);
-      src.connect(bp).connect(g).connect(c.destination);
-      src.start(when);
-    }
-
-    function play(kind) {
-      if (!enabled() || reduceMotion) return;
-      const c = ensure();
-      if (!c) return;
-      if (c.state === 'suspended') {
-        c.resume().catch(() => {});
-      }
-      const now = c.currentTime;
-      if (now - lastAt < 0.04) return; // never machine-gun
-      lastAt = now;
-      try {
-        if (kind === 'thock') burst(340, 0.045, 0.07, now);
-        else if (kind === 'double') {
-          burst(1500, 0.03, 0.05, now);
-          burst(1500, 0.03, 0.045, now + 0.09);
-        } else burst(1750, 0.028, 0.05, now);
-      } catch { /* audio is garnish, never load-bearing */ }
-    }
-
-    return { play };
   })();
 
   const d2r = (d) => (d * Math.PI) / 180,
@@ -1026,8 +954,6 @@
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     els.proToggleSheet.checked = !!state.prefs.pro;
     syncThemeSeg();
-    const tapToggle = $('tapSoundsToggle');
-    if (tapToggle) tapToggle.checked = state.prefs.tapSounds !== false;
     const dispersionToggle = $('dispersionToggle');
     if (dispersionToggle) {
       dispersionToggle.checked = state.prefs.dispersionZone !== false;
@@ -5794,15 +5720,6 @@ out geom;`;
     document.querySelectorAll('#themeSeg .seg-opt').forEach((b) => {
       b.addEventListener('click', () => setTheme(b.dataset.theme));
     });
-    const tapSoundsToggle = $('tapSoundsToggle');
-    if (tapSoundsToggle) {
-      tapSoundsToggle.addEventListener('change', () => {
-        state.prefs.tapSounds = tapSoundsToggle.checked;
-        save('caddy:prefs', state.prefs);
-        if (tapSoundsToggle.checked) tickSound.play('thock');
-        haptic(6);
-      });
-    }
     const dispersionToggle = $('dispersionToggle');
     if (dispersionToggle) {
       dispersionToggle.addEventListener('change', () => {
@@ -12631,14 +12548,6 @@ out geom;`;
       applyPrefs();
     });
   }
-
-  // iOS needs an AudioContext created/resumed inside a user gesture.
-  // haptic() usually runs in one already, but this guarantees the very
-  // first interaction unlocks audio on iPhone.
-  window.addEventListener('pointerdown', () => tickSound.play('tick'), {
-    once: true,
-    passive: true,
-  });
 
   bootstrap();
 })();
