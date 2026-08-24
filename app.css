@@ -363,34 +363,79 @@ body.dark .bottom-tabs {
 }
 
 .tab-btn {
-  border-radius: 18px;
+  border-radius: 14px;
   background: transparent;
   color: var(--muted);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  font-size: 10.5px;
-  font-weight: 760;
-  letter-spacing: -0.01em;
-  transition: background 0.18s ease, color 0.18s ease,
-    transform 0.15s var(--spring-snappy);
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  transition: color 0.18s ease;
 }
 
 .tab-btn svg {
-  width: 23px;
-  height: 23px;
-  stroke-width: 2.2;
+  width: 24px;
+  height: 24px;
 }
 
+/* Icon well: outline + filled variants stacked in one grid cell so
+   swapping them never shifts layout. Crossfade, not display flip. */
+.tab-ic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+}
+
+.tab-ic svg {
+  grid-area: 1 / 1;
+  transition: opacity 0.16s ease;
+}
+
+.tab-btn .ic-fill {
+  opacity: 0;
+}
+
+/* iOS selection = tint only. No pill, no chrome. */
 .tab-btn.active {
-  background: var(--green-3);
+  background: transparent;
   color: var(--green);
 }
 
+body.dark .tab-btn.active {
+  color: #56e08c;
+}
+
+.tab-btn.active .ic-outline {
+  opacity: 0;
+}
+
+.tab-btn.active .ic-fill {
+  opacity: 1;
+  animation: tabPop 0.42s var(--spring-snappy);
+}
+
+@keyframes tabPop {
+  0% {
+    transform: scale(0.7);
+  }
+
+  55% {
+    transform: scale(1.14);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
 .tab-btn:active {
-  transform: scale(0.95);
+  opacity: 0.55;
 }
 
 .card {
@@ -4616,4 +4661,15 @@ body.dark .group-table td:first-child {
 
 body.dark .group-total {
   color: #63e89a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-btn.active .ic-fill {
+    animation: none;
+  }
+
+  .tab-ic svg,
+  .tab-btn {
+    transition: none !important;
+  }
 }

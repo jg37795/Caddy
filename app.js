@@ -811,7 +811,7 @@
     const icon =
       'data:image/svg+xml,' +
       encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#0f7a43"/><circle cx="256" cy="256" r="168" fill="#eafff1"/><path d="M210 360V132h132v40h-82v52h73v40h-73v96z" fill="#0f7a43"/><circle cx="365" cy="132" r="30" fill="#fff"/></svg>`
+        `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#0f7a43"/><circle cx="256" cy="204" r="102" fill="#ffffff"/><circle cx="216" cy="170" r="18" fill="#0f7a43" fill-opacity=".38"/><circle cx="296" cy="170" r="18" fill="#0f7a43" fill-opacity=".38"/><circle cx="256" cy="242" r="18" fill="#0f7a43" fill-opacity=".38"/><path d="M222 332h68c-3.4 27-13.2 50-26.5 63.5-6.6 6.8-11.7 6.8-18.3 0C231.8 382 225.4 359 222 332Z" fill="#ffffff"/></svg>`
       );
     const manifest = {
       name: 'Caddy',
@@ -988,9 +988,9 @@
     $(map[tab] || 'rangeScreen').classList.add('active');
     const titles = {
       range: 'Tap map for live yardage',
-      clubs: 'Stock carry distances',
-      shot: 'Plan your holes',
       round: 'Scorecard',
+      clubs: 'Your bag · stock carries',
+      shot: 'Course prep & planning',
       stats: 'Local round stats',
     };
     els.topSubtitle.textContent = titles[tab] || 'Personal golf caddy';

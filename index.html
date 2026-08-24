@@ -15,7 +15,7 @@
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <link id="manifestLink" rel="manifest" />
   <link rel="apple-touch-icon"
-    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230f7a43'/%3E%3Ccircle cx='90' cy='90' r='58' fill='%23eafff1'/%3E%3Cpath d='M74 127V47h45v14H91v18h25v14H91v34z' fill='%230f7a43'/%3E%3Ccircle cx='128' cy='47' r='10' fill='%23ffffff'/%3E%3C/svg%3E" />
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230f7a43'/%3E%3Ccircle cx='90' cy='72' r='36' fill='%23ffffff'/%3E%3Ccircle cx='76' cy='60' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Ccircle cx='104' cy='60' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Ccircle cx='90' cy='85' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Cpath d='M78 117h24c-1.2 9.5-4.6 17.6-9.3 22.4-2.3 2.4-4.1 2.4-6.4 0-4.7-4.8-8.1-12.9-8.3-22.4Z' fill='%23ffffff'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./leaflet.css" />
   <link rel="stylesheet" href="./app.css" />
 </head>
@@ -27,8 +27,8 @@
       <div class="ob-top">
         <div class="ob-logo">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M8 20V4h9v4h-6v4h5v4h-5v4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"
-              stroke-linejoin="round" />
+            <path fill="#ffffff" fill-rule="evenodd"
+              d="M12 3.9a5.15 5.15 0 1 1 0 10.3 5.15 5.15 0 0 1 0-10.3ZM10.2 6.55a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9Zm3.6 0a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM12 9.85a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM10.65 14.9h2.7c-.12.95-.42 1.85-.88 2.33-.26.28-.66.28-.92 0-.46-.48-.78-1.38-.9-2.33Z" />
           </svg>
         </div>
         <div class="ob-title">Caddy</div>
@@ -36,10 +36,11 @@
       </div>
 
       <div class="ob-divider" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M6 21V4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          <path d="M6 5h10l-1.5 3L16 11H6" fill="currentColor" stroke="currentColor" stroke-width="1.4"
-            stroke-linejoin="round" />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <circle cx="12" cy="12" r="6.8" />
+          <path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3" />
+          <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
         </svg>
       </div>
 
@@ -112,9 +113,9 @@
     <header class="topbar">
       <div class="brand">
         <div class="logo" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="23" height="23" fill="none">
-            <path d="M8 20V4h9v4h-6v4h5v4h-5v4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
-              stroke-linejoin="round" />
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" aria-hidden="true">
+            <path fill="#ffffff" fill-rule="evenodd"
+              d="M12 3.9a5.15 5.15 0 1 1 0 10.3 5.15 5.15 0 0 1 0-10.3ZM10.2 6.55a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9Zm3.6 0a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM12 9.85a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM10.65 14.9h2.7c-.12.95-.42 1.85-.88 2.33-.26.28-.66.28-.92 0-.46-.48-.78-1.38-.9-2.33Z" />
           </svg>
         </div>
         <div>
@@ -148,9 +149,9 @@
           <div class="range-top-ui">
             <div style="display: flex; align-items: center; gap: 8px">
               <div class="brand-mark" aria-label="Caddy" id="brandMark">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M8 20V4h9v4h-6v4h5v4h-5v4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
-                    stroke-linejoin="round" />
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path fill="currentColor" fill-rule="evenodd"
+                    d="M12 3.9a5.15 5.15 0 1 1 0 10.3 5.15 5.15 0 0 1 0-10.3ZM10.2 6.55a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9Zm3.6 0a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM12 9.85a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM10.65 14.9h2.7c-.12.95-.42 1.85-.88 2.33-.26.28-.66.28-.92 0-.46-.48-.78-1.38-.9-2.33Z" />
                 </svg>
               </div>
               <div class="mode-toggle glass" id="modeToggle" role="radiogroup" aria-label="App mode">
@@ -179,7 +180,7 @@
                     <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="2" />
                     <path
                       d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 0 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1H3a2 2 0 0 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9.1A1.7 1.7 0 0 0 10 3.6V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9.1a1.7 1.7 0 0 0 1.56 1H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"
-                      stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
                 </button>
               </div>
@@ -214,7 +215,7 @@
                     <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2" />
                     <path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2"
                       stroke-linecap="round" />
-                    <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6" opacity="0.55" />
+                    <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8" opacity="0.55" />
                   </svg>
                   <span class="lock-badge" id="lockBadge" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none">
@@ -832,37 +833,97 @@
     </main>
 
     <nav class="bottom-tabs" aria-label="Caddy tabs">
+      <!-- Play — rangefinder reticle: crosshair + dot, the whole screen in one glyph -->
       <button class="tab-btn active" data-tab="range">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M12 21s7-6.1 7-12a7 7 0 1 0-14 0c0 5.9 7 12 7 12Z" stroke="currentColor" />
-          <path d="M12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="currentColor" />
-        </svg>Range
+        <span class="tab-ic" aria-hidden="true">
+          <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="6.8" />
+            <path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3" />
+            <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+          </svg>
+          <svg class="ic-fill" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path fill="currentColor" fill-rule="evenodd"
+              d="M12 19.6a7.6 7.6 0 1 1 0-15.2 7.6 7.6 0 0 1 0 15.2Zm0-2.1a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11Z" />
+            <path d="M12 2.4v3.6M12 18v3.6M2.4 12H6M18 12h3.6" stroke="currentColor" stroke-width="2.4"
+              stroke-linecap="round" />
+            <circle cx="12" cy="12" r="2" fill="currentColor" />
+          </svg>
+        </span>
+        Play
       </button>
-      <button class="tab-btn" data-tab="clubs">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M7 3v11a4 4 0 0 0 8 0V3" stroke="currentColor" stroke-linecap="round" />
-          <path d="M15 6h3a3 3 0 0 1 0 6h-3M7 21h10" stroke="currentColor" stroke-linecap="round" />
-        </svg>Clubs
-      </button>
-      <button class="tab-btn" data-tab="shot">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M9 21V4l10 4-10 4" stroke="currentColor" stroke-linecap="round"
-            stroke-linejoin="round" />
-          <path d="M6 21h6" stroke="currentColor" stroke-linecap="round" />
-        </svg>Plan
-      </button>
+
+      <!-- Score — the ONLY flag-free tab set member: scorecard rows -->
       <button class="tab-btn" data-tab="round">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M6 3v18" stroke="currentColor" stroke-linecap="round" />
-          <path d="M6 4h10l-1 4 1 4H6" stroke="currentColor" stroke-linejoin="round" />
-          <path d="M5 21h8" stroke="currentColor" stroke-linecap="round" />
-        </svg>Round
+        <span class="tab-ic" aria-hidden="true">
+          <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.8" y="4.8" width="16.4" height="14.4" rx="2.6" />
+            <path d="M7.2 9.4v.01M7.2 14.6v.01" stroke-width="2.6" />
+            <path d="M10.4 9.4h6.4M10.4 14.6h6.4" />
+          </svg>
+          <svg class="ic-fill" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path fill="currentColor" fill-rule="evenodd"
+              d="M6.4 4.6h11.2a2.9 2.9 0 0 1 2.9 2.9v9a2.9 2.9 0 0 1-2.9 2.9H6.4a2.9 2.9 0 0 1-2.9-2.9v-9a2.9 2.9 0 0 1 2.9-2.9Zm3.9 3.9h7v1.8h-7V8.5Zm0 5.2h7v1.8h-7v-1.8Z" />
+          </svg>
+        </span>
+        Score
       </button>
+
+      <!-- Bag — golf bag with clubs peeking out -->
+      <button class="tab-btn" data-tab="clubs">
+        <span class="tab-ic" aria-hidden="true">
+          <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3.2v5.6M9.6 4.1l.5 4.7M14.4 4.1l-.5 4.7" />
+            <path d="M8.7 9h6.6l-.5 8.8a2.7 2.7 0 0 1-2.69 2.5h-.22a2.7 2.7 0 0 1-2.69-2.5L8.7 9Z" />
+            <path d="M9.05 12.8h5.9" />
+          </svg>
+          <svg class="ic-fill" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2.9v6.3M9.6 3.8l.5 5.4M14.4 3.8l-.5 5.4" stroke="currentColor" stroke-width="2.3"
+              stroke-linecap="round" />
+            <path fill="currentColor" fill-rule="evenodd"
+              d="M8.55 8.9h6.9l-.52 9a2.8 2.8 0 0 1-2.79 2.6h-.28a2.8 2.8 0 0 1-2.79-2.6l-.52-9Zm.5 3.1h5.9v1.7h-5.9V12Z" />
+          </svg>
+        </span>
+        Bag
+      </button>
+
+      <!-- Prep — winding route from tee dot to green ring -->
+      <button class="tab-btn" data-tab="shot">
+        <span class="tab-ic" aria-hidden="true">
+          <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5.9 18.4h3.6a3.05 3.05 0 0 0 0-6.1H8.1a3.05 3.05 0 0 1 0-6.1h6" />
+            <circle cx="16.3" cy="6.2" r="2.2" />
+            <circle cx="5.9" cy="18.4" r="1.7" fill="currentColor" stroke="none" />
+          </svg>
+          <svg class="ic-fill" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5.9 18.4h3.6a3.05 3.05 0 0 0 0-6.1H8.1a3.05 3.05 0 0 1 0-6.1h6" stroke="currentColor"
+              stroke-width="2.7" stroke-linecap="round" />
+            <circle cx="16.3" cy="6.2" r="2.6" fill="currentColor" />
+            <circle cx="5.9" cy="18.4" r="2" fill="currentColor" />
+          </svg>
+        </span>
+        Prep
+      </button>
+
+      <!-- Stats — bars on a baseline -->
       <button class="tab-btn" data-tab="stats">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M5 20V10M12 20V4M19 20v-7" stroke="currentColor" stroke-linecap="round" />
-          <path d="M3 20h18" stroke="currentColor" stroke-linecap="round" />
-        </svg>Stats
+        <span class="tab-ic" aria-hidden="true">
+          <svg class="ic-outline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3.4 20h17.2" />
+            <path d="M6.6 20v-8.4M12 20V5.4M17.4 20v-6" />
+          </svg>
+          <svg class="ic-fill" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3.2 20.1h17.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            <rect x="4.9" y="11.4" width="3.4" height="8.6" rx="1.7" fill="currentColor" />
+            <rect x="10.3" y="4.4" width="3.4" height="15.6" rx="1.7" fill="currentColor" />
+            <rect x="15.7" y="13.8" width="3.4" height="6.2" rx="1.7" fill="currentColor" />
+          </svg>
+        </span>
+        Stats
       </button>
     </nav>
   </div>
