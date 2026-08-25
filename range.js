@@ -74,7 +74,6 @@
 
   const wrap = $('rangeWrap');
   const root = {
-    reticle: $('rxReticle'),
     stack: $('rxStack'),
     strip: $('rxStrip'),
     stripHole: $('rxStripHole'),
@@ -83,6 +82,7 @@
     oneLiner: $('sheetOneLiner'),
     olDist: $('olDist'),
     olClub: $('olClub'),
+    olSub: $('olSub'),
     hero: $('rxHero'),
     heroKicker: $('rxHeroKicker'),
     heroNum: $('rxHeroNum'),
@@ -101,7 +101,7 @@
     clubPopSub: $('rxClubPopSub'),
     clubPopClose: $('rxClubPopClose'),
   };
-  if (!wrap || !root.reticle) return; // wrong page / partial HTML (dock removed v1.0.66)
+  if (!wrap || !root.strip) return; // wrong page / partial HTML (dock removed v1.0.66)
 
   /* ================= 1. HERO DISTANCE MIRROR =================
      Mirrors the sheet's numbers into a glanceable top-center capsule. */
@@ -326,87 +326,76 @@
     return true;
   }
 
-  /* ================= 4. COLLAPSED ONE-LINER =================
-     At the collapsed detent the sheet's visible band is the drag handle
-     plus one compact line: "<distance> yd · <club short name>" (or a tap-
-     to-target hint). Fades out via --fcb-reveal as the sheet rises; see
-     .sheet-oneliner in app.css. */
+  /* ================= 4. COLLAPSED PEEK ROW =================
+   Slim always-on summary band inside the drag band (v1.0.69):
+   "143 yd · plays 138" plus green F/M/B distances and the target-line
+   direction/aim status. Data sources are the app's own DOM mirrors
+   (#rawYards, #playsLikeYards, #fcbFront/#fcbCenter/#fcbBack,
+   #bearingChipText/#aimChip), so the row updates live with every target
+   change. Full cards still appear at half+. */
 
-  let lastOneLiner = '';
+  let lastPeekKey = '';
+
+  function peekNum(el) {
+    const t = el ? parseNum(el.textContent) : null;
+    return t != null && t > 0 ? Math.round(t) : null;
+  }
 
   function renderOneLiner() {
     if (!root.oneLiner || !srcYards) return;
-    const raw = parseNum(srcYards.textContent);
-    const yd = parseNum(srcPlays && srcPlays.textContent) ?? raw;
-    let text = 'Tap map to set target';
-    if (yd != null && yd > 0) {
-      const clubs = getClubs();
-      const best = clubs.length ? bestCarryMatch(yd, clubs) : null;
-      text =
-        `${Math.round(yd)} yd` + (best ? ` · ${best.club.name}` : '');
+    const raw = peekNum(srcYards);
+    const pl = peekNum(srcPlays);
+
+    // F/M/B from the app's own green tiles ("-" means unmapped).
+    const f = peekNum($('fcbFront'));
+    const m = peekNum($('fcbCenter'));
+    const b = peekNum($('fcbBack'));
+    const fmb = [
+      f != null ? 'F ' + f : null,
+      m != null ? 'M ' + m : null,
+      b != null ? 'B ' + b : null,
+    ].filter(Boolean).join(' · ');
+
+    // Target-line direction / aim status.
+    let aim = '';
+    const bearingEl = $('bearingChip');
+    const aimEl = $('aimChip');
+    let bearingText = '';
+    const bt = $('bearingChipText');
+    if (bt) bearingText = String(bt.textContent || '').trim();
+    if (bearingEl && !bearingEl.hidden && bearingText) {
+      aim = 'target ' + bearingText;
+    } else if (aimEl && !aimEl.hidden) {
+      const t = (aimEl.textContent || '').trim();
+      if (t) aim = t.toLowerCase();
     }
-    if (text === lastOneLiner) return;
-    lastOneLiner = text;
-    if (yd != null && yd > 0) {
-      // Split so the club can take the accent color via CSS.
-      const sep = text.indexOf(' · ');
-      root.olDist.textContent = sep === -1 ? text : text.slice(0, sep);
-      root.olClub.textContent = sep === -1 ? '' : text.slice(sep); // keeps " · Club"
-    } else {
-      root.olDist.textContent = text;
+
+    const key = [raw, pl, fmb, aim].join('|');
+    if (key === lastPeekKey) return;
+    lastPeekKey = key;
+
+    if (raw == null) {
+      root.olDist.textContent = 'Tap map to set target';
       root.olClub.textContent = '';
+      if (root.olSub) root.olSub.textContent = '';
+      return;
+    }
+    let main = raw + ' yd';
+    if (pl != null) main += ' · plays ' + pl;
+    root.olDist.textContent = main;
+    root.olClub.textContent = '';
+    if (root.olSub) {
+      const parts = [];
+      if (fmb) parts.push(fmb);
+      if (aim) parts.push(aim);
+      root.olSub.textContent = parts.join('   ·   ');
     }
   }
 
-  /* ================= 5. RETICLE POSITIONING =================
-     Sits at the center of the VISIBLE map area between the top UI and the
-     current sheet edge. Tracks drags/animations with a bounded rAF loop. */
+  /* ================= 5. (removed v1.0.69) — map reticle deleted.
+     Tap feedback comes from the dropped target pin only. ================ */
 
-  let rafId = 0;
-
-  function reticlePoint() {
-    const wr = wrap.getBoundingClientRect();
-    const sheet = $('sheet');
-    const topUi = wrap.querySelector('.range-top-ui');
-    const sr = sheet ? sheet.getBoundingClientRect() : { top: wr.bottom };
-    const tr = topUi ? topUi.getBoundingClientRect().bottom : wr.top + 64;
-    const top = Math.max(tr, wr.top);
-    const bottom = Math.min(sr.top, wr.bottom);
-    const x = wr.left + wr.width / 2;
-    const y = top + Math.max(40, bottom - top) * 0.46;
-    return { x, y };
-  }
-
-  function placeReticle() {
-    const p = reticlePoint();
-    root.reticle.style.transform = `translate(${p.x}px, ${p.y}px)`;
-  }
-
-  function startReticleLoop() {
-    if (rafId || reduceMotion) return;
-    const tick = () => {
-      placeReticle();
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-  }
-
-  function stopReticleLoop() {
-    if (rafId) {
-      cancelAnimationFrame(rafId);
-      rafId = 0;
-    }
-    placeReticle();
-  }
-
-  function pingReticle() {
-    if (!root.reticle || reduceMotion) return;
-    root.reticle.classList.remove('rx-ping');
-    void root.reticle.offsetWidth;
-    root.reticle.classList.add('rx-ping');
-  }
-
-  /* ================= 6. QUICK-ACTION DOCK ================= */
+/* ================= 6. QUICK-ACTION DOCK ================= */
 
   const mapEl = $('map');
   const recenterBtn = $('recenterBtn');
@@ -428,14 +417,7 @@
     return true;
   }
 
-  function dropPin() {
-    const p = reticlePoint();
-    pingReticle();
-    haptic(true);
-    tapMapAt(p.x, p.y);
-  }
-
-  /* ---------- long-press = set target pin (v1.0.67) ----------
+  /* ---------- long-press = set target pin (v1.0.67) ----------  /* ---------- long-press = set target pin (v1.0.67) ----------
      A ~500 ms hold anywhere on the map drops/moves the shot target at
      that point by replaying the exact tap path (tapMapAt → app.js's
      Leaflet click handler). Cancels if the finger moves > 10 px (map
@@ -686,26 +668,6 @@
       seg.querySelectorAll('.seg-opt').forEach((o) => watchAttrs(o, syncDock));
     }
 
-    // Green-edge placement mode disables Drop pin.
-    const fcbSeg = document.querySelector('.fcb-seg');
-    watchAttrs(fcbSeg, syncDock);
-
-    // Sheet movement drives the reticle.
-    const sheet = $('sheet');
-    if (sheet) {
-      sheet.addEventListener('transitionrun', startReticleLoop);
-      sheet.addEventListener('transitionstart', startReticleLoop);
-      sheet.addEventListener('transitionend', stopReticleLoop);
-      sheet.addEventListener('transitioncancel', stopReticleLoop);
-    }
-    watchAttrs(document.body, () => {
-      if (document.body.getAttribute('data-dragging') === '1') startReticleLoop();
-      else stopReticleLoop();
-    });
-
-    window.addEventListener('resize', placeReticle);
-    window.addEventListener('orientationchange', placeReticle);
-
     // Cross-tab / settings-driven data refreshes.
     window.addEventListener('storage', (e) => {
       if (e.key === CLUBS_KEY) {
@@ -734,13 +696,6 @@
       haptic(false);
       openClubPop();
     });
-    if (root.actPin) root.actPin.addEventListener('click', () => {
-      if (root.actPin.getAttribute('aria-disabled') === 'true') {
-        toast('Finish marking the green first.');
-        return;
-      }
-      dropPin();
-    });
     if (root.actTrack) root.actTrack.addEventListener('click', trackShot);
     if (root.actCenter) root.actCenter.addEventListener('click', centerOnMe);
     if (root.actSat) root.actSat.addEventListener('click', toggleSatellite);
@@ -754,7 +709,6 @@
   function init() {
     initObservers();
     initEvents();
-    placeReticle();
     renderHero();
     renderOneLiner();
     renderStrip();

@@ -12,7 +12,6 @@ map, plus root-cause fixes for the four confirmed bugs.
 | Context strip | `.rx-strip` (in `.rx-stack`) | abs, top `safe-top+108`; **+152 round-live**, centered | 600 | always; **hole · dots only** — wind removed v1.0.67 |
 | Dock | `.rx-dock` | abs, bottom lane, centered; lifted −(ui-lift+144) round-live | 600 | not full-detent |
 | GPS pill / zoom / layer seg | `.range-top-ui` family | top bar / right rail per app.css | ≤601 | per app.js |
-| Reticle | `.rx-reticle` | JS-placed center of visible map area | 500 | not full-detent |
 | Toasts | `.rx-toast`, `#appToast` | bottom-centered; lifted −(ui-lift+214) round-live | 700/701 | transient |
 | Popovers (club) + scrim | `.rx-pop`, `.rx-scrim` | fixed, centered sheets | 650 | user-opened |
 | Hole-advance card | `.rx-hole-prompt` | abs, bottom lane, lifted −(ui-lift+14), centered | 660 | current hole just scored, once per hole per round |
@@ -87,3 +86,46 @@ Cache bumped to v1.0.65.
 
 Overlay matrix updated: strip row and new hole-advance card row above.
 Cache bumped to v1.0.67.
+
+## v1.0.69 / v1.0.70 changes
+
+9. **Collapsed sheet = informative peek row** — the v1.0.67 one-liner
+   was a downgrade (one club name, dead dark slab above it). The drag
+   band is now a slim (~72 px incl handle) always-visible summary:
+   "<distance> yd · plays <N>" plus F/M/B green distances and the
+   target-line direction/aim status ("target NE · 42°"). It sits IN FLOW,
+   and `detents()` computes the collapsed offset from a compact band
+   (`measureCollapsedBand()`, clamped 56–120 px) instead of the full
+   header, so collapsed height matches content exactly — no reserved
+   empty slab. Data sources are app.js's own DOM mirrors (#rawYards,
+   #playsLikeYards, #fcb*, #bearingChip/#aimChip); updates live via
+   range.js MutationObservers. Full number band + FCB cards appear at
+   half+ as before.
+
+10. **Reticle removed entirely** — `.rx-reticle` markup (index.html),
+    all CSS (ring/dot/ticks/breath/ping) and range.js machinery
+    (`reticlePoint`/`placeReticle`/rAF loop/`pingReticle`/`dropPin`)
+    deleted. Tap feedback comes from the dropped pin only.
+
+11. **Stray dark blob fixed** — root cause was the collapsed detent
+    reserving the old ~150 px header while its content was invisible:
+    an empty glass slab floating mid-map. Fix 9 removes it.
+
+12. **Start-round-during-mapping leak closed** — enforcement moved to
+    the single choke point `beginRound()`: if
+    `state.courseMappingState` is 'mapping'/'failed' it refuses with a
+    toast, regardless of entry path (roundActionBtn/startRound, the
+    round-setup sheet's own Start button, quick-start confirm, round
+    options). UI disabled states (`syncStartRoundGate`) kept.
+
+13. **End-round confirm sheet** — tapping 'End round' no longer fires
+    immediately. Every entry point routes through `requestEndRound()` →
+    glass action sheet "End round?" with contextual subtext ("Your
+    scorecard for this round will be saved." when scores exist; "no
+    scores yet" otherwise), destructive 'End round' + 'Cancel'. Pending-
+    shot guard runs before the sheet opens. Sheet transitions respect
+    `prefers-reduced-motion`.
+
+Self-tests: 48/48 pass (added beginRound-gate refuse/allow and collapsed-
+band math blocks). Overlay matrix unchanged except Reticle row removed.
+Cache at v1.0.70 (bumped by map-load work).

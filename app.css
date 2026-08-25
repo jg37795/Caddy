@@ -19,7 +19,7 @@
   --radius: 22px;
   --tab-h: 78px;
   --tab-total: calc(var(--tab-h) + var(--safe-bottom));
-  --sheet-peek: 150px;
+  --sheet-peek: 72px;
   --ui-lift: 160px;
   /* NEW: how far up the pill/zoom ride with the sheet */
   --glass-bg: rgba(255, 255, 255, 0.72);
@@ -2400,6 +2400,13 @@ body.dark #roundSummaryScore.over {
   max-height: min(60dvh, 460px);
 }
 
+/* End-round confirm + all mini-sheets: respect reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .round-score-sheet {
+    transition: none;
+  }
+}
+
 .round-score-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3103,7 +3110,7 @@ body[data-dragging='1'] .detail-block {
 
 .sheet-drag {
   position: relative;
-  padding: 10px 18px 14px;
+  padding: 6px 18px 8px;
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -3119,7 +3126,7 @@ body[data-dragging='1'] .detail-block {
   width: 40px;
   height: 5px;
   border-radius: 3px;
-  margin: 0 auto 10px;
+  margin: 0 auto 7px;
   background: rgba(120, 120, 128, 0.4);
 }
 
@@ -3135,32 +3142,31 @@ body.dark .sheet-handle {
   padding: 0 2px;
 }
 
-/* ---- Collapsed one-liner (v1.0.67) ----
-   Collapsed detent shows ONLY the handle + one compact line
-   "<distance> yd · <club>". The full number band (.sheet-peek) fades out
-   and the one-liner fades in; both are driven by data-detent at rest and
-   by --fcb-reveal frame-by-frame during a drag, so the swap rides the
-   finger. Geometry is unchanged: .sheet-peek stays in flow (opacity only)
-   so the sheet's collapsed height — and thus every detent position — is
-   identical to before. */
+/* ---- Collapsed peek row (v1.0.69) ----
+   The drag band is a slim, always-visible summary: "143 yd · plays 138"
+   on top, green F/M/B + target-direction/aim status underneath. It sits
+   IN FLOW inside .sheet-drag, so the sheet's collapsed detent height
+   matches its content exactly — no dead slab above the fold. The full
+   number band (.sheet-peek) and FCB cards appear at half+. */
 
 .sheet-oneliner {
-  position: absolute;
-  left: 18px;
-  right: 18px;
-  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  margin: -2px 0 7px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sheet-oneliner .ol-main {
   display: flex;
   align-items: baseline;
   gap: 2px;
   font-size: 17px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  line-height: 1.2;
+  line-height: 1.15;
   color: var(--text, inherit);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.28s ease;
-  -webkit-tap-highlight-color: transparent;
 }
 
 .sheet-oneliner .ol-dist {
@@ -3179,27 +3185,20 @@ body.dark .sheet-oneliner .ol-club {
   color: #37e07f;
 }
 
-body[data-detent='collapsed'] .sheet-oneliner {
-  opacity: 1;
+.sheet-oneliner .ol-sub {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  color: var(--muted, rgba(90, 100, 95, 0.85));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-body[data-detent='half'] .sheet-oneliner,
-body[data-detent='full'] .sheet-oneliner {
-  opacity: 0;
-}
-
-body[data-dragging='1'] .sheet-oneliner {
-  opacity: calc(1 - var(--fcb-reveal, 0));
-  transition: none !important;
-}
-
-body[data-dragging='1'] .sheet-peek {
-  opacity: var(--fcb-reveal, 0);
-  transition: none !important;
-}
-
-body[data-detent='collapsed'] .sheet-peek {
-  opacity: 0;
+body.dark .sheet-oneliner .ol-sub {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .sheet-yards {

@@ -3450,6 +3450,58 @@
     openRoundSummary();
   }
 
+  /* ---- End-round confirm (v1.0.69) --------------------------------------
+     'End round' is destructive and was one accidental tap away from
+     destroying a round. Every entry point now opens this glass action
+     sheet first; only its explicit 'End round' button calls endRound(). */
+  function requestEndRound() {
+    const rs = state.roundSession;
+    if (!rs) return;
+    if (rs.status === 'pending') {
+      setNotice(
+        'Finish or discard the current shot before ending the round.',
+        'danger'
+      );
+      haptic(12);
+      return;
+    }
+    const hasScores =
+      Array.isArray(rs.scorecard) &&
+      rs.scorecard.some((h) => Number(h && h.score) > 0);
+    const sub = document.getElementById('endRoundSub');
+    if (sub) {
+      sub.textContent = hasScores
+        ? 'Your scorecard for this round will be saved.'
+        : 'This round has no scores yet — nothing will be saved.';
+    }
+    const sheet = document.getElementById('endRoundSheet');
+    if (!sheet || !els.roundScoreScrim) {
+      endRound(); // markup unavailable (shouldn't happen) — legacy path
+      return;
+    }
+    sheet.classList.add('open');
+    sheet.setAttribute('aria-hidden', 'false');
+    els.roundScoreScrim.classList.add('open');
+    haptic(8);
+  }
+
+  function closeEndRoundConfirm() {
+    const sheet = document.getElementById('endRoundSheet');
+    if (!sheet) return;
+    sheet.classList.remove('open');
+    sheet.setAttribute('aria-hidden', 'true');
+    // Only drop the scrim if no other sheet is open behind this one.
+    const anyOpen = [
+      els.roundMiniSheet,
+      els.roundScoreSheet,
+      document.getElementById('roundOptionsSheet'),
+      document.getElementById('quickStartSheet'),
+    ].some((s) => s && s.classList.contains('open'));
+    if (!anyOpen && els.roundScoreScrim) {
+      els.roundScoreScrim.classList.remove('open');
+    }
+  }
+
   // Capture the start of a shot: snapshot position + recommended club +
   // intended bearing (to the current aim, if any) for future lateral calc.
   function startShot() {
@@ -5030,6 +5082,21 @@
   }
 
   function beginRound(course, startHole) {
+    // SINGLE CHOKE POINT (v1.0.69): no round may start while a course
+    // scorecard is still being mapped (or failed without a successful
+    // retry). This covers EVERY entry path — roundActionBtn/startRound,
+    // the round-setup sheet's own Start button, quick-start confirm, the
+    // round-options sheet, and any future caller.
+    if (courseMappingBlocked()) {
+      showAppToast(
+        state.courseMappingState === 'failed'
+          ? 'Course mapping failed — tap Retry on the map (or clear the course) before starting.'
+          : `Still mapping ${state.courseMappingName || 'the course'} — hang on a second.`
+      );
+      haptic(20);
+      return null;
+    }
+
     const normalizedCourse = normalizeCourse(course);
 
     state.roundSession = emptyRoundSession(normalizedCourse, startHole);
@@ -6899,7 +6966,24 @@ out geom;`;
     }
 
     if (els.roundEndBtn) {
-      els.roundEndBtn.addEventListener('click', endRound);
+      // v1.0.69: confirm before destroying a round — never end directly.
+      els.roundEndBtn.addEventListener('click', requestEndRound);
+    }
+
+    const erConfirm = document.getElementById('endRoundConfirmBtn');
+    if (erConfirm) {
+      erConfirm.addEventListener('click', () => {
+        haptic(12);
+        closeEndRoundConfirm();
+        endRound();
+      });
+    }
+    const erCancel = document.getElementById('endRoundCancelBtn');
+    if (erCancel) {
+      erCancel.addEventListener('click', () => {
+        haptic(6);
+        closeEndRoundConfirm();
+      });
     }
 
     if (els.roundFab) {
@@ -7356,6 +7440,17 @@ out geom;`;
     function headerH() {
       return drag.offsetHeight || 130;
     }
+    // Collapsed band (v1.0.69): handle + the peek summary row ONLY —
+    // NOT the full number band, which sits below the fold at collapsed.
+    // This kills the old dead dark slab above the fold.
+    let cachedCollapsedBand = 72;
+    const peekEl = sheet.querySelector('.sheet-peek');
+    function measureCollapsedBand() {
+      const dragH = drag.offsetHeight || 130;
+      const peekH = peekEl ? peekEl.offsetHeight : 0;
+      cachedCollapsedBand = clmp(dragH - peekH, 56, 120) || 72;
+      return cachedCollapsedBand;
+    }
     function tabTotalPx() {
       const tabs = document.querySelector('.bottom-tabs');
       return tabs ? tabs.getBoundingClientRect().height : 78;
@@ -7378,7 +7473,7 @@ out geom;`;
     function detents() {
       const dragH = headerH();
       const fcbH = cachedFcbH;
-      const collapsed = clmp(H - dragH, 0, maxY);
+      const collapsed = clmp(H - measureCollapsedBand(), 0, maxY);
       const half = clmp(H - (dragH + fcbH + 10), 0, maxY);
       const full = 0;
       return { collapsed, half, full };
@@ -7520,7 +7615,7 @@ out geom;`;
       measureFcbHeight();
       document.documentElement.style.setProperty(
         '--sheet-peek',
-        headerH() + 'px'
+        measureCollapsedBand() + 'px'
       );
       const cur = document.body.getAttribute('data-detent') || 'collapsed';
       const d = detents();
@@ -13582,6 +13677,47 @@ out geom;`;
         state.planCourseId = sPlanId;
         prepEphemeralCourse = sEphem;
       }
+    }
+
+    // 17b. Start-round gate (v1.0.69): beginRound is the single choke
+    // point — while courseMappingState is 'mapping'/'failed' it must
+    // refuse and leave any existing session untouched.
+    {
+      const sSession = state.roundSession;
+      const sMap = state.courseMappingState;
+      try {
+        state.roundSession = null;
+        state.courseMappingState = 'mapping';
+        state.courseMappingName = 'Gate Test GC';
+        const refused = beginRound(makeCasualCourse(), 1);
+        ok('beginRound refuses while scorecard mapping is in flight',
+          refused === null && state.roundSession === null,
+          `returned=${JSON.stringify(refused)} session=${state.roundSession}`);
+
+        state.courseMappingState = 'idle';
+        beginRound(makeCasualCourse(), 1);
+        const allowed = state.roundSession !== null;
+        state.roundSession = null;
+        ok('beginRound proceeds once mapping is idle', allowed,
+          `session created=${allowed}`);
+      } finally {
+        state.roundSession = sSession;
+        state.courseMappingState = sMap;
+      }
+    }
+
+    // 17c. Collapsed detent band math (v1.0.69): the collapsed peek is a
+    // slim ~72px summary, not the old 150px header — the sheet's collapsed
+    // offset must use the compact band so no dead slab shows.
+    {
+      const dragEl = els.sheetDrag;
+      const peekNode = els.sheet ? els.sheet.querySelector('.sheet-peek') : null;
+      const dragH = dragEl ? Number(dragEl.offsetHeight) || 130 : 130;
+      const peekH = peekNode ? Number(peekNode.offsetHeight) || 0 : 0;
+      const band = Math.min(120, Math.max(56, dragH - peekH)) || 72;
+      ok('Collapsed detent band stays slim (≤120px, ≥56px)',
+        band >= 56 && band <= 120,
+        `drag=${dragH}px peek=${peekH}px band=${band}px`);
     }
 
     console.log(out.join('\n'));
