@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.55'; // qa-001: map Score button opened the sheet for hole NaN — scores entered there were silently dropped
+const CACHE_VERSION = 'v1.0.56'; // qa-001..004 fixes + stats tab dashboard merged
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
@@ -12,6 +12,8 @@ const APP_SHELL = [
   './index.html',
   './app.css',
   './app.js',
+  './stats.css',
+  './stats.js',
   './leaflet.css',
   './leaflet.js',
 ];
