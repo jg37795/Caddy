@@ -6115,7 +6115,12 @@ out geom;`;
   }
   function initRoundMode() {
     if (els.roundMapScoreBtn) {
-      els.roundMapScoreBtn.addEventListener('click', openRoundScoreSheet);
+      // QA-001: must not pass the click event through as `holeNumber` —
+      // the PointerEvent is truthy, so the sheet bound to hole NaN and
+      // saving wrote to a non-index slot (score silently lost).
+      els.roundMapScoreBtn.addEventListener('click', () =>
+        openRoundScoreSheet()
+      );
     }
 
     if (els.roundScoreCloseBtn) {
