@@ -18,6 +18,7 @@
     href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230f7a43'/%3E%3Ccircle cx='90' cy='72' r='36' fill='%23ffffff'/%3E%3Ccircle cx='76' cy='60' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Ccircle cx='104' cy='60' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Ccircle cx='90' cy='85' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Cpath d='M78 117h24c-1.2 9.5-4.6 17.6-9.3 22.4-2.3 2.4-4.1 2.4-6.4 0-4.7-4.8-8.1-12.9-8.3-22.4Z' fill='%23ffffff'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./leaflet.css" />
   <link rel="stylesheet" href="./app.css" />
+  <link rel="stylesheet" href="./range.css" />
 </head>
 
 <body>
@@ -321,6 +322,138 @@
             <div class="wind-pop-shot" id="windPopShot">—</div>
             <div class="wind-pop-meta" id="windPopMeta">—</div>
           </div>
+
+          <!-- ══ Range premium layer (range.css / range.js) — additive HUD.
+               Decorative reticle + mirrored hero readout + quick actions.
+               All logic lives in range.js; it only mirrors app.js state. ══ -->
+          <div class="rx-reticle" id="rxReticle" aria-hidden="true">
+            <span class="rx-reticle-ring"></span>
+            <span class="rx-reticle-dot"></span>
+            <span class="rx-reticle-ping"></span>
+          </div>
+
+          <div class="rx-stack" id="rxStack">
+            <div class="rx-strip glass" id="rxStrip">
+              <span class="rx-strip-hole" id="rxStripHole" hidden></span>
+              <span class="rx-strip-sep" id="rxStripHoleSep" hidden></span>
+              <span class="rx-dots" id="rxDots" aria-hidden="true"></span>
+              <button class="rx-wind" id="rxWind" type="button"
+                aria-haspopup="dialog" aria-label="Wind — tap to set manual wind">
+                <span class="rx-wind-mini" aria-hidden="true">
+                  <svg class="rose" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10.4" stroke="currentColor" stroke-width="1" stroke-opacity="0.3" />
+                    <path d="M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6" stroke="currentColor" stroke-width="1.2" stroke-opacity="0.4" stroke-linecap="round" />
+                  </svg>
+                  <svg class="arrow" id="rxWindArrow" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 3.4l4.8 7H7.2z" fill="currentColor" />
+                    <path d="M12 10.6v8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-opacity="0.55" />
+                  </svg>
+                </span>
+                <span class="rx-wind-text" id="rxWindText">—</span>
+                <span class="rx-wind-tag" id="rxWindTag">DEMO</span>
+              </button>
+            </div>
+
+            <div class="rx-hero glass" id="rxHero" aria-live="polite">
+              <div class="rx-hero-kicker" id="rxHeroKicker">Tap a target</div>
+              <div class="rx-hero-num-row">
+                <span class="rx-hero-num" id="rxHeroNum">—</span>
+                <span class="rx-hero-unit">yd</span>
+                <span class="rx-hero-pl" id="rxHeroPl" hidden></span>
+              </div>
+              <button class="rx-club-chip" id="rxClubChip" type="button" hidden
+                aria-haspopup="dialog" aria-label="Suggested club — tap for alternatives">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+                  <path d="M7 21V4.4l11 2.8-8.4 2.5" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M5 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+                <span class="rx-club-name" id="rxClubName"></span>
+                <span class="rx-club-meta" id="rxClubMeta"></span>
+                <span class="rx-club-chev" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none">
+                    <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.4"
+                      stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div class="rx-dock glass" id="rxDock" role="toolbar" aria-label="Map quick actions">
+            <button class="rx-act" id="rxActTrack" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 20c6.5-.8 10.6-4.9 11.6-11.4" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" />
+                <circle cx="16.8" cy="5.4" r="2.3" stroke="currentColor" stroke-width="2" />
+                <circle cx="16.8" cy="5.4" r="0.7" fill="currentColor" stroke="none" />
+              </svg>
+              <span class="rx-act-lb">Track</span>
+            </button>
+            <button class="rx-act armed" id="rxActPin" type="button" aria-label="Drop pin at reticle">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 21s-7-5.6-7-11a7 7 0 1 1 14 0c0 5.4-7 11-7 11Z" stroke="currentColor"
+                  stroke-width="2" stroke-linejoin="round" />
+                <circle cx="12" cy="10" r="2.4" stroke="currentColor" stroke-width="2" />
+              </svg>
+              <span class="rx-act-lb">Pin</span>
+            </button>
+            <button class="rx-act" id="rxActCenter" type="button" aria-label="Center map on me">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2" />
+                <path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" />
+              </svg>
+              <span class="rx-act-lb">Center</span>
+            </button>
+            <button class="rx-act" id="rxActSat" type="button" aria-label="Toggle satellite view">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="9.2" y="9.2" width="5.6" height="5.6" rx="1.2" stroke="currentColor" stroke-width="2" />
+                <path d="M2.8 15.2l3.6-3.6M21.2 8.8l-3.6 3.6" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" />
+                <path d="M4.5 20.5c.8-2 .8-3.6 0-5.6M8 19.2c.5-1.3.5-2.3 0-3.6" stroke="currentColor"
+                  stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.65" />
+              </svg>
+              <span class="rx-act-lb">Sat</span>
+            </button>
+          </div>
+
+          <div class="rx-scrim" id="rxScrim" hidden></div>
+
+          <section class="rx-sheet glass" id="rxClubPop" role="dialog" aria-label="Club alternatives" hidden>
+            <div class="rx-sheet-grab" aria-hidden="true"></div>
+            <div class="rx-sheet-head">
+              <div>
+                <div class="rx-sheet-title">Clubs for this shot</div>
+                <div class="rx-sheet-sub" id="rxClubPopSub"></div>
+              </div>
+              <button class="rx-sheet-close" id="rxClubPopClose" type="button" aria-label="Close">×</button>
+            </div>
+            <div class="rx-club-list" id="rxClubList"></div>
+            <div class="rx-club-note"></div>
+          </section>
+
+          <section class="rx-sheet glass" id="rxWindPop" role="dialog" aria-label="Manual wind" hidden>
+            <div class="rx-sheet-grab" aria-hidden="true"></div>
+            <div class="rx-sheet-head">
+              <div>
+                <div class="rx-sheet-title">Wind</div>
+                <div class="rx-sheet-sub">Set what you feel on the tee — Caddy tags it Manual.</div>
+              </div>
+              <button class="rx-sheet-close" id="rxWindPopClose" type="button" aria-label="Close">×</button>
+            </div>
+            <div class="rx-wind-sec">
+              <div class="rx-wind-label">Speed · mph</div>
+              <div class="rx-speed-row" id="rxSpeedRow"></div>
+            </div>
+            <div class="rx-wind-sec">
+              <div class="rx-wind-label">From</div>
+              <div class="rx-dir-grid" id="rxDirGrid"></div>
+            </div>
+            <div class="rx-wind-actions">
+              <button class="rx-pill-btn rx-wind-clear" id="rxWindClear" type="button">Clear manual wind</button>
+            </div>
+          </section>
 
           <section class="sheet glass" id="sheet" aria-label="Yardage details">
             <div class="sheet-drag" id="sheetDrag" role="button" tabindex="0" aria-expanded="false"
@@ -1369,6 +1502,7 @@
 
   <script src="./leaflet.js"></script>
   <script src="./app.js"></script>
+  <script defer src="./range.js"></script>
 </body>
 
 </html>

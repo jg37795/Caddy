@@ -1,0 +1,911 @@
+/* ==========================================================================
+   range.css — Range premium layer (additive only)
+   --------------------------------------------------------------------------
+   Everything in this file styles elements created for the Play/Range
+   premium pass (prefix `rx-`) plus a handful of purely-visual refinements
+   to existing chrome (sheet handle micro-interaction, spring tail).
+   No layout, logic, or behavior owned by app.js is redefined here.
+   ========================================================================== */
+
+/* ---------- micro-polish on existing chrome (visual only) ---------- */
+
+/* Slightly longer spring tail on the sheet snap — a softer settle
+   without touching app.js drag physics. */
+.sheet.animate {
+  transition: transform 0.46s var(--spring);
+}
+
+/* Handle stretches subtly while the player pulls the sheet. */
+.sheet-handle {
+  transition: width 0.28s var(--spring-snappy);
+}
+
+body[data-dragging='1'] .sheet-handle {
+  width: 54px;
+}
+
+/* ==========================================================================
+   1. Reticle — decorative aim point at the center of the VISIBLE map area
+      (between the top UI and wherever the sheet currently sits). Purely
+      cosmetic: pointer-events none, sits under every control.
+   ========================================================================== */
+
+.rx-reticle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 500;
+  pointer-events: none;
+  will-change: transform;
+  /* JS positions via transform; size comes from the ring below. */
+}
+
+.rx-reticle-ring,
+.rx-reticle-dot,
+.rx-reticle-ping {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+
+.rx-reticle-ring {
+  width: 58px;
+  height: 58px;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.18),
+    inset 0 0 14px rgba(255, 255, 255, 0.12);
+  animation: rxBreath 3.2s ease-in-out infinite;
+}
+
+.rx-reticle-dot {
+  width: 5px;
+  height: 5px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Tick marks — crosshair feel without clutter. */
+.rx-reticle-ring::before,
+.rx-reticle-ring::after {
+  content: '';
+  position: absolute;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.35);
+}
+
+.rx-reticle-ring::before {
+  width: 1.5px;
+  height: 9px;
+  left: 50%;
+  top: -13px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+}
+
+.rx-reticle-ring::after {
+  width: 9px;
+  height: 1.5px;
+  top: 50%;
+  left: -13px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+}
+
+@keyframes rxBreath {
+
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.85;
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.07);
+    opacity: 1;
+  }
+}
+
+/* One-shot ping when a pin is dropped from the dock. */
+.rx-reticle-ping {
+  width: 12px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rx-reticle.rx-ping .rx-reticle-ping {
+  animation: rxPing 0.7s var(--spring) forwards;
+}
+
+@keyframes rxPing {
+  0% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(5.2);
+  }
+}
+
+body[data-detent='full'] .rx-reticle {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .rx-reticle-ring {
+    animation: none;
+  }
+
+  .rx-reticle.rx-ping .rx-reticle-ping {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   2. Top stack — context strip (hole · scorecard dots · wind) above the
+      hero distance capsule. Centered, clear of the top-right controls.
+   ========================================================================== */
+
+.rx-stack {
+  position: absolute;
+  z-index: 600;
+  left: 50%;
+  top: calc(var(--safe-top) + 108px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 20px);
+  pointer-events: none;
+  transition: transform 0.42s var(--spring), opacity 0.3s ease;
+}
+
+/* Live round: the compact round HUD occupies the upper-left, so drop the
+   stack below it instead of overlapping. */
+.range-wrap.rx-round-live .rx-stack {
+  top: calc(var(--safe-top) + 152px);
+}
+
+/* Fade with the sheet like the other floating pills. */
+body[data-dragging='1'] .rx-stack {
+  transition: none !important;
+  opacity: calc(1 - var(--detail-reveal, 0));
+}
+
+body[data-detent='full']:not([data-dragging='1']) .rx-stack {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 0.42s var(--spring), opacity 0.3s ease,
+    visibility 0s linear 0.32s;
+}
+
+.rx-stack>* {
+  pointer-events: auto;
+}
+
+/* ---------- context strip ---------- */
+
+.rx-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  max-width: calc(100vw - 20px);
+}
+
+.rx-strip-hole {
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 11px;
+  opacity: 0.92;
+}
+
+.rx-strip-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 1px 0;
+  background: var(--glass-stroke);
+}
+
+/* Scorecard dots — one per hole, par-relative tint once played. */
+.rx-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
+}
+
+.rx-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(128, 128, 128, 0.32);
+  flex: 0 0 auto;
+}
+
+.rx-dot.cur {
+  box-shadow: 0 0 0 1.5px currentColor;
+  background: transparent;
+}
+
+.rx-dot.under {
+  background: #d63939;
+}
+
+.rx-dot.over {
+  background: #1677ff;
+}
+
+.rx-dot.even {
+  background: var(--green-2);
+}
+
+body.dark .rx-dot.under {
+  background: #ff8f8f;
+}
+
+body.dark .rx-dot.over {
+  background: #6cb2ff;
+}
+
+/* ---------- wind widget (inside the strip) ---------- */
+
+button.rx-wind {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  min-height: 24px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button.rx-wind:active {
+  transform: scale(0.94);
+}
+
+.rx-wind-mini {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.rx-wind-mini svg.rose,
+.rx-wind-mini svg.arrow {
+  position: absolute;
+  inset: 0;
+}
+
+.rx-wind-mini svg.arrow {
+  transform-origin: 50% 50%;
+  transition: transform 0.45s var(--spring);
+}
+
+.rx-wind-text {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.rx-wind-tag {
+  font-size: 7.5px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  padding: 2px 4px;
+  border-radius: 5px;
+  background: rgba(211, 135, 19, 0.16);
+  color: var(--warn);
+  text-transform: uppercase;
+}
+
+.rx-wind-tag.manual {
+  background: rgba(24, 164, 91, 0.16);
+  color: var(--green-2);
+}
+
+body.dark .rx-wind-tag.manual {
+  color: #37e07f;
+}
+
+.rx-wind.is-demo {
+  opacity: 0.72;
+}
+
+/* ==========================================================================
+   3. Hero distance capsule — the big number, front and center.
+      Mirrors #rawYards / #playsLikeYards; never owns the data.
+   ========================================================================== */
+
+.rx-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 22px 12px;
+  border-radius: 22px;
+  min-width: 168px;
+  text-align: center;
+}
+
+.rx-hero-kicker {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.rx-hero-num-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.rx-hero-num {
+  font-size: clamp(44px, 12vw, 60px);
+  font-weight: 900;
+  line-height: 0.94;
+  letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rx-hero-unit {
+  font-size: 13px;
+  font-weight: 850;
+  opacity: 0.55;
+  letter-spacing: 0.02em;
+}
+
+/* Plays-like delta badge beside the number. */
+.rx-hero-pl {
+  font-size: 11px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 7px;
+  border-radius: 8px;
+  background: rgba(15, 122, 67, 0.12);
+  color: var(--green);
+  white-space: nowrap;
+}
+
+.rx-hero-pl.longer {
+  background: rgba(211, 135, 19, 0.14);
+  color: var(--warn);
+}
+
+.rx-hero-pl.shorter {
+  background: rgba(22, 119, 255, 0.12);
+  color: var(--blue);
+}
+
+body.dark .rx-hero-pl {
+  background: rgba(24, 164, 91, 0.18);
+  color: #37e07f;
+}
+
+body.dark .rx-hero-pl.longer {
+  color: #f5b14a;
+}
+
+body.dark .rx-hero-pl.shorter {
+  color: #6cb2ff;
+}
+
+/* Number roll-in on change. */
+.rx-hero-num.rx-roll {
+  animation: rxRoll 0.38s var(--spring-snappy);
+}
+
+@keyframes rxRoll {
+  0% {
+    opacity: 0.15;
+    transform: translateY(7px);
+    filter: blur(3px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rx-hero-num.rx-roll {
+    animation: none;
+  }
+}
+
+/* ---------- club suggestion chip ---------- */
+
+button.rx-club-chip {
+  appearance: none;
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px 7px 9px;
+  min-height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-stroke);
+  background: linear-gradient(145deg, rgba(15, 122, 67, 0.92), rgba(24, 164, 91, 0.86));
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(15, 122, 67, 0.3);
+  transition: transform 0.15s var(--spring-snappy), box-shadow 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button.rx-club-chip:active {
+  transform: scale(0.95);
+  box-shadow: 0 2px 8px rgba(15, 122, 67, 0.26);
+}
+
+.rx-club-name {
+  font-weight: 900;
+}
+
+.rx-club-meta {
+  opacity: 0.85;
+  font-weight: 750;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rx-club-chev {
+  display: inline-flex;
+  opacity: 0.8;
+}
+
+/* ==========================================================================
+   4. Quick-action dock — four one-tap controls floating above the tab bar,
+      riding the shared --ui-lift so they track the sheet.
+   ========================================================================== */
+
+.rx-dock {
+  position: absolute;
+  z-index: 600;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%) translateY(calc(-1 * var(--ui-lift, 160px) - 52px));
+  display: inline-flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 26px;
+  transition: transform 0.42s var(--spring), opacity 0.3s ease;
+  will-change: transform;
+}
+
+/* During a live round the Start-shot FAB owns the lane above the GPS pill —
+   climb well above it (its live pill stacks higher while a shot is pending). */
+.range-wrap.rx-round-live .rx-dock {
+  transform: translateX(-50%) translateY(calc(-1 * var(--ui-lift, 160px) - 144px));
+}
+
+body[data-dragging='1'] .rx-dock {
+  transition: none !important;
+  opacity: calc(1 - var(--detail-reveal, 0));
+}
+
+body[data-detent='full']:not([data-dragging='1']) .rx-dock {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 0.42s var(--spring), opacity 0.3s ease,
+    visibility 0s linear 0.32s;
+}
+
+.rx-act {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  width: 62px;
+  min-height: 52px;
+  border-radius: 21px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px 5px;
+  cursor: pointer;
+  transition: transform 0.15s var(--spring-snappy), background 0.2s ease,
+    color 0.2s ease, opacity 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.rx-act:active {
+  transform: scale(0.92);
+  background: rgba(127, 127, 127, 0.14);
+}
+
+.rx-act svg {
+  width: 21px;
+  height: 21px;
+  flex: 0 0 auto;
+}
+
+.rx-act-lb {
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.78;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Active/armed states */
+.rx-act.armed svg {
+  color: var(--green-2);
+}
+
+body.dark .rx-act.armed svg {
+  color: #37e07f;
+}
+
+.rx-act.pending {
+  color: var(--warn);
+}
+
+.rx-act.pending svg {
+  color: var(--warn);
+}
+
+.rx-act[aria-disabled='true'] {
+  opacity: 0.45;
+}
+
+.rx-act.pending .rx-act-lb {
+  color: var(--warn);
+  opacity: 1;
+}
+
+/* ==========================================================================
+   5. Popovers — club alternatives & manual wind editor. Bottom mini-sheets
+      matching the app's existing sheet vocabulary.
+   ========================================================================== */
+
+.rx-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 700;
+  background: rgba(4, 10, 6, 0.42);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.rx-scrim.open {
+  opacity: 1;
+}
+
+.rx-sheet {
+  position: fixed;
+  z-index: 701;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%) translateY(110%);
+  width: min(430px, 100vw);
+  border-radius: 24px 24px 0 0;
+  padding: 10px 18px calc(var(--safe-bottom) + 18px);
+  transition: transform 0.46s var(--spring);
+  will-change: transform;
+}
+
+.rx-sheet.open {
+  transform: translateX(-50%) translateY(0);
+}
+
+.rx-sheet-grab {
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  margin: 0 auto 12px;
+  background: rgba(120, 120, 128, 0.4);
+}
+
+body.dark .rx-sheet-grab {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.rx-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.rx-sheet-title {
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+
+.rx-sheet-sub {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.62;
+  margin-top: 1px;
+}
+
+.rx-sheet-close {
+  appearance: none;
+  border: 0;
+  background: rgba(127, 127, 127, 0.16);
+  color: inherit;
+  width: 30px;
+  height: 30px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.15s var(--spring-snappy);
+}
+
+.rx-sheet-close:active {
+  transform: scale(0.9);
+}
+
+/* ---------- club alternatives list ---------- */
+
+.rx-club-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(46vh, 380px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  margin: 0 -6px;
+}
+
+.rx-club-row {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.rx-club-row:active {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.rx-club-row.best {
+  background: rgba(24, 164, 91, 0.12);
+}
+
+.rx-club-row .nm {
+  font-size: 14px;
+  font-weight: 900;
+  min-width: 74px;
+}
+
+.rx-club-row .bar {
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(127, 127, 127, 0.18);
+  position: relative;
+  overflow: hidden;
+}
+
+.rx-club-row .bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: var(--green-2);
+}
+
+body.dark .rx-club-row .bar i {
+  background: #37e07f;
+}
+
+.rx-club-row.best .bar i {
+  background: linear-gradient(90deg, var(--green), var(--green-2));
+}
+
+.rx-club-row .cy {
+  font-size: 13px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+  text-align: right;
+}
+
+.rx-club-row .df {
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  text-align: right;
+  opacity: 0.66;
+}
+
+.rx-club-row .df.hot {
+  color: var(--green-2);
+  opacity: 1;
+}
+
+body.dark .rx-club-row .df.hot {
+  color: #37e07f;
+}
+
+.rx-club-note {
+  margin-top: 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.4;
+  opacity: 0.62;
+}
+
+/* ---------- wind editor ---------- */
+
+.rx-wind-sec {
+  margin-top: 4px;
+}
+
+.rx-wind-label {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin-bottom: 7px;
+}
+
+.rx-speed-row,
+.rx-dir-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.rx-speed-row {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.rx-dir-grid {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.rx-pill-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 127, 0.08);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  min-height: 44px;
+  border-radius: 13px;
+  cursor: pointer;
+  transition: transform 0.15s var(--spring-snappy), background 0.2s ease,
+    color 0.2s ease, border-color 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.rx-pill-btn:active {
+  transform: scale(0.94);
+}
+
+.rx-pill-btn.on {
+  background: rgba(24, 164, 91, 0.16);
+  border-color: rgba(24, 164, 91, 0.4);
+  color: var(--green);
+}
+
+body.dark .rx-pill-btn.on {
+  color: #37e07f;
+}
+
+.rx-wind-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rx-wind-clear {
+  flex: 1 1 auto;
+}
+
+/* ==========================================================================
+   6. Toast — tiny transient hint above the dock.
+   ========================================================================== */
+
+.rx-toast {
+  position: absolute;
+  z-index: 650;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%) translateY(calc(-1 * var(--ui-lift, 160px) - 122px));
+  padding: 9px 16px;
+  border-radius: 14px;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.35;
+  max-width: calc(100vw - 40px);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease, transform 0.28s var(--spring);
+}
+
+.rx-toast.show {
+  opacity: 1;
+}
+
+/* Clear the taller round-FAB stack (live pill + FAB) while a shot is pending. */
+.range-wrap.rx-round-live .rx-toast {
+  transform: translateX(-50%) translateY(calc(-1 * var(--ui-lift, 160px) - 214px));
+}
+
+/* ==========================================================================
+   7. Small screens / satellite legibility
+   ========================================================================== */
+
+.range-wrap.is-sat .rx-strip,
+.range-wrap.is-sat .rx-hero,
+.range-wrap.is-sat .rx-dock {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 355px) {
+  .rx-act {
+    width: 56px;
+  }
+
+  .rx-hero-num {
+    font-size: 40px;
+  }
+}

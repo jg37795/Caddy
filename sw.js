@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.53'; // quick start "change details" now opens a focused options sheet (tees/start hole/group), not the full form; back-navigation preserved
+const CACHE_VERSION = 'v1.0.54'; // range premium layer: hero HUD, quick-action dock, club chip, manual wind widget (range.js/range.css)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
@@ -12,6 +12,8 @@ const APP_SHELL = [
   './index.html',
   './app.css',
   './app.js',
+  './range.css',
+  './range.js',
   './leaflet.css',
   './leaflet.js',
 ];
