@@ -857,6 +857,228 @@ body.dark .tee-chip.active {
   height: 17px;
 }
 
+/* --- 3-step welcome flow --- */
+.ob-skip {
+  position: absolute;
+  top: calc(var(--safe-top) + 16px);
+  right: 20px;
+  z-index: 2;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(10, 70, 40, 0.45);
+  border: 1px solid rgba(140, 240, 180, 0.25);
+  color: #c9f7db;
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.ob-step {
+  width: 100%;
+  animation: obStepIn 0.45s var(--spring) both;
+}
+
+@keyframes obStepIn {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ob-h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(34px, 10vw, 44px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #fff;
+  text-align: center;
+}
+
+.ob-lede {
+  max-width: 340px;
+  margin: 0 auto;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.4;
+  color: rgba(220, 245, 228, 0.82);
+}
+
+.ob-top .ob-lede {
+  margin-top: 18px;
+}
+
+.ob-card,
+.ob-tabs-intro li {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(160, 245, 190, 0.18);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.12),
+    0 12px 30px rgba(0, 0, 0, 0.22);
+}
+
+.ob-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  max-width: 420px;
+  margin: 14px auto 0;
+  padding: 16px 18px;
+  border-radius: 20px;
+}
+
+.ob-card svg {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  color: #7df0ad;
+  margin-top: 2px;
+}
+
+.ob-card h3 {
+  margin: 0 0 3px;
+  font-size: 16px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.ob-card p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: rgba(220, 245, 228, 0.75);
+  font-weight: 600;
+}
+
+.ob-card-alt svg {
+  color: #b9e9cc;
+}
+
+.ob-step2-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+  margin: 22px auto 0;
+}
+
+.ob-std-btn {
+  width: 100%;
+  border-radius: 18px;
+  padding: 17px 22px;
+  background: #fff;
+  color: var(--green);
+  font-size: 18px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  transition: transform 0.15s var(--spring-snappy);
+}
+
+.ob-std-btn:active {
+  transform: scale(0.97);
+}
+
+.ob-later-link {
+  padding: 8px 12px;
+  background: none;
+  color: #a8ecc5;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ob-tabs-intro {
+  list-style: none;
+  margin: 18px auto 0;
+  padding: 6px;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ob-tabs-intro li {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 11px 14px;
+  border-radius: 16px;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: rgba(228, 248, 235, 0.88);
+}
+
+.ob-tabs-intro strong {
+  color: #fff;
+  font-weight: 850;
+}
+
+.ob-tab-ico {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 70, 40, 0.55);
+  border: 1px solid rgba(140, 240, 180, 0.2);
+  color: #7df0ad;
+}
+
+.ob-tab-ico svg {
+  width: 21px;
+  height: 21px;
+}
+
+.ob-dots {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.ob-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(200, 250, 220, 0.32);
+  transition: background 0.25s ease, transform 0.25s ease;
+}
+
+.ob-dots i.on {
+  background: #fff;
+  transform: scale(1.15);
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .ob-logo,
+  .ob-step {
+    animation: none;
+  }
+
+  .ob-dots i,
+  .ob-start,
+  .ob-std-btn {
+    transition: none;
+  }
+}
+
 @media (max-height: 720px) {
   .ob-logo {
     width: 96px;

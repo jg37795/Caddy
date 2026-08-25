@@ -27,73 +27,88 @@
 <body>
   <!-- ONBOARDING / GET STARTED -->
   <div class="onboard" id="onboard" role="dialog" aria-modal="true" aria-label="Welcome to Caddy" hidden>
+    <button class="ob-skip" id="obSkipBtn" type="button">Skip</button>
+
     <div class="onboard-inner">
-      <div class="ob-top">
-        <div class="ob-logo">
+      <!-- STEP 1 · Welcome -->
+      <div class="ob-step" data-step="1">
+        <div class="ob-top">
+          <div class="ob-logo">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path fill="#ffffff" fill-rule="evenodd"
+                d="M12 3.9a5.15 5.15 0 1 1 0 10.3 5.15 5.15 0 0 1 0-10.3ZM10.2 6.55a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9Zm3.6 0a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM12 9.85a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM10.65 14.9h2.7c-.12.95-.42 1.85-.88 2.33-.26.28-.66.28-.92 0-.46-.48-.78-1.38-.9-2.33Z" />
+            </svg>
+          </div>
+          <div class="ob-title">Caddy</div>
+          <div class="ob-tag">Know your distance.<br />Play smarter.</div>
+          <p class="ob-lede">Caddy is your on-course caddie — precise yardages, club picks, and score tracking in one quiet app.</p>
+        </div>
+      </div>
+
+      <!-- STEP 2 · Set your bag -->
+      <div class="ob-step" data-step="2" hidden>
+        <h2 class="ob-h2">Set your bag</h2>
+        <p class="ob-lede">Tell Caddy what's in your bag so every yardage comes with the right club recommendation.</p>
+        <div class="ob-card">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path fill="#ffffff" fill-rule="evenodd"
-              d="M12 3.9a5.15 5.15 0 1 1 0 10.3 5.15 5.15 0 0 1 0-10.3ZM10.2 6.55a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9Zm3.6 0a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM12 9.85a.95.95 0 1 1 0 1.9.95.95 0 0 1 0-1.9ZM10.65 14.9h2.7c-.12.95-.42 1.85-.88 2.33-.26.28-.66.28-.92 0-.46-.48-.78-1.38-.9-2.33Z" />
+            <path d="M7 3v11a4 4 0 0 0 8 0V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <path d="M15 6h3a3 3 0 0 1 0 6h-3M7 21h10" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" />
           </svg>
+          <div>
+            <h3>A full set, ready to go</h3>
+            <p>Driver through putter with sensible carry distances — tune them any time in the Bag tab.</p>
+          </div>
         </div>
-        <div class="ob-title">Caddy</div>
-        <div class="ob-tag">Know your distance.<br />Play smarter.</div>
+        <div class="ob-card ob-card-alt">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <div>
+            <h3>Or add clubs yourself</h3>
+            <p>Set exact carry distances for your own setup in the Bag tab after we're done.</p>
+          </div>
+        </div>
+        <div class="ob-step2-actions">
+          <button class="ob-std-btn" id="obStdBagBtn" type="button">Start with standard bag</button>
+          <button class="ob-later-link" id="obLaterBtn" type="button">I'll set up my bag later</button>
+        </div>
       </div>
 
-      <div class="ob-divider" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-          stroke-linejoin="round">
-          <circle cx="12" cy="12" r="6.8" />
-          <path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3" />
-          <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
-        </svg>
-      </div>
-
-      <div class="ob-features">
-        <div class="ob-feature">
-          <div class="ob-feat-icon">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M12 21s7-6.1 7-12a7 7 0 1 0-14 0c0 5.9 7 12 7 12Z" stroke="currentColor" stroke-width="2" />
-              <path d="M12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="currentColor" stroke-width="2" />
-            </svg>
-          </div>
-          <div class="ob-feat-text">
-            <h3>Precise Yardages</h3>
-            <p>Get instant club recommendations.</p>
-          </div>
-        </div>
-
-        <div class="ob-feature">
-          <div class="ob-feat-icon">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M7 3v11a4 4 0 0 0 8 0V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M15 6h3a3 3 0 0 1 0 6h-3M7 21h10" stroke="currentColor" stroke-width="2"
-                stroke-linecap="round" />
-            </svg>
-          </div>
-          <div class="ob-feat-text">
-            <h3>Built Around Your Bag</h3>
-            <p>Customize carry distances for every club.</p>
-          </div>
-        </div>
-
-        <div class="ob-feature">
-          <div class="ob-feat-icon">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M5 20V10M12 20V4M19 20v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path d="M3 20h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </div>
-          <div class="ob-feat-text">
-            <h3>Track Your Improvement</h3>
-            <p>Analyze your game and lower your scores.</p>
-          </div>
-        </div>
+      <!-- STEP 3 · You're ready -->
+      <div class="ob-step" data-step="3" hidden>
+        <h2 class="ob-h2">You're ready</h2>
+        <p class="ob-lede">Five tabs, one job each:</p>
+        <ul class="ob-tabs-intro">
+          <li>
+            <span class="ob-tab-ico"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6.1 7-12a7 7 0 1 0-14 0c0 5.9 7 12 7 12Z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="10" r="2.4" stroke="currentColor" stroke-width="2"/></svg></span>
+            <span><strong>Play</strong> — live GPS yardages to greens and targets.</span>
+          </li>
+          <li>
+            <span class="ob-tab-ico"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" stroke="currentColor" stroke-width="2"/><path d="M8 3v4M16 3v4M3 11h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+            <span><strong>Round</strong> — scorecard, FIR/GIR and putts as you play.</span>
+          </li>
+          <li>
+            <span class="ob-tab-ico"><svg viewBox="0 0 24 24" fill="none"><path d="M7 3v11a4 4 0 0 0 8 0V3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M15 6h3a3 3 0 0 1 0 6h-3M7 21h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+            <span><strong>Bag</strong> — your clubs and their carry distances.</span>
+          </li>
+          <li>
+            <span class="ob-tab-ico"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2v6m0 0 3-3m-3 3L9 5m3 17v-6m0 0 3 3m-3-3-3 3M2 12h6m0 0-3-3m3 3-3 3M22 12h-6m0 0 3-3m-3 3 3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <span><strong>Prep</strong> — plan holes and shots before you swing.</span>
+          </li>
+          <li>
+            <span class="ob-tab-ico"><svg viewBox="0 0 24 24" fill="none"><path d="M5 20V10M12 20V4M19 20v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3 20h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+            <span><strong>Stats</strong> — see trends and watch your scores drop.</span>
+          </li>
+        </ul>
       </div>
     </div>
 
     <div class="ob-bottom">
-      <button class="ob-start" id="obStartBtn" type="button">
-        Get Started
+      <div class="ob-dots" id="obDots" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
+      <button class="ob-start hidden-step-btn" id="obNextBtn" type="button">
+        Continue
         <span class="arrow" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
@@ -101,15 +116,15 @@
           </svg>
         </span>
       </button>
-      <div class="ob-foot">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 3l7 3v5c0 4.5-3 8.2-7 9-4-0.8-7-4.5-7-9V6l7-3Z" stroke="currentColor" stroke-width="1.8"
-            stroke-linejoin="round" />
-          <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-            stroke-linejoin="round" />
-        </svg>
-        No account required
-      </div>
+      <button class="ob-start" id="obStartBtn" type="button" hidden>
+        Let's play
+        <span class="arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+              stroke-linejoin="round" />
+          </svg>
+        </span>
+      </button>
     </div>
   </div>
 

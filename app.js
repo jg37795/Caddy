@@ -66,6 +66,11 @@
     shotDataDesc: $('shotDataDesc'),
     onboard: $('onboard'),
     obStartBtn: $('obStartBtn'),
+    obNextBtn: $('obNextBtn'),
+    obSkipBtn: $('obSkipBtn'),
+    obStdBagBtn: $('obStdBagBtn'),
+    obLaterBtn: $('obLaterBtn'),
+    obDots: $('obDots'),
     findNearbyCoursesBtn: $('findNearbyCoursesBtn'),
     nearbyCourseStatus: $('nearbyCourseStatus'),
     nearbyCourseList: $('nearbyCourseList'),
@@ -838,6 +843,7 @@
 
   // ===== Onboarding =====
   let lastFocusBeforeOnboard = null;
+  let obStep = 1;
   function shouldShowOnboard() {
     try {
       return localStorage.getItem(ONBOARD_KEY) !== '1';
@@ -845,18 +851,37 @@
       return true;
     }
   }
+  function showObStep(n) {
+    obStep = Math.min(3, Math.max(1, n));
+    els.onboard.querySelectorAll('.ob-step').forEach((s) => {
+      s.hidden = Number(s.dataset.step) !== obStep;
+    });
+    els.obDots.querySelectorAll('i').forEach((d, i) => {
+      d.classList.toggle('on', i < obStep);
+    });
+    els.obNextBtn.hidden = obStep === 3;
+    els.obStartBtn.hidden = obStep !== 3;
+    const focusTarget =
+      obStep === 3
+        ? els.obStartBtn
+        : obStep === 2
+          ? els.obStdBagBtn
+          : els.obNextBtn;
+    requestAnimationFrame(() => {
+      try {
+        focusTarget.focus();
+      } catch { }
+    });
+  }
   function showOnboard() {
     lastFocusBeforeOnboard = document.activeElement;
     els.onboard.hidden = false;
     els.onboard.classList.remove('hide');
     document.body.style.overflow = 'hidden';
-    requestAnimationFrame(() => {
-      try {
-        els.obStartBtn.focus();
-      } catch { }
-    });
+    showObStep(1);
   }
   function dismissOnboard() {
+    // Set the flag FIRST so a re-render can never flash the gate again.
     try {
       localStorage.setItem(ONBOARD_KEY, '1');
     } catch { }
@@ -898,7 +923,20 @@
     }
   }
   function initOnboard() {
+    els.obNextBtn.addEventListener('click', () => showObStep(obStep + 1));
+    els.obStdBagBtn.addEventListener('click', () => {
+      state.clubs = DEFAULT_CLUBS.map((c) => ({ ...c, id: cryptoId() }));
+      state.prefs.selectedClubId = '';
+      save('caddy:clubs', state.clubs);
+      save('caddy:prefs', state.prefs);
+      renderClubs();
+      haptic(10);
+      showObStep(3);
+    });
+    // "Later" just moves on — the Bag tab is always there.
+    els.obLaterBtn.addEventListener('click', () => showObStep(3));
     els.obStartBtn.addEventListener('click', dismissOnboard);
+    els.obSkipBtn.addEventListener('click', dismissOnboard);
     document.addEventListener('keydown', trapOnboardFocus);
     if (shouldShowOnboard()) showOnboard();
     else els.onboard.hidden = true;
@@ -13172,6 +13210,20 @@ out geom;`;
   window.__caddySelfTest = function () {
     const out = [];
     const ok = (name, pass, detail) => out.push(`${pass ? '✅' : '❌'} ${name}${detail ? ' — ' + detail : ''}`);
+
+    // 0. Onboarding gate: first-run shows, set-flag stays quiet.
+    try {
+      const obPrev = localStorage.getItem(ONBOARD_KEY);
+      localStorage.removeItem(ONBOARD_KEY);
+      const showsFirstRun = shouldShowOnboard();
+      localStorage.setItem(ONBOARD_KEY, '1');
+      const quietAfterSet = !shouldShowOnboard();
+      if (obPrev === null) localStorage.removeItem(ONBOARD_KEY);
+      else localStorage.setItem(ONBOARD_KEY, obPrev);
+      ok('Onboarding gate: shows when key absent, quiet once set',
+        showsFirstRun && quietAfterSet,
+        `absent→show=${showsFirstRun}, set→hide=${quietAfterSet}`);
+    } catch { /* storage unavailable in host */ }
 
     // 1. Geodesy: meridian arc, lat 40->41 on WGS-84.
     // Simpson's rule on M(φ)=a(1-e²)/(1-e²sin²φ)^1.5 over 40°..41° gives 111046.6 m;
