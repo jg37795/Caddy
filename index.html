@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="./leaflet.css" />
   <link rel="stylesheet" href="./app.css" />
   <link rel="stylesheet" href="./stats.css" />
+  <link rel="stylesheet" href="./bag.css" />
 </head>
 
 <body>
@@ -536,29 +537,36 @@
       <!-- CLUBS -->
       <section id="clubsScreen" class="screen">
         <h1 class="large-title">Bag</h1>
-        <div class="card">
-          <div class="card-title">
-            <h2>Clubs</h2>
-            <button class="ghost-btn" id="resetClubsBtn">
-              Reset defaults
-            </button>
+        <!-- Premium club management UI — rendered by bag.js -->
+        <div id="bagRoot"></div>
+        <!-- Legacy flat editor kept in the DOM (hidden): app.js remains the
+             owner of the canonical club list, and bag.js mirrors edits into
+             these controls so every existing behaviour keeps working. -->
+        <div id="bagLegacyHost" hidden>
+          <div class="card">
+            <div class="card-title">
+              <h2>Clubs</h2>
+              <button class="ghost-btn" id="resetClubsBtn">
+                Reset defaults
+              </button>
+            </div>
+            <div class="hint">
+              Edit your stock carry distances in yards. Recommendations prefer
+              the longer club when between clubs, with an easy/choke-down note.
+            </div>
+            <div id="clubsList" style="margin-top: 10px"></div>
           </div>
-          <div class="hint">
-            Edit your stock carry distances in yards. Recommendations prefer
-            the longer club when between clubs, with an easy/choke-down note.
+          <div class="card">
+            <div class="card-title">
+              <h3>Add club</h3>
+            </div>
+            <div class="form-row">
+              <label class="field">Name <input id="newClubName" placeholder="e.g. 60°" /></label>
+              <label class="field">Carry yd
+                <input id="newClubYards" type="number" inputmode="numeric" placeholder="80" /></label>
+            </div>
+            <button class="primary-btn" id="addClubBtn">Add club</button>
           </div>
-          <div id="clubsList" style="margin-top: 10px"></div>
-        </div>
-        <div class="card">
-          <div class="card-title">
-            <h3>Add club</h3>
-          </div>
-          <div class="form-row">
-            <label class="field">Name <input id="newClubName" placeholder="e.g. 60°" /></label>
-            <label class="field">Carry yd
-              <input id="newClubYards" type="number" inputmode="numeric" placeholder="80" /></label>
-          </div>
-          <button class="primary-btn" id="addClubBtn">Add club</button>
         </div>
       </section>
 
@@ -1402,6 +1410,7 @@
   <script src="./leaflet.js"></script>
   <script src="./app.js"></script>
   <script defer src="./stats.js"></script>
+  <script defer src="./bag.js"></script>
 </body>
 
 </html>
