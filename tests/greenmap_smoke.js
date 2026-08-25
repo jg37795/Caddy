@@ -75,7 +75,17 @@ console.log('2. Color ramp endpoints');
 })());
 }
 
-console.log('3. Polygon clip mask');
+console.log('3. Elevation ramp endpoints');
+{
+  const low = GM.elevationColor(0), mid = GM.elevationColor(0.5), high = GM.elevationColor(1);
+  check('elev low is blue (B > R)', low[2] > low[0], low);
+  check('elev high is red (R > B)', high[0] > high[2], high);
+  check('elev mid is neutral green-ish', mid[1] >= mid[0] && mid[1] >= mid[2], mid);
+  check('elev clamps out-of-range', JSON.stringify(GM.elevationColor(-5)) ===
+    JSON.stringify(low) && JSON.stringify(GM.elevationColor(7)) === JSON.stringify(high));
+}
+
+console.log('4. Polygon clip mask');
 {
   // Square poly ±8m around centre, 32 cells @ 1m.
   const sq = [[-8, -8], [8, -8], [8, 8], [-8, 8]];
@@ -89,7 +99,45 @@ console.log('3. Polygon clip mask');
   check('pointInPoly basic', GM.pointInPoly(0, 0, sq) && !GM.pointInPoly(20, 20, sq));
 }
 
-/* ---- 4. Live smoke — Ankeny 3DEP ---------------------------------------- */
+console.log('5. Putt preview integrator');
+{
+  // Flat field, square mask ±8m @ 1m cells, ball (-6,0) → pin (6,0):
+  // straight line, reaches pin, all points inside mask.
+  const W = 32, H = 32, cs = 0.5;
+  const grid = new Float32Array(W * H);   // flat → no lateral drift
+  const f = GM.computeGradientField(grid, W, H, cs);
+  const mask = GM.polyMask([[-8, -8], [8, -8], [8, 8], [-8, 8]], W, H, cs);
+  const r = GM.naivePuttPath([-6, 0], [6, 0], f, W, H, cs, mask);
+  check('flat putt reaches pin', r.stopped === 'pin' &&
+    Math.hypot(r.pts[r.pts.length - 1][0] - 6,
+               r.pts[r.pts.length - 1][1] - 0) < 1.2, r.stopped);
+}
+{
+  // Strong cross-slope pushes the naive line out of a narrow strip mask:
+  // integrator must report 'edge' and never emit out-of-mask points.
+  const W = 40, H = 40, cs = 0.25;
+  const grid = new Float32Array(W * H);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) grid[y * W + x] = 0.3 * y * cs; // falls north hard
+  const f = GM.computeGradientField(grid, W, H, cs);
+  const mask = GM.polyMask([[-4, -4], [4, -4], [4, 4], [-4, 4]], W, H, cs);
+  const r = GM.naivePuttPath([-3, 3.5], [3, -3.5], f, W, H, cs, mask, 120, 12);
+  check('cross-slope putt stops at edge', r.stopped === 'edge', r.stopped);
+  let inMask = true;
+  const cellOk = ([mx, my]) => {
+    const ix = Math.round(mx / cs + W / 2), iy = Math.round(H / 2 - my / cs);
+    return ix >= 0 && iy >= 0 && ix < W && iy < H && mask[iy * W + ix] === 1;
+  };
+  // every point except possibly the final clamp must be inside the mask
+  for (let k = 0; k < r.pts.length; k++)
+    if (!cellOk(r.pts[k])) { inMask = false; break; }
+  check('all putt points inside polygon (edge stop)', inMask || r.stopped === 'pin',
+    `${r.pts.length} pts`);
+  check('edge path shorter than ball→pin line',
+    r.pts.length < 121, r.pts.length);
+}
+
+/* ---- 6. Live smoke — Ankeny 3DEP ---------------------------------------- */
 (async () => {
   console.log('4. Live smoke — Ankeny test green (41.95,-93.75)');
   try {

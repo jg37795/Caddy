@@ -23,6 +23,10 @@
 <div id="gm-topbar" class="gm-chrome">
   <span id="gm-title">⛳ Green Slope <span style="color:#9db3a6;font-weight:400">prototype</span></span>
   <select id="gm-preset" class="gm-select" title="Preset greens"></select>
+  <select id="gm-mode" class="gm-select" title="Color mode" style="max-width:110px">
+    <option value="slope">Slope</option>
+    <option value="elev">Elev</option>
+  </select>
   <button class="gm-btn gm-layer-btn" data-layer="shading">Shading</button>
   <button class="gm-btn gm-layer-btn" data-layer="arrows">Arrows</button>
   <button class="gm-btn gm-layer-btn" data-layer="both">Both</button>
@@ -33,29 +37,18 @@
 </div>
 
 <div id="gm-legend" class="gm-chrome">
-  <h4>Slope %</h4>
-  <div id="rampbar"></div>
-  <div id="ramplabels"><span>0%</span><span>5%</span><span>10%+</span></div>
+  <h4 id="gm-legend-title">Slope %</h4>
+  <div id="gm-rampbar"></div>
+  <div id="gm-ramplabels"><span>0%</span><span>5%</span><span>10%+</span></div>
   <div class="row"><span class="swatch" style="background:#b0c2b5"></span>flat — calm colours</div>
   <div class="row"><span class="swatch" style="background:#d6603e"></span>steep — warm colours</div>
   <div class="row">↘ arrows point downhill; length ∝ steepness</div>
-  <div class="row">tap = slope readout · drag = pan · pinch/scroll = zoom</div>
+  <div class="row">long-press = move pin · tap = slope readout · drag = pan</div>
 </div>
 
 <div id="gm-tip"></div>
 
 <script src="caddy-elev.js"></script>
 <script src="greenmap.js"></script>
-<script>
-// Paint the legend ramp bar from the actual color function so it never drifts.
-(() => {
-  const el = document.getElementById('rampbar');
-  if (!el || !window.GreenMapCore) return;
-  const stops = [];
-  for (let p = 0; p <= 13; p += 0.25)
-    stops.push(`rgb(${GreenMapCore.slopeColor(p).join(',')}) ${((p / 13) * 100).toFixed(1)}%`);
-  el.style.background = `linear-gradient(to right, ${stops.join(',')})`;
-})();
-</script>
 </body>
 </html>

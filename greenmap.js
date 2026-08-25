@@ -96,6 +96,32 @@
     return stops[stops.length - 1][1];
   };
 
+  // Elevation ramp (18Birdies convention): low = deep blue,
+  // mid = neutral green, high = warm red. t is normalized 0..1.
+  GreenMapCore.elevationColor = function (t) {
+    const stops = [
+      [0.00, [42, 84, 154]],    // deep blue — low
+      [0.25, [82, 148, 186]],   // blue-teal
+      [0.50, [146, 188, 158]],  // neutral sage green — mid
+      [0.72, [222, 196, 118]],  // warm sand
+      [0.88, [226, 130, 74]],   // orange
+      [1.00, [208, 62, 48]]     // warm red — high
+    ];
+    const p = Math.max(0, Math.min(1, t));
+    for (let k = 1; k < stops.length; k++) {
+      if (p <= stops[k][0]) {
+        const [p0, c0] = stops[k - 1], [p1, c1] = stops[k];
+        const u = (p - p0) / (p1 - p0);
+        return [
+          Math.round(c0[0] + (c1[0] - c0[0]) * u),
+          Math.round(c0[1] + (c1[1] - c0[1]) * u),
+          Math.round(c0[2] + (c1[2] - c0[2]) * u)
+        ];
+      }
+    }
+    return stops[stops.length - 1][1];
+  };
+
   // Ray casting point-in-polygon (LL or any planar coords).
   GreenMapCore.pointInPoly = function (x, y, poly) {
     let inside = false;
@@ -120,36 +146,60 @@
     return mask;
   };
 
-  // Naive putt-line preview: integrate lateral gradient along a straight
-  // ball→pin line; offset accumulates perpendicular drift. Returns polyline
-  // of local-metre points. CLEARLY A PREVIEW — not a real putt simulator.
-  GreenMapCore.naivePuttPath = function (ballLL, pinLL, field, W, H, bbox,
-                                          steps = 60, sensitivity = 6) {
-    const wM = bbox[2] - bbox[0], hM = bbox[3] - bbox[1];
-    const toXY = (ll) => [
-      (ll.lng - bbox[0]) / wM * W,
-      (bbox[3] - ll.lat) / hM * H
-    ];
-    const [bx, by] = toXY(ballLL), [px, py] = toXY(pinLL);
+  // Naive putt-line preview v2: integrate lateral gradient along a straight
+  // ball→pin line with MIDPOINT gradient sampling (more stable), smaller
+  // steps, stopping at the pin OR when leaving the green polygon/mask.
+  // ballM/pinM are local-metre coords [x E, y N]. Returns { pts, stopped }
+  // where stopped === 'edge' if it left the green before reaching the pin.
+  // CLEARLY A PREVIEW — not a real putt simulator.
+  GreenMapCore.naivePuttPath = function (ballM, pinM, field, W, H, cellSizeM,
+                                          mask, steps = 120, sensitivity = 6) {
+    const toCell = ([mx, my]) => [
+      Math.round(mx / cellSizeM + W / 2),
+      Math.round(H / 2 - my / cellSizeM)];
+    const [bx, by] = toCell(ballM), [px, py] = toCell(pinM);
     const dx = px - bx, dy = py - by;
     const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len;          // along line (screen coords)
+    const ux = dx / len, uy = dy / len;          // along line (grid coords)
     const nx = -uy, ny = ux;                     // perpendicular
+    const ds = len / steps;
+    const toMetres = (cx, cy) => [
+      (cx - W / 2) * cellSizeM,
+      (H / 2 - cy) * cellSizeM];
     const pts = [];
     let off = 0;
+
+    const cellOk = (cx, cy) => {
+      const ix = Math.round(cx), iy = Math.round(cy);
+      if (ix < 0 || iy < 0 || ix >= W || iy >= H) return -1;
+      const i = iy * W + ix;
+      return (field.valid[i] && (!mask || mask[i])) ? i : -1;
+    };
+
     for (let s = 0; s <= steps; s++) {
       const t = s / steps;
       const cx = bx + dx * t + nx * off;
       const cy = by + dy * t + ny * off;
-      pts.push([cx, cy]);
-      const ix = Math.min(W - 1, Math.max(0, Math.round(cx)));
-      const iy = Math.min(H - 1, Math.max(0, Math.round(cy)));
-      const i = iy * W + ix;
-      if (!field.valid[i]) continue;
-      const lat = -(field.gx[i] * nx + field.gy[i] * ny); // lateral pull
-      off += lat * sensitivity * (len / steps);
+      // Stop when we reach the pin (remaining along-line distance ≤ 1 step).
+      if (len * (1 - t) <= ds) {
+        pts.push(pinM);
+        return { pts, stopped: 'pin' };
+      }
+      const i = cellOk(cx, cy);
+      if (i < 0) {
+        // Stepped off the green — stop at the last in-mask point.
+        return { pts, stopped: 'edge' };
+      }
+      pts.push(toMetres(cx, cy));
+      // Midpoint gradient sampling: sample half a step ahead for stability.
+      const mi = cellOk(cx + ux * ds / 2 + nx * off / 2,
+                        cy + uy * ds / 2 + ny * off / 2);
+      if (mi >= 0) {
+        const lat = -(field.gx[mi] * nx + field.gy[mi] * ny); // lateral pull
+        off += lat * sensitivity * ds;
+      }
     }
-    return pts;
+    return { pts, stopped: 'pin' };
   };
   window.GreenMapCore = GreenMapCore;
 
@@ -175,8 +225,11 @@
     lat: parseFloat(qs.get('lat')) || PRESETS[0].lat,
     lng: parseFloat(qs.get('lng')) || PRESETS[0].lng,
     layer: 'both',           // shading | arrows | both
+    mode: 'slope',           // slope | elev — color ramp mode
     view: { scale: null, ox: 0, oy: 0 },   // set after first render
     grid: null, field: null, mask: null, bbox: null,
+    polyLocal: null,         // polygon in local metres (null = ellipse fallback)
+    elevRange: [0, 1],       // min/max elevation inside mask (elev mode)
     pin: null,               // local metre coords of pin marker
     ball: null,              // local metre coords for putt preview
     showPutt: false
@@ -236,6 +289,7 @@
         (lon - state.lng) * 111320 * Math.cos(state.lat * Math.PI / 180),
         (la - state.lat) * 111320
       ]);
+      state.polyLocal = polyLocal;
       mask = GreenMapCore.polyMask(polyLocal, elev.W, elev.H, elev.cellSizeM);
     } else {
       mask = new Uint8Array(elev.W * elev.H);
@@ -252,24 +306,38 @@
     state.pin = [0, 0]; // pin at green centre
 
     let nValid = 0, nMasked = 0, maxS = 0, sumS = 0;
+    let minZ = Infinity, maxZ = -Infinity;
     for (let i = 0; i < mask.length; i++) {
-      if (mask[i]) nMasked++;
+      if (mask[i]) {
+        nMasked++;
+        const z = elev.grid[i];
+        if (Number.isFinite(z)) {
+          if (z < minZ) minZ = z;
+          if (z > maxZ) maxZ = z;
+        }
+      }
       if (field.valid[i]) {
         nValid++;
         const s = GreenMapCore.slopePctAt(field, i);
         sumS += s; if (s > maxS) maxS = s;
       }
     }
+    if (Number.isFinite(minZ) && Number.isFinite(maxZ) && maxZ > minZ)
+      state.elevRange = [minZ, maxZ];
+    const t0 = performance.now();
+    fitView();
+    buildHeatImage(); // v-fix: was never invoked — heat canvas stayed transparent
+    render();
+    console.log('[greenmap] load', `mode=${state.mode}`,
+      `polyVerts=${state.polyLocal ? state.polyLocal.length : 0}`,
+      state.polyLocal ? '' : 'ellipse fallback',
+      `renderMs=${(performance.now() - t0).toFixed(1)}`);
     console.log('[greenmap] grid', `${elev.W}x${elev.H}`,
       'cellSize(m)', elev.cellSizeM.toFixed(3),
       `valid ${(100 * nValid / mask.length).toFixed(0)}%`,
       `in-mask ${nMasked}`, `mean slope ${(sumS / Math.max(1, nValid)).toFixed(2)}%`,
       `max slope ${maxS.toFixed(1)}%`);
-
-    fitView();
-    buildHeatImage(); // v-fix: was never invoked — heat canvas stayed transparent
-    render();
-    status.textContent = `${polyLL ? 'OSM green shape' : 'ellipse fallback'} · ` +
+    status.textContent = `${state.polyLocal ? 'OSM green shape' : 'ellipse fallback'} · ` +
       `${(sumS / Math.max(1, nValid)).toFixed(1)}% mean slope`;
   }
 
@@ -310,7 +378,14 @@
         const i = y * g.W + x;
         const o = i * 4;
         if (!m[i] || !f.valid[i]) { d[o + 3] = 0; continue; }
-        const c = GreenMapCore.slopeColor(GreenMapCore.slopePctAt(f, i));
+        let c;
+        if (state.mode === 'elev') {
+          const z = g.grid[i];
+          const [lo, hi] = state.elevRange;
+          c = GreenMapCore.elevationColor((z - lo) / Math.max(1e-6, hi - lo));
+        } else {
+          c = GreenMapCore.slopeColor(GreenMapCore.slopePctAt(f, i));
+        }
         d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
       }
     }
@@ -332,9 +407,12 @@
       ctx.drawImage(heatCanvas, sx0, sy0, SPAN_M * state.view.scale, SPAN_M * state.view.scale);
     }
 
+    // --- crisp green boundary outline ---
+    drawGreenOutline();
+
     // --- flow arrows ---
     if (state.layer !== 'shading') {
-      const step = 2;                       // subsample every 2nd cell
+      const step = 3;                       // subsample every 3rd cell
       for (let y = 1; y < g.H - 1; y += step) {
         for (let x = 1; x < g.W - 1; x += step) {
           const i = y * g.W + x;
@@ -354,6 +432,30 @@
     drawScaleBar();
   }
 
+  function drawGreenOutline() {
+    const s = state.view.scale;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    if (state.polyLocal && state.polyLocal.length > 2) {
+      state.polyLocal.forEach(([mx, my], k) => {
+        const [sx, sy] = toScreen(mx, my);
+        if (k === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+      });
+      ctx.closePath();
+    } else {
+      // ellipse fallback — same radius as the mask build
+      const rM = SPAN_M * 0.36;
+      ctx.ellipse(state.view.ox, state.view.oy, rM * s, rM * s, 0, 0, 7);
+    }
+    // dark halo underneath, soft light line on top → crisp on any fill
+    ctx.strokeStyle = 'rgba(10,16,13,0.55)';
+    ctx.lineWidth = Math.max(3, (window.devicePixelRatio || 1) * 2.4);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(248,252,249,0.75)';
+    ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 0.8);
+    ctx.stroke();
+  }
+
   function drawArrow(cellX, cellY, i) {
     const g = state.grid;
     const mx = (cellX - g.W / 2) * g.cellSizeM;
@@ -362,25 +464,34 @@
     const mag = Math.hypot(gxv, gyv);
     if (mag < 1e-5) return;
     const slopePct = mag * 100;
-    const lenM = 0.55 + Math.min(1.6, slopePct / 4.5);   // ∝ steepness, capped
+    const lenM = 0.72 + Math.min(1.85, slopePct / 4.0);  // ∝ steepness, capped ~15% longer
     // downhill dir in local metres: east comp = -gx; north comp = +gy
     // (gy was computed with +y = south/screen-down, so flipping sign gives N)
     const dxm = -gxv / mag, dym = gyv / mag;
     const [x1, y1] = toScreen(mx - dxm * lenM / 2, my - dym * lenM / 2);
     const [x2, y2] = toScreen(mx + dxm * lenM / 2, my + dym * lenM / 2);
-    const dark = state.layer === 'arrows';
-    ctx.strokeStyle = dark ? 'rgba(235,242,236,0.85)' : 'rgba(20,28,24,0.55)';
-    ctx.lineWidth = Math.max(1, state.view.scale * 0.02);
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    // head
     const ang = Math.atan2(y2 - y1, x2 - x1);
-    const hs = Math.max(2.2, state.view.scale * 0.05);
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.beginPath();
-    ctx.moveTo(x2, y2);
-    ctx.lineTo(x2 - hs * Math.cos(ang - 0.42), y2 - hs * Math.sin(ang - 0.42));
-    ctx.lineTo(x2 - hs * Math.cos(ang + 0.42), y2 - hs * Math.sin(ang + 0.42));
-    ctx.closePath(); ctx.fill();
+    const hs = Math.max(2.6, state.view.scale * 0.055);
+    ctx.lineCap = 'round';
+    // shaft: dark halo underneath, light stroke on top — legible on any fill
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+    ctx.strokeStyle = 'rgba(12,18,15,0.85)';
+    ctx.lineWidth = Math.max(3.0, state.view.scale * 0.05);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(246,251,247,0.95)';
+    ctx.lineWidth = Math.max(1.4, state.view.scale * 0.022);
+    ctx.stroke();
+    // head: dark halo triangle slightly larger, then light on top
+    const drawHead = (size, color) => {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - size * Math.cos(ang - 0.42), y2 - size * Math.sin(ang - 0.42));
+      ctx.lineTo(x2 - size * Math.cos(ang + 0.42), y2 - size * Math.sin(ang + 0.42));
+      ctx.closePath(); ctx.fill();
+    };
+    drawHead(hs * 1.45, 'rgba(12,18,15,0.85)');
+    drawHead(hs, 'rgba(246,251,247,0.95)');
   }
 
   function drawPin() {
@@ -398,38 +509,31 @@
   }
 
   function drawPutt() {
-    // Naive preview: integrate lateral gradient along ball→pin, drawn here.
+    // Naive preview: uses GreenMapCore.naivePuttPath (midpoint-sampled,
+    // stops at pin or green edge). Drawn dashed white with a ball dot.
     const g = state.grid;
-    const toCell = ([mx, my]) => [
-      Math.round(mx / g.cellSizeM + g.W / 2),
-      Math.round(g.H / 2 - my / g.cellSizeM)];
-    const [bx, by] = toCell(state.ball), [px, py] = toCell(state.pin);
-    const steps = 80;
-    const dx = px - bx, dy = py - by, len = Math.hypot(dx, dy) || 1;
-    const nx = -dy / len, ny = dx / len;
-    let off = 0;
-    ctx.strokeStyle = 'rgba(255,209,102,0.95)';
+    if (!state.field) return;
+    const { pts, stopped } = GreenMapCore.naivePuttPath(
+      state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM, state.mask);
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
     ctx.lineWidth = Math.max(1.5, state.view.scale * 0.035);
     ctx.setLineDash([state.view.scale * 0.18, state.view.scale * 0.12]);
     ctx.beginPath();
-    const start = toScreen(state.ball[0], state.ball[1]);
-    ctx.moveTo(start[0], start[1]);
-    for (let s = 1; s <= steps; s++) {
-      const t = s / steps;
-      const cx = bx + dx * t + nx * off, cy = by + dy * t + ny * off;
-      const ix = Math.min(g.W - 1, Math.max(0, Math.round(cx)));
-      const iy = Math.min(g.H - 1, Math.max(0, Math.round(cy)));
-      const [sx, sy] = toScreen((cx - g.W / 2) * g.cellSizeM,
-                                (g.H / 2 - cy) * g.cellSizeM);
-      ctx.lineTo(sx, sy);
-      const i = iy * g.W + ix;
-      if (state.field.valid[i]) {
-        const lat = -(state.field.gx[i] * nx + state.field.gy[i] * ny);
-        off += lat * 6 * (len / steps);
-      }
-    }
+    pts.forEach((p, k) => {
+      const [sx, sy] = toScreen(p[0], p[1]);
+      if (k === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    });
     ctx.stroke();
     ctx.setLineDash([]);
+    // ball dot at start
+    const start = toScreen(state.ball[0], state.ball[1]);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(start[0], start[1],
+      Math.max(3, state.view.scale * 0.08), 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(10,16,13,0.8)'; ctx.lineWidth = 1;
+    ctx.stroke();
+    if (stopped === 'edge')
+      setStatus('Naive preview: ball line leaves the green before the pin');
   }
 
   function drawScaleBar() {
@@ -465,10 +569,25 @@
   canvas.addEventListener('pointerdown', (ev) => {
     dragging = true; lastPt = eventPos(ev);
     canvas.setPointerCapture(ev.pointerId);
+    // Long-press (500ms, no drag) moves the pin to the pressed spot.
+    const [px0, py0] = lastPt;
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+      if (!dragging || Math.hypot(lastPt[0] - px0, lastPt[1] - py0) > 8) return;
+      const s = sampleAtScreen(px0, py0);
+      if (s && state.mask && state.mask[s.i] &&
+          state.field && state.field.valid[s.i]) {
+        state.pin = [s.mx, s.my];
+        dragging = false; lastPt = null;
+        setStatus('Pin moved — long-press again anywhere inside the green');
+        render();
+      }
+    }, 500);
   });
   canvas.addEventListener('pointermove', (ev) => {
     const [px, py] = eventPos(ev);
     if (dragging && lastPt) {
+      cancelLongPress();
       state.view.ox += px - lastPt[0];
       state.view.oy += py - lastPt[1];
       lastPt = [px, py];
@@ -483,6 +602,7 @@
       (Math.abs(eventPos(ev)[0] - lastPt[0]) > 4 ||
        Math.abs(eventPos(ev)[1] - lastPt[1]) > 4);
     dragging = false; lastPt = null;
+    cancelLongPress();
     if (!wasDrag) handleTap(eventPos(ev));
   });
 
@@ -556,12 +676,37 @@
     render();
   }
   let armBallNext = false;
+  let longPressTimer = null;
+
+  function cancelLongPress() { clearTimeout(longPressTimer); }
 
   function setStatus(msg) { document.getElementById('gm-status').textContent = msg; }
 
   /* ======================================================================
      5. CHROME WIRING
      ====================================================================== */
+  const LEGEND_TEXT = {
+    slope: { title: 'Slope %', labels: ['0%', '5%', '10%+'] },
+    elev:  { title: 'Elevation', labels: ['low', '', 'high'] }
+  };
+  function updateLegend() {
+    const cfg = LEGEND_TEXT[state.mode] || LEGEND_TEXT.slope;
+    document.getElementById('gm-legend-title').textContent = cfg.title;
+    const spans = document.querySelectorAll('#gm-ramplabels span');
+    spans.forEach((el, k) => { el.textContent = cfg.labels[k] || ''; });
+    // Paint the ramp bar from the active color function so it never drifts.
+    const el = document.getElementById('gm-rampbar');
+    if (!el || !window.GreenMapCore) return;
+    const stops = [];
+    for (let p = 0; p <= 1.0001; p += 0.04)
+      stops.push(`rgb(${GreenMapCore.elevationColor(p).join(',')}) ${(p * 100).toFixed(0)}%`);
+    for (let p = 0; p <= 13; p += 0.25)
+      stops.push(`rgb(${GreenMapCore.slopeColor(p).join(',')}) ${((p / 13) * 100).toFixed(1)}%`);
+    el.style.background = state.mode === 'elev'
+      ? `linear-gradient(to right, ${stops.slice(0, 26).join(',')})`
+      : `linear-gradient(to right, ${stops.slice(26).join(',')})`;
+  }
+
   function wireChrome() {
     const sel = document.getElementById('gm-preset');
     PRESETS.forEach((p, idx) => {
@@ -583,6 +728,16 @@
       });
     });
     document.querySelector(`.gm-layer-btn[data-layer="both"]`).classList.add('active');
+
+    document.getElementById('gm-mode').addEventListener('change', (ev) => {
+      state.mode = ev.target.value === 'elev' ? 'elev' : 'slope';
+      buildHeatImage();
+      updateLegend();
+      render();
+      setStatus(state.mode === 'elev' ? 'Elevation ramp — low=blue → high=red'
+                                      : 'Slope mode — flat=sage → steep=red');
+    });
+    updateLegend();
 
     document.getElementById('gm-ball').addEventListener('click', () => {
       armBallNext = true;

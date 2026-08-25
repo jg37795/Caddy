@@ -83,6 +83,8 @@ html, body {
   right: 10px;
   bottom: 12px;
   width: 190px;
+  max-height: min(46vh, calc(100dvh - 110px)); /* never overlaps top bar */
+  overflow-y: auto;
 }
 #gm-legend h4 { margin: 2px 0 6px; font-size: 12px; color: var(--gm-dim); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 #gm-rampbar { height: 10px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.15); }
@@ -105,6 +107,16 @@ html, body {
 #gm-tip b { color: var(--gm-accent); }
 
 @media (max-width: 560px) {
-  #gm-legend { width: 150px; }
+  #gm-legend {
+    width: 150px;
+    font-size: 12px;
+    padding: 6px 8px;
+    max-height: min(40vh, calc(100dvh - 130px));
+  }
+  #gm-legend h4 { font-size: 10.5px; margin: 1px 0 4px; }
+  #gm-rampbar { height: 8px; }
+  #gm-ramplabels { font-size: 9.5px; letter-spacing: -0.02em; gap: 4px; }
+  #gm-legend .row { font-size: 10px; margin-top: 4px; }
+  #gm-legend .swatch { width: 11px; height: 11px; }
   .gm-select { max-width: 130px; }
 }
