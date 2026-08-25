@@ -763,6 +763,13 @@
     root.innerHTML = html;
     root.classList.toggle('bag-anim', !!animate);
     fixGapPills(root);
+    // v1.0.75: at cold launch the tab may still be display:none / mid-layout,
+    // so clientWidth reads 0 and pill clamping lands wrong. Re-run after two
+    // frames (same pattern as the bar-grow animation) and again on first
+    // visibility of the tab.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => fixGapPills(root))
+    );
 
     if (animate && !reduceMotion) {
       // Two frames so the zero-width bars are committed before growing.
@@ -1083,6 +1090,18 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) scheduleReconcile();
     });
+    // v1.0.75: re-clamp gap pills once the tab is actually laid out — at cold
+    // launch the bag renders while hidden, so pill measurement was garbage.
+    if ('IntersectionObserver' in window && root) {
+      const pillFixer = new IntersectionObserver((entries) => {
+        entries.forEach((en) => {
+          if (en.isIntersecting) {
+            requestAnimationFrame(() => fixGapPills(root));
+          }
+        });
+      }, { threshold: 0.01 });
+      pillFixer.observe(root);
+    }
   }
 
   if (document.readyState === 'loading') {

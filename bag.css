@@ -219,10 +219,10 @@ body.dark #bagRoot {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   color: var(--text);
-  background: var(--bag-pill-bg);
+  /* v1.0.75: solid pill (user: transparent pills were unreadable) — matches
+     the wide/warning pill's opacity, tinted neutral instead of orange. */
+  background: var(--bag-accent-soft, #e8ece9);
   border: 1px solid rgba(127, 127, 127, 0.35);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
   border-radius: 999px;
   padding: 2.5px 8px;
   white-space: nowrap;
