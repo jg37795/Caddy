@@ -291,15 +291,14 @@
   }
 
   function renderStrip() {
-    // Hole text mirrors the live-round HUD; hidden when there is no round.
+    // v1.0.65: during a live round the round HUD card (#roundMapHud) owns
+    // hole identity + scorecard dots — the strip shows wind only, so the
+    // same info never renders twice.
     const hudVisible = !!hudEl && !hudEl.hidden;
-    const txt = hudVisible && hudHoleEl ? (hudHoleEl.textContent || '').trim() : '';
-    const hasHole = hudVisible && !!txt;
-    if (root.stripHole) {
-      root.stripHole.hidden = !hasHole;
-      if (hasHole) root.stripHole.textContent = txt.toUpperCase();
-    }
-    if (root.stripHoleSep) root.stripHoleSep.hidden = !hasHole || !renderDotsInto();
+    if (root.stripHole) root.stripHole.hidden = true;
+    if (root.stripHoleSep) root.stripHoleSep.hidden = true;
+    const hasDots = !hudVisible && renderDotsInto();
+    if (root.dots) root.dots.hidden = !hasDots;
 
     // Live-round layout flag: shift the floating stack/dock clear of HUD.
     wrap.classList.toggle('rx-round-live', hudVisible);
@@ -378,7 +377,13 @@
       const pill = $('windPill');
       return !!pill && !pill.hidden;
     })();
-    if (!manual && liveShowing) {
+    const hudVisible = !!hudEl && !hudEl.hidden;
+    // Live weather beats everything except an explicit manual entry.
+    // During a live round the DEMO placeholder must NEVER show: if the
+    // app's real wind pill hasn't been revealed yet (renderWind can run
+    // before app.js's first updateWeatherUI, and observers only help
+    // after that), show nothing rather than fake data.
+    if (!manual && (liveShowing || hudVisible)) {
       root.wind.hidden = true;
       return;
     }
@@ -806,6 +811,9 @@
     renderStrip();
     renderWind();
     syncDock();
+    // Belt-and-suspenders poll: catches a wind-pill reveal that happened
+    // before these observers attached (script-order race on cold start).
+    setInterval(renderWind, 2000);
   }
 
   if (document.readyState === 'loading') {

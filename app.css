@@ -981,6 +981,13 @@ body.dark .tee-chip.active {
   display: none;
 }
 
+/* Live round: the round HUD card occupies the top-left lane (top ≈ +60px)
+   and the context strip sits at ≈ +152px — drop the mapping pill below
+   both so the error toast can never render on top of the HUD. */
+body:has(#roundMapHud:not([hidden])) .mapping-pill {
+  top: calc(var(--safe-top) + 204px);
+}
+
 .mapping-pill.is-error {
   background: rgba(255, 235, 235, 0.88);
 }

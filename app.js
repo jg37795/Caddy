@@ -11452,15 +11452,37 @@ out geom;`;
   //  Replaces: calculateRange, renderBreakdown
   // ============================================================
 
+  // Sanity bound: a real golf target is never farther than this from the
+  // player. Anything beyond is a stale/fallback point (e.g. a caddy:lastTarget
+  // restored from a previous venue, or a geocoded course centroid when
+  // scorecard mapping failed) — never compute yardage against it.
+  const MAX_SANE_TARGET_YD = 1200;
+
   function calculateRange() {
-    if (!state.loc || !state.target) {
+    const staleTargetYd =
+      state.loc && state.target
+        ? haversineMeters(state.loc, state.target) * M_TO_YD
+        : null;
+    const targetInvalid =
+      !state.loc ||
+      !state.target ||
+      (staleTargetYd != null &&
+        (staleTargetYd <= 0 || staleTargetYd > MAX_SANE_TARGET_YD));
+    if (targetInvalid) {
+      if (state.target) {
+        // Drop the bogus target so it can't leak into GPS ticks or persist.
+        state.target = null;
+        try { localStorage.removeItem('caddy:lastTarget'); } catch { }
+      }
       els.rawYards.textContent = '—';
-      els.rawLabel.textContent = 'Tap a target';
+      els.rawLabel.textContent = 'Map a target';
       if (els.aimChip) els.aimChip.hidden = true;
       if (els.bearingChip) els.bearingChip.hidden = true;
       els.playsLikeYards.textContent = '—';
-      els.clubRecommendation.textContent = 'No target selected';
-      els.clubRecommendationSub.textContent = 'Tap a point on the map for club guidance.';
+      els.playsLikeYards.classList.remove('pl-long', 'pl-short');
+      els.clubRecommendation.textContent = 'No valid target';
+      els.clubRecommendationSub.textContent =
+        'Course map unavailable — tap the green on the map for distances.';
       renderCaddyTips([]);
       updateAdvice([], 'neutral');
       renderFcb();

@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.64'; // + hero capsule removed from map, DEMO wind hides when live wind shows
+const CACHE_VERSION = 'v1.0.65'; // + play-tab overlay audit: dedupe hole info, sane distance fallback, mapping-pill layout, live wind priority
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
