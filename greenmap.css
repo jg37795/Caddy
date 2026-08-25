@@ -1,0 +1,110 @@
+/* ==========================================================================
+   greenmap.css — standalone Arccos-style green slope prototype
+   Not linked from the main app. Full-viewport map + minimal chrome only.
+   ========================================================================== */
+
+:root {
+  --gm-bg: #0e1411;
+  --gm-panel: rgba(16, 22, 19, 0.92);
+  --gm-text: #e8efe9;
+  --gm-dim: #9db3a6;
+  --gm-accent: #ffd166;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--gm-bg);
+  color: var(--gm-text);
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+}
+
+#gm-stage {
+  position: fixed;
+  inset: 0;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+#gm-canvas { display: block; width: 100%; height: 100%; }
+
+.gm-chrome {
+  position: fixed;
+  z-index: 10;
+  background: var(--gm-panel);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+#gm-topbar {
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#gm-title { font-weight: 700; letter-spacing: 0.02em; margin-right: 4px; }
+#gm-status { color: var(--gm-dim); flex: 1; min-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gm-btn {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: transparent;
+  color: var(--gm-text);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.gm-btn:hover { background: rgba(255,255,255,0.07); }
+.gm-btn.active { background: var(--gm-accent); color: #22200e; border-color: var(--gm-accent); font-weight: 600; }
+.gm-select {
+  appearance: none;
+  background: rgba(255,255,255,0.06);
+  color: var(--gm-text);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  max-width: 220px;
+}
+
+#gm-legend {
+  right: 10px;
+  bottom: 12px;
+  width: 190px;
+}
+#gm-legend h4 { margin: 2px 0 6px; font-size: 12px; color: var(--gm-dim); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+#gm-rampbar { height: 10px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.15); }
+#gm-ramplabels { display: flex; justify-content: space-between; font-size: 11px; color: var(--gm-dim); margin-top: 3px; }
+#gm-legend .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11.5px; color: var(--gm-dim); }
+#gm-legend .swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+
+#gm-tip {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  background: rgba(10,14,12,0.94);
+  border: 1px solid rgba(255,209,102,0.4);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 12.5px;
+  display: none;
+  white-space: nowrap;
+}
+#gm-tip b { color: var(--gm-accent); }
+
+@media (max-width: 560px) {
+  #gm-legend { width: 150px; }
+  .gm-select { max-width: 130px; }
+}

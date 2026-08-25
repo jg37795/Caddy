@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<!-- =========================================================================
+  greenmap.html — STANDALONE Arccos-style green slope prototype.
+  NOT linked from the Caddy app UI. No tab bar, no SW precache.
+
+  Usage:
+    greenmap.html                      → default Ankeny test green (41.95,-93.75)
+    greenmap.html?lat=41.95&lng=-93.75 → arbitrary location
+  ========================================================================= -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Green Slope Map — prototype</title>
+<link rel="stylesheet" href="greenmap.css">
+</head>
+<body>
+
+<div id="gm-stage">
+  <canvas id="gm-canvas"></canvas>
+</div>
+
+<div id="gm-topbar" class="gm-chrome">
+  <span id="gm-title">⛳ Green Slope <span style="color:#9db3a6;font-weight:400">prototype</span></span>
+  <select id="gm-preset" class="gm-select" title="Preset greens"></select>
+  <button class="gm-btn gm-layer-btn" data-layer="shading">Shading</button>
+  <button class="gm-btn gm-layer-btn" data-layer="arrows">Arrows</button>
+  <button class="gm-btn gm-layer-btn" data-layer="both">Both</button>
+  <button class="gm-btn" id="gm-ball" title="Then tap the green to drop a ball for the naive putt preview">Ball ⛳</button>
+  <button class="gm-btn" id="gm-clear-ball">Clear ball</button>
+  <button class="gm-btn" id="gm-recenter">⤢ Fit</button>
+  <span id="gm-status">Loading…</span>
+</div>
+
+<div id="gm-legend" class="gm-chrome">
+  <h4>Slope %</h4>
+  <div id="rampbar"></div>
+  <div id="ramplabels"><span>0%</span><span>5%</span><span>10%+</span></div>
+  <div class="row"><span class="swatch" style="background:#b0c2b5"></span>flat — calm colours</div>
+  <div class="row"><span class="swatch" style="background:#d6603e"></span>steep — warm colours</div>
+  <div class="row">↘ arrows point downhill; length ∝ steepness</div>
+  <div class="row">tap = slope readout · drag = pan · pinch/scroll = zoom</div>
+</div>
+
+<div id="gm-tip"></div>
+
+<script src="caddy-elev.js"></script>
+<script src="greenmap.js"></script>
+<script>
+// Paint the legend ramp bar from the actual color function so it never drifts.
+(() => {
+  const el = document.getElementById('rampbar');
+  if (!el || !window.GreenMapCore) return;
+  const stops = [];
+  for (let p = 0; p <= 13; p += 0.25)
+    stops.push(`rgb(${GreenMapCore.slopeColor(p).join(',')}) ${((p / 13) * 100).toFixed(1)}%`);
+  el.style.background = `linear-gradient(to right, ${stops.join(',')})`;
+})();
+</script>
+</body>
+</html>
