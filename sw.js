@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.67'; // + wind controls removed, collapsed one-liner, long-press pin, hole-advance prompt
+const CACHE_VERSION = 'v1.0.68'; // + stats recap card, bag confidence, prep flyover, first-run welcome
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
