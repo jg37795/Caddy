@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.76'; // + gap pills tinted with club-category colors
+const CACHE_VERSION = 'v1.0.77'; // + green maps: USGS 3DEP slope arrows & tee-to-green delta
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
@@ -18,6 +18,8 @@ const APP_SHELL = [
   './bag.js',
   './prep.css',
   './prep.js',
+  './elev.css',
+  './caddy-elev.js',
   './range.css',
   './range.js',
   './leaflet.css',

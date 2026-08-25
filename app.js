@@ -14396,6 +14396,11 @@ out geom;`;
         strokeIndex: hole.strokeIndex || null,
         hazards: planHazardsFor(hole),
         green: planGreenInfo(hole),
+        // Green Maps: raw lat/lng for the elevation service (read-only).
+        teeLatLng: hole.teePoint
+          ? { lat: hole.teePoint.lat, lng: hole.teePoint.lng } : null,
+        greenLatLng: hole.greenCenter
+          ? { lat: hole.greenCenter.lat, lng: hole.greenCenter.lng } : null,
         bearing:
           hole.teePoint && hole.greenCenter
             ? initialBearingDeg(hole.teePoint, hole.greenCenter)

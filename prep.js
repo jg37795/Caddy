@@ -1132,6 +1132,7 @@
     paintControls();
     paintTarget();
     recompute({ pulse: true });
+    loadGreenMap(); // lazy + cancellable; never blocks the flow
   }
 
   function unbindHoleIfGone() {
@@ -1142,6 +1143,7 @@
       paintControls();
       paintTarget();
       renderStrategy();
+      loadGreenMap(); // boundHole null → hides the card + aborts any fetch
     }
   }
 
@@ -1161,6 +1163,122 @@
         attributeFilter: ['hidden'],
       });
     }
+  }
+
+  /* ======================================================================
+     GREEN MAPS — USGS 3DEP slope arrows + tee→green elevation delta.
+     Purely additive: lazy, cancellable, silently absent when coverage or
+     the service is unavailable. Never blocks any existing flow.
+     ====================================================================== */
+  let geAbort = null;
+
+  function ensureGreenMapCard() {
+    let card = $('prepGreenMapCard');
+    if (card) return card;
+    const rec = $('prepRecCard');
+    const host = rec && rec.parentNode ? rec.parentNode : studio;
+    const div = document.createElement('div');
+    div.className = 'card ge-card';
+    div.id = 'prepGreenMapCard';
+    div.hidden = true;
+    div.innerHTML =
+      '<div class="ge-head">' +
+      '<span class="ge-title">Green Map</span>' +
+      '<span class="ge-delta-chip" id="geDeltaChip" hidden></span>' +
+      '</div>' +
+      '<div id="geBody"></div>';
+    host.insertBefore(div, rec);
+    return div;
+  }
+
+  function geArrowSVG(cx, cy, dirDeg, len) {
+    // Arrow pointing downhill (dirDeg compass) from (cx,cy).
+    const rad = ((dirDeg - 90) * Math.PI) / 180;
+    const x2 = cx + Math.cos(rad) * len;
+    const y2 = cy + Math.sin(rad) * len;
+    const wing = 4;
+    const wA = rad + Math.PI - 0.5;
+    const wB = rad + Math.PI + 0.5;
+    return (
+      `<line class="ge-arrow" x1="${cx.toFixed(1)}" y1="${cy.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round"/>` +
+      `<path class="ge-arrow" d="M ${x2.toFixed(1)} ${y2.toFixed(1)} L ${(x2 + Math.cos(wA) * wing).toFixed(1)} ${(y2 + Math.sin(wA) * wing).toFixed(1)} L ${(x2 + Math.cos(wB) * wing).toFixed(1)} ${(y2 + Math.sin(wB) * wing).toFixed(1)} Z" fill="var(--green)"/>`
+    );
+  }
+
+  function renderGreenMap(gm) {
+    const card = ensureGreenMapCard();
+    const body = $('geBody');
+    const chip = $('geDeltaChip');
+
+    const hideAll = () => { card.hidden = true; };
+    if (!gm || (!gm.slope && gm.deltaFt == null)) { hideAll(); return; }
+    card.hidden = false;
+
+    // Delta chip (+12 ft uphill / −8 ft downhill from tee to green).
+    if (gm.deltaFt != null && Math.abs(gm.deltaFt) >= 1) {
+      const up = gm.deltaFt > 0;
+      chip.hidden = false;
+      chip.textContent = `${up ? '+' : '−'}${Math.abs(Math.round(gm.deltaFt))} ft ${up ? 'uphill' : 'downhill'}`;
+      chip.classList.toggle('down', !up);
+    } else {
+      chip.hidden = true;
+    }
+
+    if (!gm.slope || gm.slope.confidence < 0.45) {
+      // Low confidence / slope unavailable → elevation delta only.
+      body.innerHTML =
+        `<div class="ge-slope-line">Green elevation data is approximate here.</div>` +
+        (gm.deltaFt != null ? '' : '');
+      return;
+    }
+
+    const s = gm.slope;
+    const SZ = 132, C = SZ / 2, R = 52;
+    // High side gets a subtle bright wash opposite the fall direction.
+    const highRad = (((s.highSideDirDeg - 90) * Math.PI) / 180);
+    const hx = C + Math.cos(highRad) * R * 0.55;
+    const hy = C + Math.sin(highRad) * R * 0.55;
+    let arrows = '';
+    const nArrows = 4;
+    for (let i = 0; i < nArrows; i++) {
+      const off = -18 + i * 12; // stagger across the green along fall line
+      const ax = C - Math.cos(((s.fallDirDeg - 90) * Math.PI) / 180) * off;
+      const ay = C - Math.sin(((s.fallDirDeg - 90) * Math.PI) / 180) * off;
+      arrows += geArrowSVG(ax, ay, s.fallDirDeg, 9);
+    }
+    body.innerHTML =
+      `<svg class="ge-view" viewBox="0 0 ${SZ} ${SZ}" role="img" aria-label="Green slope map">` +
+      `<defs><radialGradient id="geShade" cx="${(hx / SZ).toFixed(2)}" cy="${(hy / SZ).toFixed(2)}" r="0.85">` +
+      `<stop offset="0%" stop-color="var(--green)" stop-opacity="0.28"/>` +
+      `<stop offset="70%" stop-color="var(--green)" stop-opacity="0.06"/>` +
+      `</radialGradient></defs>` +
+      `<circle cx="${C}" cy="${C}" r="${R}" fill="url(#geShade)" stroke="var(--green-3)" stroke-width="1"/>` +
+      `<circle cx="${C}" cy="${C}" r="2.6" fill="var(--glass-text)" opacity="0.85"/>` +
+      arrows +
+      `</svg>` +
+      `<div class="ge-slope-line">Slope: <b>${s.meanSlopePct.toFixed(1)}%</b> toward <b>${compass16(s.fallDirDeg)}</b></div>` +
+      (gm.approx ? '<div class="ge-note">approximate</div>' : '');
+  }
+
+  function loadGreenMap() {
+    if (geAbort) geAbort.abort();
+    geAbort = null;
+    const card = $('prepGreenMapCard');
+    if (!boundHole || !window.CaddyElev ||
+        !boundHole.greenLatLng || !Number.isFinite(boundHole.greenLatLng.lat)) {
+      if (card) card.hidden = true;
+      return;
+    }
+    geAbort = new AbortController();
+    const myAbort = geAbort;
+    window.CaddyElev.greenMap({
+      teeLL: boundHole.teeLatLng,
+      centerLL: boundHole.greenLatLng,
+      radiusM: 13,
+    }, myAbort.signal).then((gm) => {
+      if (myAbort !== geAbort) return; // superseded
+      renderGreenMap(gm);
+    }).catch(() => { /* silent — feature is best-effort */ });
   }
 
   /* ---------- Boot ---------- */
