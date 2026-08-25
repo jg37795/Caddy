@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.59'; // + Range premium layer merged (all 5 tabs)
+const CACHE_VERSION = 'v1.0.60'; // + fade hero capsule when sheet is raised (no duplicate numbers)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

@@ -176,6 +176,20 @@ body[data-detent='full'] .rx-reticle {
   top: calc(var(--safe-top) + 152px);
 }
 
+/* Sheet raised (half/full): the hero capsule duplicates the sheet's own
+   numbers, so fade it out — the strip (hole · wind) stays useful on the map. */
+.rx-hero {
+  transition: transform 0.42s var(--spring), opacity 0.3s ease,
+    visibility 0s linear 0.3s;
+}
+
+body[data-detent='half'] .rx-hero,
+body[data-detent='full'] .rx-hero {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Fade with the sheet like the other floating pills. */
 body[data-dragging='1'] .rx-stack {
   transition: none !important;
