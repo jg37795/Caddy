@@ -354,6 +354,7 @@
     const dpr = window.devicePixelRatio || 1;
     canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
     state.view.scale = Math.min(canvas.width, canvas.height) / (SPAN_M * 1.25);
+    state.baseScale = state.view.scale;   // zoom clamp reference resets on fit
     state.view.ox = canvas.width / 2;
     state.view.oy = canvas.height / 2;
   }
@@ -616,6 +617,7 @@
   canvas.addEventListener('touchmove', (ev) => {
     if (ev.touches.length === 2) {
       ev.preventDefault();
+      dragging = false; lastPt = null;   // pinch supersedes drag
       const d = Math.hypot(ev.touches[0].clientX - ev.touches[1].clientX,
                            ev.touches[0].clientY - ev.touches[1].clientY);
       if (pinchDist) {
@@ -629,7 +631,8 @@
   canvas.addEventListener('touchend', () => { pinchDist = 0; });
 
   function zoomAt(px, py, k) {
-    const ns = Math.max(state.view.scale * 0.3, Math.min(state.view.scale * 8,
+    const base = state.baseScale || (state.baseScale = state.view.scale);
+    const ns = Math.max(base * 0.3, Math.min(base * 8,
                    state.view.scale * k));
     const applied = ns / state.view.scale;
     state.view.ox = px + (state.view.ox - px) * applied;
