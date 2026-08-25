@@ -779,3 +779,94 @@
     transition: none !important;
   }
 }
+
+/* ---------- post-round summary recap card ---------- */
+
+.sd-recap-title { margin-top: 6px; }
+
+.sd-recap {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--green) 32%, var(--line));
+}
+
+.sd-recap::before {
+  content: '';
+  position: absolute;
+  inset: -60% -20% auto;
+  height: 130%;
+  background: radial-gradient(
+    ellipse at 18% 0%,
+    rgba(47, 213, 116, 0.14),
+    transparent 62%
+  );
+  pointer-events: none;
+}
+
+.sd-recap-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  margin: 0 -2px;
+  padding: 2px;
+}
+
+.sd-recap-row::-webkit-scrollbar { display: none; }
+
+.sd-recap-chip {
+  flex: 1 1 0;
+  min-width: 78px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--card-solid);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) * 0.7);
+  padding: 10px 11px;
+}
+
+.sd-recap-l {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.sd-recap-v {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sd-recap-s {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-2, var(--muted));
+  white-space: nowrap;
+}
+
+.sd-recap-trend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+}
+
+.sd-recap-trend svg { flex: 0 0 auto; }
+
+.sd-recap-trend.good { color: var(--sd-good); }
+.sd-recap-trend.bad { color: var(--sd-bad); }
+.sd-recap-trend.flat svg { opacity: 0.55; }

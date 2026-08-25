@@ -865,6 +865,157 @@
 
   const expandedRounds = new Set();
 
+  /* ============================================================ *
+   *  Post-round summary recap card                               *
+   * ============================================================ */
+
+  /**
+   * Longest GPS-measured drive for the most recent round: shot-log
+   * entries ({d: totalYd, ..., t: ms}) timestamped within ±36 h of
+   * the round's save date. Returns null otherwise so we never
+   * attribute an old range session to this round.
+   */
+  function longestDriveFor(roundDateMs) {
+    if (!Number.isFinite(roundDateMs)) return null;
+    const log = lsGet(K.SHOT_LOG, {});
+    if (!log || typeof log !== 'object') return null;
+    const lo = roundDateMs - 36 * 3600 * 1000;
+    const hi = roundDateMs + 36 * 3600 * 1000;
+    let best = null;
+    Object.keys(log).forEach((cid) => {
+      const shots = Array.isArray(log[cid]) ? log[cid] : [];
+      shots.forEach((e) => {
+        const d = e && typeof e === 'object' ? num(e.d, NaN) : num(e, NaN);
+        const t = e && typeof e === 'object' ? num(e.t, NaN) : NaN;
+        if (!Number.isFinite(d) || d <= 0 || d > 500) return; // sanity cap
+        if (!Number.isFinite(t) || t < lo || t > hi) return;
+        if (!best || d > best.d) best = { d, t };
+      });
+    });
+    return best ? Math.round(best.d) : null;
+  }
+
+  /** Best hole (lowest relative-to-par score) from the captured scorecard. */
+  function bestHoleFor(r) {
+    if (!r || !Array.isArray(r.holes)) return null;
+    let best = null;
+    r.holes.forEach((h, i) => {
+      if (!h || h.score == null) return;
+      const par = r.pars && Number.isFinite(r.pars[i]) ? r.pars[i] : null;
+      if (par == null) return; // can't rank holes without pars
+      const diff = h.score - par;
+      if (!best || diff < best.diff) best = { hole: h.hole || i + 1, diff };
+    });
+    return best;
+  }
+
+  /**
+   * One-line trend sentence for the latest round vs recent form.
+   * Returns { text, tone } or null.
+   */
+  function trendFor(last, priorRounds) {
+    if (last.vsPar == null) {
+      // No par data — compare gross scores instead.
+      if (priorRounds.length >= 2) {
+        const avg = priorRounds.reduce((a, r) => a + r.score, 0) / priorRounds.length;
+        const d = last.score - avg;
+        const isBest = last.score <= Math.min(...priorRounds.map((r) => r.score));
+        if (isBest) {
+          return { text: `Best round in your last ${priorRounds.length + 1}`, tone: 'good' };
+        }
+        if (Math.abs(d) >= 1) {
+          return { text: `${signed(d)} vs your recent ${fmt(avg, 1)} avg`, tone: d < 0 ? 'good' : 'bad' };
+        }
+        return { text: 'Right on your recent average', tone: 'flat' };
+      }
+      return { text: 'First saved round — trends start here', tone: 'flat' };
+    }
+    const vpPrior = priorRounds.filter((r) => r.vsPar != null);
+    if (!vpPrior.length) {
+      return { text: 'First scored round — trends start here', tone: 'flat' };
+    }
+    const isBest = last.vsPar <= Math.min(...vpPrior.map((r) => r.vsPar));
+    if (isBest) {
+      return { text: `Best round in your last ${vpPrior.length + 1}`, tone: 'good' };
+    }
+    const avg = vpPrior.reduce((a, r) => a + r.vsPar, 0) / vpPrior.length;
+    const d = last.vsPar - avg;
+    if (Math.abs(d) < 0.5) {
+      return { text: `${signed(avg, 1)} avg over your last ${vpPrior.length + 1} rounds`, tone: 'flat' };
+    }
+    return {
+      text: `${signed(d, 1)} vs your ${signed(avg, 1)} recent average`,
+      tone: d < 0 ? 'good' : 'bad',
+    };
+  }
+
+  function computeRecap(rounds) {
+    if (!rounds.length) return null;
+
+    // Hide during a live round: any hole with a score on the app's
+    // active scorecard means the player is mid-round right now.
+    try {
+      const live = lsGet(K.ROUND, []);
+      if (Array.isArray(live) && live.some((h) => h && String(h.score ?? '').trim() !== '')) {
+        return null;
+      }
+    } catch { /* fall through */ }
+
+    const last = rounds[rounds.length - 1];
+    const prior = rounds.slice(0, -1);
+    const bestHole = bestHoleFor(last);
+    const drive = longestDriveFor(last.date);
+    const trend = trendFor(last, prior);
+
+    const chips = [];
+    chips.push({
+      label: 'Score',
+      value: last.vsPar != null ? signed(last.vsPar) : String(last.score),
+      sub: last.vsPar != null ? `${last.score} gross` : `${last.played} holes`,
+    });
+    if (bestHole) {
+      chips.push({
+        label: 'Best hole',
+        value: signed(bestHole.diff),
+        sub: `No. ${bestHole.hole}`,
+      });
+    }
+    if (drive != null) {
+      chips.push({ label: 'Longest drive', value: `${drive}`, sub: 'yd · GPS' });
+    }
+    if (Number.isFinite(last.putts)) {
+      chips.push({
+        label: 'Putts',
+        value: String(last.putts),
+        sub: last.puttRows ? `${fmt(last.putts / last.puttRows, 2)}/hole` : '',
+      });
+    }
+
+    return { date: last.date, played: last.played, chips, trend };
+  }
+
+  function renderRecap(recap) {
+    if (!recap) return '';
+    const chipHtml = recap.chips.map((c) =>
+      `<div class="sd-recap-chip">` +
+      `<span class="sd-recap-l">${esc(c.label)}</span>` +
+      `<span class="sd-recap-v">${esc(c.value)}</span>` +
+      (c.sub ? `<span class="sd-recap-s">${esc(c.sub)}</span>` : '') +
+      `</div>`).join('');
+    const trendHtml = recap.trend
+      ? `<div class="sd-recap-trend ${esc(recap.trend.tone)}">` +
+        `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>` +
+        esc(recap.trend.text) + `</div>`
+      : '';
+    return (
+      `<div class="sd-section-title sd-recap-title"><h2>Last round</h2>` +
+      `<span class="sd-sub">${esc(fmtDate(recap.date))}` +
+      `${recap.played < 18 ? ` · ${recap.played} holes` : ''}</span></div>` +
+      `<div class="sd-card sd-recap">` +
+      `<div class="sd-recap-row">${chipHtml}</div>${trendHtml}</div>`
+    );
+  }
+
   function renderDashboard() {
     const host = $id('statsDashboard');
     if (!host) return;
@@ -883,6 +1034,7 @@
     const facets = buildFacets(agg);
 
     host.innerHTML = `<div class="sd sd-anim">` +
+      renderRecap(computeRecap(all)) +
       renderChips({ filter }) +
       `<div class="sd-section-title"><h2>Trends</h2>` +
       `<span class="sd-sub">last ${view.length} round${view.length === 1 ? '' : 's'}</span></div>` +
