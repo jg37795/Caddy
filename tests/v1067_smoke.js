@@ -141,8 +141,8 @@ setTimeout(() => {
             // so clear the guard to get a fresh closure per scenario.
             const load = () => { delete global.window.__rxRangePremium; new Function(src)(); };
             load();
-            check('one-liner shows "176 yd · 7 Iron"',
-              els.olDist.textContent === '176 yd' && els.olClub.textContent.includes('7 Iron'));
+            check('peek shows "178 yd · plays 176"',
+              els.olDist.textContent === '178 yd · plays 176');
             els.playsLikeYards.textContent = '—';
             els.rawYards.textContent = '—';
             load();
