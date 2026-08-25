@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.70'; // + overpass mirror retry ladder, premium mapping loader (mapload)
+const CACHE_VERSION = 'v1.0.71'; // + collapsed peek simplified to actual yds · plays like (user pref)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
