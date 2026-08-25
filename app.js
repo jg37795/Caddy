@@ -4294,11 +4294,45 @@
     if (!optsOpen) els.roundScoreScrim?.classList.remove('open');
   }
 
+  // QA-003: case-insensitive duplicate guard shared by the partner sheet
+  // and the group editor. Checks the places a partner can currently live:
+  // the round-options group, a live session's groupPlayers, and the saved
+  // roster (used when no round is open). `exceptId` lets a rename keep
+  // its own name.
+  function partnerNameTaken(name, exceptId) {
+    const needle = String(name || '').trim().toLowerCase();
+    if (!needle) return false;
+    const pools = [
+      state.optionsGroupPlayers || [],
+      (state.roundSession && Array.isArray(state.roundSession.groupPlayers)
+        ? state.roundSession.groupPlayers
+        : []) || [],
+      state.roundSession ? [] : loadGroupRoster(),
+    ];
+    return pools.some((pool) =>
+      (Array.isArray(pool) ? pool : []).some(
+        (p) =>
+          p &&
+          p.id !== exceptId &&
+          String(p.name || '').trim().toLowerCase() === needle
+      )
+    );
+  }
+
   function commitPartnerSheet() {
     const input = document.getElementById('partnerNameInput');
     const name = (input?.value || '').trim().slice(0, 24);
     if (!name) {
       closePartnerSheet();
+      return;
+    }
+    // QA-003: reject duplicates instead of silently creating two partners
+    // with the same name (the suggestion list already filtered them — the
+    // manual path must agree with it).
+    if (partnerNameTaken(name, state.partnerSheetEditId)) {
+      setNotice(`"${name}" is already in the group.`, 'danger');
+      haptic(12);
+      input.focus();
       return;
     }
 
@@ -12425,6 +12459,14 @@ out geom;`;
         const input = row.querySelector('input');
         input.addEventListener('change', () => {
           const name = input.value.trim() || 'Player';
+          // QA-003: renames must not collide with another partner either.
+          if (partnerNameTaken(name, id)) {
+            setNotice(`"${name}" is already in the group.`, 'danger');
+            haptic(12);
+            input.value =
+              groupPartners().find((x) => x.id === id)?.name || name;
+            return;
+          }
           const rs = state.roundSession;
           const inSession =
             rs && Array.isArray(rs.groupPlayers)
