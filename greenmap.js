@@ -751,7 +751,9 @@
       setStatus('');
       render();
     });
-    document.getElementById('gm-recenter').addEventListener('click', fitView);
+    document.getElementById('gm-recenter').addEventListener('click', () => {
+      fitView(); render(); setStatus('View reset');
+    });
   }
 
   window.addEventListener('resize', () => { fitView(); render(); });
