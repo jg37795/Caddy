@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.57'; // + premium Bag tab merged
+const CACHE_VERSION = 'v1.0.58'; // + Prep Studio merged
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
@@ -16,6 +16,8 @@ const APP_SHELL = [
   './stats.js',
   './bag.css',
   './bag.js',
+  './prep.css',
+  './prep.js',
   './leaflet.css',
   './leaflet.js',
 ];

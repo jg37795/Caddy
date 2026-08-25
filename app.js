@@ -13503,5 +13503,44 @@ out geom;`;
     });
   }
 
+  // ============================================================
+  //  BLOCK 18 — PREP ADD-ON BRIDGE (read-only API for prep.js)
+  //  The premium Prep studio lives in prep.js and reuses THIS closure's
+  //  physics + planner data so every number matches the rest of the app.
+  //  Strictly additive: nothing here mutates app state, and deleting this
+  //  block restores the exact pre-bridge behavior.
+  // ============================================================
+  window.CaddyPrep = {
+    v: 1,
+    playsLike,
+    recommendClub,
+    clubsDesc: () => sortedClubsDesc(),
+    weather: () => getWeatherOrNeutral(),
+    elevation: () => getElevationOrNeutral(),
+    locLat: () =>
+      state.loc && Number.isFinite(state.loc.lat) ? state.loc.lat : STD_LAT,
+    holeInfo(number) {
+      const course = getPlannerCourse();
+      if (!course) return null;
+      const hole = (course.holes || [])[number - 1];
+      if (!hole) return null;
+      const yd = planHoleYardage(hole);
+      return {
+        number,
+        courseName: course.name || 'Course',
+        par: hole.par || inferParFromYards(yd),
+        yards: yd,
+        strokeIndex: hole.strokeIndex || null,
+        hazards: planHazardsFor(hole),
+        green: planGreenInfo(hole),
+        bearing:
+          hole.teePoint && hole.greenCenter
+            ? initialBearingDeg(hole.teePoint, hole.greenCenter)
+            : null,
+      };
+    },
+    haptic,
+  };
+
   bootstrap();
 })();
