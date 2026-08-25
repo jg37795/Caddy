@@ -4229,10 +4229,20 @@
       const id = row.dataset.id;
       const input = row.querySelector('input');
       input.addEventListener('change', () => {
+        // QA-003: same duplicate rule as the partner sheet.
+        const name = input.value.trim() || 'Player';
+        if (partnerNameTaken(name, id)) {
+          setNotice(`"${name}" is already in the group.`, 'danger');
+          haptic(12);
+          input.value =
+            (state.optionsGroupPlayers || []).find((x) => x.id === id)?.name ||
+            name;
+          return;
+        }
         const p = (state.optionsGroupPlayers || []).find(
           (x) => x.id === id
         );
-        if (p) p.name = input.value.trim() || 'Player';
+        if (p) p.name = name;
       });
       row.querySelector('.group-editor-remove').addEventListener(
         'click',
