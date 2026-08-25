@@ -2942,46 +2942,147 @@
     setCourseMapping('idle', { name: '', retry: null });
   }
 
+  /* ===== Premium mapping loader (v1.0.70) ============================
+     Animated glass card with a flag-on-pole scan motif and staged copy,
+     shared by scorecard mapping (map pill) AND the nearby-course list
+     while a scorecard loads. Styles live in mapload.css; honors
+     prefers-reduced-motion. ================================================== */
+
+  const MAPLOAD_PHASES = [
+    { title: 'Finding course…', sub: 'Matching your selection…' },
+    { title: 'Contacting map data…', sub: 'Querying OpenStreetMap mirrors…' },
+    { title: 'Drawing greens…', sub: 'Tracing holes, greens & water…' },
+  ];
+  const MAPLOAD_PHASE_MS = 1700;
+
+  function maploadCardHtml(phaseIdx, variant = '') {
+    const p = MAPLOAD_PHASES[Math.max(0, Math.min(phaseIdx, MAPLOAD_PHASES.length - 1))];
+    return `
+      <div class="mapload-card ${variant}">
+        <svg class="mapload-flag" viewBox="0 0 48 48" aria-hidden="true">
+          <line class="mapload-pole" x1="14" y1="6" x2="14" y2="42"></line>
+          <path class="mapload-banner" d="M14 8 L34 13 L14 18 Z"></path>
+          <ellipse class="mapload-scan" cx="24" cy="42" rx="5" ry="1.8"></ellipse>
+        </svg>
+        <div class="mapload-copy">
+          <span class="mapload-title">${escapeHtml(p.title)}</span>
+          <span class="mapload-sub">${escapeHtml(p.sub)}</span>
+        </div>
+        <div class="mapload-bar"><i></i></div>
+      </div>`;
+  }
+
+  // Per-mount phase timers so the map pill and the nearby list can animate
+  // independently without clobbering each other.
+  const _maploadTimers = {};
+  let _maploadFadeTimer = null;
+
+  function maploadStopPhases(key) {
+    if (_maploadTimers[key]) {
+      clearTimeout(_maploadTimers[key]);
+      delete _maploadTimers[key];
+    }
+  }
+
+  function maploadStartPhases(key, onPhase, root) {
+    maploadStopPhases(key);
+    onPhase(0);
+    let idx = 0;
+    const tick = () => {
+      idx = Math.min(idx + 1, MAPLOAD_PHASES.length - 1);
+      onPhase(idx);
+      if (idx < MAPLOAD_PHASES.length - 1) {
+        _maploadTimers[key] = setTimeout(tick, MAPLOAD_PHASE_MS);
+      }
+    };
+    if (MAPLOAD_PHASES.length > 1) {
+      _maploadTimers[key] = setTimeout(tick, MAPLOAD_PHASE_MS);
+    }
+  }
+
   function renderCourseMappingPill(successHint = null) {
     const pill = els.courseMappingPill;
     if (!pill) return;
     const kind = state.courseMappingState;
+    maploadStopPhases('pill');
+    clearTimeout(_maploadFadeTimer);
 
     if (kind === 'idle') {
       pill.hidden = true;
+      pill.innerHTML = '';
       return;
     }
 
     pill.hidden = false;
-    pill.classList.toggle('is-error', kind === 'failed');
 
-    if (els.courseMappingSpinner) {
-      els.courseMappingSpinner.style.display = kind === 'failed' ? 'none' : '';
-    }
-    if (els.courseMappingRetryBtn) {
-      els.courseMappingRetryBtn.hidden = kind !== 'failed';
-    }
-
-    const name = state.courseMappingName || 'course';
     if (kind === 'mapping') {
-      if (els.courseMappingText) els.courseMappingText.textContent = `Mapping ${name}…`;
-      if (els.courseMappingSub) {
-        els.courseMappingSub.textContent =
-          'Fetching greens & holes from OpenStreetMap…';
-      }
+      pill.classList.remove('is-error', 'mapload-done');
+      pill.innerHTML = maploadCardHtml(0, 'mapload-loading');
+      maploadStartPhases('pill', (idx) => {
+        const card = pill.querySelector('.mapload-card');
+        if (!card) return;
+        const p = MAPLOAD_PHASES[idx];
+        const t = card.querySelector('.mapload-title');
+        const s = card.querySelector('.mapload-sub');
+        if (t) t.textContent = p.title;
+        if (s) s.textContent = p.sub;
+      }, pill);
     } else if (kind === 'failed') {
-      if (els.courseMappingText) {
-        els.courseMappingText.textContent = `Couldn't map ${name}`;
+      pill.classList.add('is-error');
+      const name = escapeHtml(state.courseMappingName || 'course');
+      pill.innerHTML = `
+        <div class="mapload-card mapload-error">
+          <div class="mapload-copy">
+            <span class="mapload-title">Couldn't map ${name}</span>
+            <span class="mapload-sub">Map data didn't respond — round start is blocked.</span>
+          </div>
+          <button class="mapload-retry" type="button">Retry</button>
+        </div>`;
+      const btn = pill.querySelector('.mapload-retry');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          if (typeof state.courseMappingRetry === 'function') {
+            haptic(8);
+            state.courseMappingRetry();
+          }
+        });
       }
-      if (els.courseMappingSub) {
-        els.courseMappingSub.textContent =
-          'Scorecard lookup failed — round start is blocked.';
-      }
-    } else if (kind === 'success' && successHint) {
-      // Transient success flash handled by caller via fade-out.
-      if (els.courseMappingText) els.courseMappingText.textContent = name;
-      if (els.courseMappingSub) els.courseMappingSub.textContent = successHint;
+    } else if (kind === 'success') {
+      pill.classList.remove('is-error');
+      pill.classList.add('mapload-done');
+      const hint = String(successHint || 'mapped').replace(/\s*✓\s*$/, '');
+      pill.innerHTML = `
+        <div class="mapload-card mapload-success">
+          <div class="mapload-copy">
+            <span class="mapload-title">✓ ${escapeHtml(hint)}</span>
+          </div>
+        </div>`;
+      _maploadFadeTimer = setTimeout(() => {
+        const card = pill.querySelector('.mapload-card');
+        if (card) card.classList.add('mapload-fadeout');
+      }, 1000);
     }
+  }
+
+  // Embed the same loader in the nearby-course status line while a picked
+  // course's scorecard is downloading (shared phases, separate timer key).
+  function renderNearbyScorecardLoader(statusEl) {
+    if (!statusEl || !state.nearbyCourseLoadingScorecard) {
+      maploadStopPhases('nearby');
+      return false;
+    }
+    if (statusEl.querySelector('.mapload-card')) return true;
+    statusEl.innerHTML = maploadCardHtml(0, 'mapload-loading mapload-inline');
+    maploadStartPhases('nearby', (idx) => {
+      const card = statusEl.querySelector('.mapload-card');
+      if (!card) return;
+      const p = MAPLOAD_PHASES[idx];
+      const t = card.querySelector('.mapload-title');
+      const s = card.querySelector('.mapload-sub');
+      if (t) t.textContent = p.title;
+      if (s) s.textContent = p.sub;
+    }, statusEl);
+    return true;
   }
 
   let _mappingFadeTimer = null;
@@ -5149,11 +5250,17 @@
     }
 
     if (state.nearbyCourseLoadingScorecard) {
-      els.nearbyCourseStatus.textContent =
-        'Course selected — loading mapped scorecard data…';
-    } else if (!state.selectedNearbyCourse) {
-      els.nearbyCourseStatus.textContent =
-        `${courses.length} nearby course${courses.length === 1 ? '' : 's'} found.`;
+      // v1.0.70 premium loader card (shared with the map pill).
+      if (!renderNearbyScorecardLoader(els.nearbyCourseStatus)) {
+        els.nearbyCourseStatus.textContent =
+          'Course selected — loading mapped scorecard data…';
+      }
+    } else {
+      maploadStopPhases('nearby');
+      if (!state.selectedNearbyCourse) {
+        els.nearbyCourseStatus.textContent =
+          `${courses.length} nearby course${courses.length === 1 ? '' : 's'} found.`;
+      }
     }
     // fall through to render the list either way
 
@@ -12183,9 +12290,13 @@ out geom;`;
       results.some((c) => c.id === sel.id) &&
       state.nearbyCourseLoadingScorecard
     ) {
-      els.nearbyCourseStatus.textContent =
-        'Course selected — loading mapped scorecard data…';
+      // v1.0.70 premium loader card (shared with the map pill).
+      if (!renderNearbyScorecardLoader(els.nearbyCourseStatus)) {
+        els.nearbyCourseStatus.textContent =
+          'Course selected — loading mapped scorecard data…';
+      }
     } else {
+      maploadStopPhases('nearby');
       els.nearbyCourseStatus.textContent = `${results.length} match${results.length === 1 ? '' : 'es'
         } — tap one to load its scorecard.`;
     }
@@ -13492,6 +13603,9 @@ out geom;`;
   const OSM_CACHE_PREFIX = 'osm:v2:';                  // v2 == invalidates the old buggy data
   const OSM_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
   const OSM_CACHE_MAX_ENTRIES = 20;
+  // v1.0.70: after the hedged mirror round comes back empty or fully failed,
+  // wait this long and re-query the primary once before concluding 'not found'.
+  const OVERPASS_RETRY_BACKOFF_MS = 1500;
 
   function osmSleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
@@ -13573,6 +13687,47 @@ out geom;`;
       .finally(() => clearTimeout(timer));
   }
 
+  /**
+   * v1.0.70 retry ladder: mirrors sometimes answer with a transiently EMPTY
+   * result (or fail outright) while an immediate retry succeeds. Run the
+   * hedged mirror round once; if it yields nothing, back off briefly and
+   * re-query the primary before letting the caller conclude 'not found'.
+   * - attemptAll()  -> Promise<elements[]> (hedged mirrors; may resolve empty)
+   * - queryPrimary()-> Promise<elements[]> (single primary re-query)
+   * Resolves empty ONLY when every attempt agreed there is nothing there.
+   */
+  async function overpassRetryLadder({
+    attemptAll,
+    queryPrimary,
+    backoffMs = OVERPASS_RETRY_BACKOFF_MS,
+    sleep = osmSleep,
+  }) {
+    let firstError = null;
+    try {
+      const els = await attemptAll();
+      if (els.length) return els;
+    } catch (err) {
+      firstError = err;
+    }
+    console.warn(
+      'Overpass: ' +
+        (firstError
+          ? `all mirrors failed (${firstError.message})`
+          : 'all mirrors returned an empty result') +
+        ` — retrying primary once after ${backoffMs}ms`
+    );
+    await sleep(backoffMs);
+    try {
+      const els = await queryPrimary();
+      if (els.length) {
+        els.meta = Object.assign({}, els.meta || {}, { retried: true });
+      }
+      return els; // authoritative empty is a valid "not found"
+    } catch (retryError) {
+      throw firstError || retryError;
+    }
+  }
+
   async function overpassFetch(query, opts = {}) {
     const {
       timeoutMs = 45000,
@@ -13590,7 +13745,10 @@ out geom;`;
 
     const encodedQuery = encodeURIComponent(query.trim());
 
-    return new Promise((resolve, reject) => {
+    // Hedged mirror round (unchanged behavior), wrapped so the retry
+    // ladder can re-query the primary if the round comes back empty.
+    const attemptMirrors = () =>
+      new Promise((resolve, reject) => {
       const total = OVERPASS_ENDPOINTS.length;
       let nextIndex = 0;
       let failures = 0;
@@ -13645,6 +13803,28 @@ out geom;`;
       };
 
       launchNext();
+      });
+
+    const queryPrimary = async () => {
+      const endpoint = OVERPASS_ENDPOINTS[0];
+      const json = await overpassOnce(endpoint, encodedQuery, timeoutMs);
+      const elements = Array.isArray(json.elements) ? json.elements : [];
+      elements.meta = {
+        endpoint,
+        cached: false,
+        remark: json.remark || null,
+        retried: true,
+      };
+      if (cacheKey && elements.length) {
+        osmCacheSet(cacheKey, elements, cacheTtlMs);
+      }
+      return elements;
+    };
+
+    return overpassRetryLadder({
+      attemptAll: attemptMirrors,
+      queryPrimary,
+      backoffMs: OVERPASS_RETRY_BACKOFF_MS,
     });
   }
 

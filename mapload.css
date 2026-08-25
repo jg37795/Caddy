@@ -1,0 +1,201 @@
+/* ============================================================
+   v1.0.70 — Premium mapping loader (map pill + nearby scorecard)
+   Animated glass card: flag-on-pole scan motif, staged copy,
+   indeterminate shimmer bar, success morph, error retry state.
+   Markup is injected by app.js (maploadCardHtml).
+   ============================================================ */
+
+.mapload-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  width: 100%;
+  padding: 12px 14px 16px;
+  border-radius: 14px;
+  background: rgba(18, 24, 20, 0.72);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #f2f5f0;
+  overflow: hidden;
+  animation: mapload-in 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes mapload-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+/* --- Flag-on-pole scan motif --- */
+.mapload-flag {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  overflow: visible;
+}
+
+.mapload-pole {
+  stroke: rgba(242, 245, 240, 0.85);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.mapload-banner {
+  fill: #7fd08a;
+  transform-origin: 14px 13px;
+  animation: mapload-wave 1.6s ease-in-out infinite;
+}
+
+@keyframes mapload-wave {
+  0%, 100% { transform: scaleX(1); opacity: 0.95; }
+  50% { transform: scaleX(0.82); opacity: 0.75; }
+}
+
+.mapload-scan {
+  fill: none;
+  stroke: #7fd08a;
+  stroke-width: 1.6;
+  opacity: 0;
+  animation: mapload-scan-pulse 2s ease-out infinite;
+}
+
+@keyframes mapload-scan-pulse {
+  0% { opacity: 0.9; transform: scale(0.3); }
+  70% { opacity: 0; transform: scale(2.4); }
+  100% { opacity: 0; transform: scale(2.4); }
+}
+
+/* --- Copy --- */
+.mapload-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mapload-title {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mapload-sub {
+  font-size: 12px;
+  color: rgba(242, 245, 240, 0.62);
+  transition: opacity 200ms ease;
+}
+
+/* Crossfade copy on phase change (title swap is instant from JS). */
+.mapload-loading .mapload-sub { animation: mapload-sub-in 360ms ease; }
+
+@keyframes mapload-sub-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* --- Thin indeterminate shimmer progress bar --- */
+.mapload-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mapload-bar i {
+  display: block;
+  height: 100%;
+  width: 34%;
+  border-radius: 3px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    #7fd08a 45%,
+    #b7e8bd 55%,
+    transparent
+  );
+  animation: mapload-shimmer 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes mapload-shimmer {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(400%); }
+}
+
+/* --- Success morph --- */
+.mapload-success {
+  border-color: rgba(127, 208, 138, 0.45);
+  padding-bottom: 12px;
+}
+
+.mapload-success .mapload-title {
+  color: #a9ecb2;
+  animation: mapload-pop 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes mapload-pop {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.mapload-fadeout {
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 420ms ease, transform 420ms ease;
+}
+
+/* --- Error state: red-tinted card with Retry --- */
+.mapload-error {
+  border-color: rgba(255, 120, 113, 0.45);
+  background: rgba(46, 20, 20, 0.78);
+}
+
+.is-error .mapload-bar i {
+  background: linear-gradient(90deg, transparent, #ff7871 45%, #ffb0ab 55%, transparent);
+}
+
+.mapload-retry {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 120, 113, 0.55);
+  background: rgba(255, 120, 113, 0.14);
+  color: #ffc9c5;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 160ms ease, transform 120ms ease;
+}
+
+.mapload-retry:active { transform: scale(0.96); }
+.mapload-retry:hover { background: rgba(255, 120, 113, 0.26); }
+
+/* --- Inline variant (nearby course status line) --- */
+.mapload-inline {
+  max-width: 420px;
+  margin: 6px 0;
+  padding: 10px 12px 14px;
+}
+
+.mapload-inline .mapload-flag { width: 30px; height: 30px; }
+.mapload-inline .mapload-title { font-size: 13px; }
+
+/* --- Reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+  .mapload-card { animation: none; }
+  .mapload-banner { animation: none; }
+  .mapload-scan { animation: none; opacity: 0.5; }
+  .mapload-bar i { animation: none; width: 60%; opacity: 0.7; }
+  .mapload-success .mapload-title,
+  .mapload-loading .mapload-sub { animation: none; }
+  .mapload-fadeout { transition: opacity 420ms ease; transform: none; }
+}

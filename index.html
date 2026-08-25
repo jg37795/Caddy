@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="./bag.css" />
   <link rel="stylesheet" href="./prep.css" />
   <link rel="stylesheet" href="./range.css" />
+  <link rel="stylesheet" href="./mapload.css" />
 </head>
 
 <body>
@@ -353,14 +354,8 @@
           </div>
 
           <!-- ══ Range premium layer (range.css / range.js) — additive HUD.
-               Decorative reticle + mirrored hero readout + quick actions.
+               Mirrored readouts live in the sheet's collapsed peek row.
                All logic lives in range.js; it only mirrors app.js state. ══ -->
-          <div class="rx-reticle" id="rxReticle" aria-hidden="true">
-            <span class="rx-reticle-ring"></span>
-            <span class="rx-reticle-dot"></span>
-            <span class="rx-reticle-ping"></span>
-          </div>
-
           <div class="rx-stack" id="rxStack">
             <div class="rx-strip glass" id="rxStrip">
               <span class="rx-strip-hole" id="rxStripHole" hidden></span>
@@ -399,11 +394,13 @@
             <div class="sheet-drag" id="sheetDrag" role="button" tabindex="0" aria-expanded="false"
               aria-label="Expand yardage panel">
               <div class="sheet-handle"></div>
-              <!-- Collapsed one-liner (v1.0.67): at the collapsed detent the
-                   visible band is handle + one compact line. Fades out as
-                   --fcb-reveal rises; full numbers live in .sheet-peek. -->
-              <div class="sheet-oneliner" id="sheetOneLiner" aria-hidden="true">
-                <span class="ol-dist" id="olDist"></span><span class="ol-club" id="olClub"></span>
+              <!-- Collapsed peek row (v1.0.69): a slim, always-on summary
+                   band under the handle — "143 yd · plays 138" plus green
+                   F/M/B and target-direction/aim status. In flow (no dead
+                   space above); the full cards appear at half+. -->
+              <div class="sheet-oneliner" id="sheetOneLiner">
+                <div class="ol-main"><span class="ol-dist" id="olDist">Tap map to set target</span><span class="ol-club" id="olClub"></span></div>
+                <div class="ol-sub" id="olSub"></div>
               </div>
               <div class="sheet-peek">
                 <div class="sheet-yards">
@@ -1274,6 +1271,29 @@
     <button class="ghost-btn" id="quickStartDetailsBtn" type="button"
       style="width: 100%; margin-top: 8px; font-size: 13px">
       Change tees, start hole, or group…
+    </button>
+  </section>
+
+  <!-- End-round confirm (v1.0.69): 'End round' never fires directly —
+       every entry point passes through this glass action sheet. -->
+  <section class="round-score-sheet glass mini-sheet" id="endRoundSheet" role="alertdialog" aria-modal="true"
+    aria-label="End round" aria-hidden="true">
+    <div class="sheet-handle" style="margin: 6px auto 12px"></div>
+
+    <div class="round-score-head">
+      <div>
+        <h2>End round?</h2>
+        <p id="endRoundSub">Your scorecard for this round will be saved.</p>
+      </div>
+    </div>
+
+    <button class="danger-btn" id="endRoundConfirmBtn" type="button" style="width: 100%">
+      End round
+    </button>
+
+    <button class="ghost-btn" id="endRoundCancelBtn" type="button"
+      style="width: 100%; margin-top: 8px; font-size: 13px">
+      Cancel
     </button>
   </section>
 
