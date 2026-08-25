@@ -199,11 +199,6 @@
     roundMiniPlusBtn: $('roundMiniPlusBtn'),
     roundShotReadout: $('roundShotReadout'),
     roundActionBtn: $('roundActionBtn'),
-    courseMappingPill: $('courseMappingPill'),
-    courseMappingSpinner: $('courseMappingSpinner'),
-    courseMappingText: $('courseMappingText'),
-    courseMappingSub: $('courseMappingSub'),
-    courseMappingRetryBtn: $('courseMappingRetry'),
     appToast: $('appToast'),
     roundSubActions: $('roundSubActions'),
     roundDiscardBtn: $('roundDiscardBtn'),
@@ -1156,9 +1151,9 @@
       initMap();
       closeWindPop();
       renderPendingShot();
-      // Keep the mapping pill honest after returning to the Play map
-      // (mapping/failed state intentionally persists across tab switches).
-      renderCourseMappingPill();
+      // NOTE (v1.0.73): no mapping pill on the Play map. Round-setup /
+      // mapping status UI is scoped strictly to the Round tab sheet; the
+      // map shows '—' distances until data arrives.
       setTimeout(() => {
         if (state.map) {
           state.map.invalidateSize();
@@ -2933,7 +2928,6 @@
     state.courseMappingState = kind;
     if (opts.name !== undefined) state.courseMappingName = opts.name;
     if (opts.retry !== undefined) state.courseMappingRetry = opts.retry;
-    renderCourseMappingPill();
     syncStartRoundGate();
   }
 
@@ -3000,70 +2994,6 @@
     }
   }
 
-  function renderCourseMappingPill(successHint = null) {
-    const pill = els.courseMappingPill;
-    if (!pill) return;
-    const kind = state.courseMappingState;
-    maploadStopPhases('pill');
-    clearTimeout(_maploadFadeTimer);
-
-    if (kind === 'idle') {
-      pill.hidden = true;
-      pill.innerHTML = '';
-      return;
-    }
-
-    pill.hidden = false;
-
-    if (kind === 'mapping') {
-      pill.classList.remove('is-error', 'mapload-done');
-      pill.innerHTML = maploadCardHtml(0, 'mapload-loading');
-      maploadStartPhases('pill', (idx) => {
-        const card = pill.querySelector('.mapload-card');
-        if (!card) return;
-        const p = MAPLOAD_PHASES[idx];
-        const t = card.querySelector('.mapload-title');
-        const s = card.querySelector('.mapload-sub');
-        if (t) t.textContent = p.title;
-        if (s) s.textContent = p.sub;
-      }, pill);
-    } else if (kind === 'failed') {
-      pill.classList.add('is-error');
-      const name = escapeHtml(state.courseMappingName || 'course');
-      pill.innerHTML = `
-        <div class="mapload-card mapload-error">
-          <div class="mapload-copy">
-            <span class="mapload-title">Couldn't map ${name}</span>
-            <span class="mapload-sub">Map data didn't respond — round start is blocked.</span>
-          </div>
-          <button class="mapload-retry" type="button">Retry</button>
-        </div>`;
-      const btn = pill.querySelector('.mapload-retry');
-      if (btn) {
-        btn.addEventListener('click', () => {
-          if (typeof state.courseMappingRetry === 'function') {
-            haptic(8);
-            state.courseMappingRetry();
-          }
-        });
-      }
-    } else if (kind === 'success') {
-      pill.classList.remove('is-error');
-      pill.classList.add('mapload-done');
-      const hint = String(successHint || 'mapped').replace(/\s*✓\s*$/, '');
-      pill.innerHTML = `
-        <div class="mapload-card mapload-success">
-          <div class="mapload-copy">
-            <span class="mapload-title">✓ ${escapeHtml(hint)}</span>
-          </div>
-        </div>`;
-      _maploadFadeTimer = setTimeout(() => {
-        const card = pill.querySelector('.mapload-card');
-        if (card) card.classList.add('mapload-fadeout');
-      }, 1000);
-    }
-  }
-
   // Embed the same loader in the nearby-course status line while a picked
   // course's scorecard is downloading (shared phases, separate timer key).
   function renderNearbyScorecardLoader(statusEl) {
@@ -3086,9 +3016,11 @@
   }
 
   let _mappingFadeTimer = null;
-  function flashMappingSuccess(hint) {
+  // v1.0.73: no on-map pill. Success/failure surfaces only in the Round
+  // tab setup sheet (nearbyCourseStatus); the state flag still gates
+  // startRound().
+  function flashMappingSuccess() {
     setCourseMapping('success', { name: state.courseMappingName, retry: null });
-    renderCourseMappingPill(hint);
     clearTimeout(_mappingFadeTimer);
     _mappingFadeTimer = setTimeout(() => {
       if (state.courseMappingState === 'success') clearCourseMapping();
@@ -3127,7 +3059,7 @@
     if (courseMappingBlocked()) {
       showAppToast(
         state.courseMappingState === 'failed'
-          ? 'Course mapping failed — tap Retry on the map (or clear the course) before starting.'
+          ? 'Course mapping failed — open the Round tab, tap Retry (or clear the course), then start.'
           : `Still mapping ${state.courseMappingName || 'the course'} — hang on a second.`
       );
       haptic(20);
@@ -4283,19 +4215,32 @@
       findNearbyCourses();
     }
 
-    els.roundSetupSheet.classList.add('open');
+    els.roundSetupSheet.hidden = false;
+    requestAnimationFrame(() => {
+      els.roundSetupSheet.classList.add('open');
+    });
     els.roundSetupScrim.classList.add('open');
     els.roundSetupSheet.setAttribute('aria-hidden', 'false');
 
     haptic(6);
   }
 
+  let _setupCloseTimer = null;
   function closeRoundSetup() {
     if (!els.roundSetupSheet || !els.roundSetupScrim) return;
 
     els.roundSetupSheet.classList.remove('open');
     els.roundSetupScrim.classList.remove('open');
     els.roundSetupSheet.setAttribute('aria-hidden', 'true');
+    // v1.0.73: after the slide-down transition, fully remove the sheet
+    // from rendering (display:none). The closed sheet must never paint,
+    // even partially, over the Play map.
+    clearTimeout(_setupCloseTimer);
+    _setupCloseTimer = setTimeout(() => {
+      if (!els.roundSetupSheet.classList.contains('open')) {
+        els.roundSetupSheet.hidden = true;
+      }
+    }, 480);
   }
 
   function renderRoundSetupStartHoleOptions() {
@@ -5090,7 +5035,7 @@
     if (courseMappingBlocked()) {
       showAppToast(
         state.courseMappingState === 'failed'
-          ? 'Course mapping failed — tap Retry on the map (or clear the course) before starting.'
+          ? 'Course mapping failed — open the Round tab, tap Retry (or clear the course), then start.'
           : `Still mapping ${state.courseMappingName || 'the course'} — hang on a second.`
       );
       haptic(20);
@@ -5283,6 +5228,29 @@
       : state.nearbyCourses[index];
   }
 
+  // v1.0.73: the ONLY retry surface for a failed scorecard mapping is
+  // inside the Round tab setup sheet (nearby-course status line). The old
+  // on-map pill (and its error/retry variant) was removed.
+  function appendRoundTabMappingRetry(statusEl) {
+    if (!statusEl || state.courseMappingState !== 'failed') return;
+    if (statusEl.querySelector('.mapload-retry')) return;
+    const btn = document.createElement('button');
+    btn.className = 'mapload-retry';
+    btn.type = 'button';
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', () => {
+      haptic(6);
+      const retry = state.courseMappingRetry;
+      if (typeof retry === 'function') {
+        retry();
+      } else {
+        clearCourseMapping();
+      }
+    });
+    statusEl.appendChild(document.createElement('br'));
+    statusEl.appendChild(btn);
+  }
+
   function renderNearbyCourses() {
     if (!els.nearbyCourseList || !els.nearbyCourseStatus) return;
 
@@ -5297,6 +5265,7 @@
       els.nearbyCourseStatus.textContent = 'Searching around your location…';
       els.nearbyCourseList.innerHTML =
         `<div class="hint">Looking for nearby golf courses…</div>`;
+      appendRoundTabMappingRetry(els.nearbyCourseStatus);
       return;
     }
 
@@ -5312,6 +5281,7 @@
       els.nearbyCourseStatus.textContent =
         state.nearbySearchError ||
         'No mapped courses found nearby. You can still create one manually.';
+      appendRoundTabMappingRetry(els.nearbyCourseStatus);
       els.nearbyCourseList.innerHTML = '';
       return;
     }
@@ -5330,6 +5300,7 @@
       }
     }
     // fall through to render the list either way
+    appendRoundTabMappingRetry(els.nearbyCourseStatus);
 
     els.nearbyCourseList.innerHTML = courses.map(courseButtonHtml).join('');
 
@@ -5925,6 +5896,8 @@ out geom;`;
 
       els.nearbyCourseStatus.textContent =
         `Selected ${candidate.name}. Scorecard lookup was unavailable; add pars and yardages manually.`;
+      // v1.0.73: Retry lives only here, inside the Round tab setup UI.
+      appendRoundTabMappingRetry(els.nearbyCourseStatus);
     } finally {
       state.nearbyCourseLoadingScorecard = false;
       renderNearbyCourses();
@@ -6936,19 +6909,6 @@ out geom;`;
           startShot();
         } else {
           finishShot(false);
-        }
-      });
-    }
-
-    // Course-mapping pill retry: re-run the failed scorecard lookup.
-    if (els.courseMappingRetryBtn) {
-      els.courseMappingRetryBtn.addEventListener('click', () => {
-        const retry = state.courseMappingRetry;
-        if (typeof retry === 'function') {
-          haptic(6);
-          retry();
-        } else {
-          clearCourseMapping();
         }
       });
     }

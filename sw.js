@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.72'; // + peek row removed entirely (handle-only collapse), wind pill always visible
+const CACHE_VERSION = 'v1.0.73'; // + all round-setup/search/mapping UI scoped to Round tab; on-map mapping pill removed
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

@@ -136,15 +136,6 @@
         <div class="range-wrap" id="rangeWrap">
           <div id="map"></div>
 
-          <div class="mapping-pill glass" id="courseMappingPill" role="status" aria-live="polite" hidden>
-            <span class="mapping-pill-spinner" id="courseMappingSpinner" aria-hidden="true"></span>
-            <span class="mapping-pill-body">
-              <span class="mapping-pill-title" id="courseMappingText">Mapping course…</span>
-              <span class="mapping-pill-sub" id="courseMappingSub">Fetching greens &amp; holes from OpenStreetMap…</span>
-            </span>
-            <button class="mapping-pill-retry" id="courseMappingRetry" type="button" hidden>Retry</button>
-          </div>
-
           <div class="app-toast glass" id="appToast" role="alert" hidden></div>
 
           <div class="range-top-ui">
@@ -999,7 +990,7 @@
   <!-- Round setup sheet -->
   <div class="modal-scrim" id="roundSetupScrim"></div>
 
-  <section class="round-setup-sheet glass" id="roundSetupSheet" aria-label="Start round setup" aria-hidden="true">
+  <section class="round-setup-sheet glass" id="roundSetupSheet" aria-label="Start round setup" aria-hidden="true" hidden>
     <div class="sheet-handle" style="margin: 6px auto 12px"></div>
 
     <div class="round-setup-head">

@@ -8,7 +8,6 @@ map, plus root-cause fixes for the four confirmed bugs.
 | Overlay | Selector | Position | z | Shown when |
 |---|---|---|---|---|
 | Round HUD card | `.round-map-hud` (#roundMapHud) | abs, top `safe-top+60`, left `+12` | 601 | live round, mode ≠ practice |
-| Mapping pill | `.mapping-pill` | abs, top `safe-top+62`, centered; **+204 when HUD visible** (new) | 650 | course mapping in flight / failed / success flash |
 | Context strip | `.rx-strip` (in `.rx-stack`) | abs, top `safe-top+108`; **+152 round-live**, centered | 600 | always; **hole · dots only** — wind removed v1.0.67 |
 | Dock | `.rx-dock` | abs, bottom lane, centered; lifted −(ui-lift+144) round-live | 600 | not full-detent |
 | GPS pill / zoom / layer seg | `.range-top-ui` family | top bar / right rail per app.css | ≤601 | per app.js |
@@ -17,7 +16,7 @@ map, plus root-cause fixes for the four confirmed bugs.
 | Hole-advance card | `.rx-hole-prompt` | abs, bottom lane, lifted −(ui-lift+14), centered | 660 | current hole just scored, once per hole per round |
 
 Collision checks: HUD (top-left, ends ≈ +150) vs strip (+152 centered) —
-clear. Mapping pill now drops to +204 under both when a round is live.
+clear. No mapping pill exists anymore (removed v1.0.73).
 Dock and toast share the bottom lane but are offset by different lifts and
 never co-visible at full detent (both fade). No remaining overlap found.
 
@@ -36,10 +35,10 @@ never co-visible at full detent (both fade). No remaining overlap found.
    `caddy:lastTarget` cleared, and distance/plays-like show "—" with a
    "Map a target" hint instead of nonsense numbers.
 
-3. **Error toast overlap** — `.mapping-pill` (z 650, top +62, centered,
-   up to 340px wide) rendered on top of the HUD card (z 601, top +60).
-   New rule `body:has(#roundMapHud:not([hidden])) .mapping-pill { top:
-   safe-top + 204px }` places it below the HUD and strip stack.
+3. **Error toast overlap** — *(superseded by v1.0.73: the mapping pill
+   was removed entirely; see change 9.)* Historically, `.mapping-pill`
+   (z 650) rendered on top of the HUD card (z 601, top +60) and was later
+   dropped to safe-top + 204px via a `body:has()` rule.
 
 4. **DEMO wind mid-round** — `renderWind()` only stepped aside for the
    live pill if `#windPill` was already un-hidden; on cold start range.js's
@@ -129,3 +128,19 @@ Cache bumped to v1.0.67.
 Self-tests: 48/48 pass (added beginRound-gate refuse/allow and collapsed-
 band math blocks). Overlay matrix unchanged except Reticle row removed.
 Cache at v1.0.70 (bumped by map-load work).
+
+## v1.0.73 changes
+
+9. **SCOPING RULE: Round-tab setup UI never renders on Play** — all
+   course-search and scorecard-mapping UI (nearby results list, loader
+   card, mapping status, Retry) lives strictly inside the Round tab's
+   round-setup sheet (`#roundSetupSheet`). The on-map mapping pill
+   (`.mapping-pill` / `renderCourseMappingPill`), including its error/
+   retry variant, is removed entirely from HTML/CSS/JS. The closed setup
+   sheet gets `hidden` → `display:none !important` after the slide-down
+   transition, so nothing can paint over the map in any viewport state.
+   `courseMappingState`, the beginRound/startRound hard gate, and the
+   'Still mapping…' toast remain as a safety net; while mapping runs and
+   the user is on Play, distance/plays-like show '—' until data arrives
+   (MAX_SANE_TARGET_YD fallback). Mapping Retry now renders only inside
+   the sheet (appended to the nearby-course status line when failed).
