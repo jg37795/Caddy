@@ -267,6 +267,7 @@
       `max slope ${maxS.toFixed(1)}%`);
 
     fitView();
+    buildHeatImage(); // v-fix: was never invoked — heat canvas stayed transparent
     render();
     status.textContent = `${polyLL ? 'OSM green shape' : 'ellipse fallback'} · ` +
       `${(sumS / Math.max(1, nValid)).toFixed(1)}% mean slope`;
