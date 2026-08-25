@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.52'; // quick start: two-tap confirm sheet (course/tees/holes/solo summary → Start), full form one tap away
+const CACHE_VERSION = 'v1.0.53'; // quick start "change details" now opens a focused options sheet (tees/start hole/group), not the full form; back-navigation preserved
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

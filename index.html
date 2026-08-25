@@ -1179,6 +1179,50 @@
     </button>
   </section>
 
+  <!-- Round options: tees / start hole / group for the already-chosen course -->
+  <section class="round-score-sheet glass mini-sheet" id="roundOptionsSheet" aria-label="Round options" aria-hidden="true">
+    <div class="sheet-handle" style="margin: 6px auto 12px"></div>
+
+    <div class="round-score-head">
+      <div>
+        <h2 id="roundOptionsTitle">Course</h2>
+        <p id="roundOptionsMeta">Regular tees · 18 holes</p>
+      </div>
+
+      <button class="icon-btn" id="roundOptionsCloseBtn" type="button" aria-label="Close">
+        ×
+      </button>
+    </div>
+
+    <div class="round-score-section">
+      <div class="round-score-label">Tee box</div>
+      <div class="tee-chip-row" id="optionsTeePicker" style="margin-top: 6px"></div>
+    </div>
+
+    <label class="field" style="margin-top: 12px">
+      Start hole
+      <select id="optionsStartHole"></select>
+    </label>
+
+    <div class="round-score-section" style="margin-top: 14px">
+      <div class="round-score-label">Playing partners</div>
+      <div id="optionsGroupList" style="margin-top: 6px"></div>
+      <button class="ghost-btn" id="optionsAddPartner" type="button"
+        style="width: 100%; margin-top: 8px">
+        Add partner
+      </button>
+      <div class="hint" style="margin-top: 8px">
+        Up to 3 partners. Their scores never affect your stats.
+      </div>
+    </div>
+
+    <div class="round-score-actions">
+      <button class="primary-btn" id="optionsStartBtn" type="button" style="width: 100%">
+        Start Round
+      </button>
+    </div>
+  </section>
+
   <!-- Round-end summary -->
   <div class="modal-scrim" id="roundSummaryScrim"></div>
 

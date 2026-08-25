@@ -4074,7 +4074,168 @@
     // Only drop the scrim if no other sheet is open behind it.
     const miniOpen = els.roundMiniSheet?.classList.contains('open');
     const fullOpen = els.roundScoreSheet?.classList.contains('open');
-    if (!miniOpen && !fullOpen) els.roundScoreScrim.classList.remove('open');
+    const optsOpen = document
+      .getElementById('roundOptionsSheet')
+      ?.classList.contains('open');
+    if (!miniOpen && !fullOpen && !optsOpen) {
+      els.roundScoreScrim.classList.remove('open');
+    }
+  }
+
+  // ---- Round options sheet (tees / start hole / group) -----------------
+  function openRoundOptionsSheet(course, fromQuickStart = true) {
+    if (!course) return;
+    state.optionsCourse = course;
+    state.optionsGroupPlayers = []; // groups are chosen per round, never assumed
+    state.optionsFromQuickStart = fromQuickStart;
+
+    const sheet = document.getElementById('roundOptionsSheet');
+    if (!sheet) return;
+
+    const title = document.getElementById('roundOptionsTitle');
+    const meta = document.getElementById('roundOptionsMeta');
+    if (title) title.textContent = course.name || 'Casual Round';
+    if (meta) {
+      meta.textContent = [
+        teeDisplayName(course.teeName),
+        Number(course.holesCount) === 9 ? '9 holes' : '18 holes',
+      ].join(' · ');
+    }
+
+    renderOptionsTeePicker(course);
+    renderOptionsStartHole(course);
+    renderRoundOptionsGroup();
+
+    sheet.classList.add('open');
+    sheet.setAttribute('aria-hidden', 'false');
+    els.roundScoreScrim?.classList.add('open');
+    haptic(8);
+  }
+
+  function closeRoundOptionsSheet() {
+    const sheet = document.getElementById('roundOptionsSheet');
+    if (!sheet) return;
+    sheet.classList.remove('open');
+    sheet.setAttribute('aria-hidden', 'true');
+    state.optionsCourse = null;
+    state.optionsGroupPlayers = null;
+
+    const wasFromQuickStart = state.optionsFromQuickStart;
+    state.optionsFromQuickStart = false;
+
+    // Back to the confirm card when we came from there — "back", not
+    // "abandon everything".
+    if (
+      wasFromQuickStart &&
+      state.quickStartSource &&
+      !els.roundMiniSheet?.classList.contains('open') &&
+      !els.roundScoreSheet?.classList.contains('open')
+    ) {
+      openQuickStartSheet(state.quickStartSource);
+      return;
+    }
+
+    const miniOpen = els.roundMiniSheet?.classList.contains('open');
+    const fullOpen = els.roundScoreSheet?.classList.contains('open');
+    if (!miniOpen && !fullOpen) {
+      els.roundScoreScrim.classList.remove('open');
+    }
+  }
+
+  function renderOptionsTeePicker(course) {
+    const row = document.getElementById('optionsTeePicker');
+    if (!row) return;
+    const sets = Array.isArray(course.teeSets) ? course.teeSets : [];
+    if (!sets.length) {
+      row.innerHTML = `<span class="hint">${escapeHtml(
+        teeDisplayName(course.teeName)
+      )}</span>`;
+      return;
+    }
+    const solo = sets.length === 1;
+    row.innerHTML = sets
+      .map((t) => {
+        const on = t.name === course.activeTeeSet;
+        return `<button type="button" class="tee-chip${on ? ' active' : ''}${
+          solo ? ' static' : ''
+        }" data-tee="${escapeHtml(t.name)}"
+          aria-pressed="${on}">${escapeHtml(teeDisplayName(t.name))}</button>`;
+      })
+      .join('');
+
+    row.querySelectorAll('.tee-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const updated = applyTeeSet(
+          state.optionsCourse,
+          chip.dataset.tee
+        );
+        state.optionsCourse = updated;
+        renderOptionsTeePicker(updated);
+        const meta = document.getElementById('roundOptionsMeta');
+        if (meta) {
+          meta.textContent = [
+            teeDisplayName(updated.teeName),
+            Number(updated.holesCount) === 9 ? '9 holes' : '18 holes',
+          ].join(' · ');
+        }
+        haptic(6);
+      });
+    });
+  }
+
+  function renderOptionsStartHole(course) {
+    const sel = document.getElementById('optionsStartHole');
+    if (!sel) return;
+    const n = clamp(Number(course.holesCount) || 18, 1, 18);
+    sel.innerHTML = Array.from({ length: n }, (_, i) => {
+      const h = i + 1;
+      return `<option value="${h}" ${h === 1 ? 'selected' : ''}>Hole ${h}${
+        h === 1 ? ' (front)' : h === 10 ? ' (back)' : ''
+      }</option>`;
+    }).join('');
+  }
+
+  function renderRoundOptionsGroup() {
+    const list = document.getElementById('optionsGroupList');
+    if (!list) return;
+    const players = state.optionsGroupPlayers || [];
+    if (!players.length) {
+      list.innerHTML =
+        '<div class="hint" style="margin:0">Playing solo — add partners below.</div>';
+      return;
+    }
+    list.innerHTML = players
+      .map(
+        (p) => `
+        <div class="group-editor-row" data-id="${escapeHtml(p.id)}">
+          <input type="text" maxlength="24" value="${escapeHtml(p.name)}"
+            aria-label="Partner name" />
+          <button class="group-editor-remove" type="button"
+            aria-label="Remove ${escapeHtml(p.name)}">✕</button>
+        </div>`
+      )
+      .join('');
+
+    list.querySelectorAll('.group-editor-row').forEach((row) => {
+      const id = row.dataset.id;
+      const input = row.querySelector('input');
+      input.addEventListener('change', () => {
+        const p = (state.optionsGroupPlayers || []).find(
+          (x) => x.id === id
+        );
+        if (p) p.name = input.value.trim() || 'Player';
+      });
+      row.querySelector('.group-editor-remove').addEventListener(
+        'click',
+        () => {
+          state.optionsGroupPlayers = (state.optionsGroupPlayers || []).filter(
+            (x) => x.id !== id
+          );
+          renderRoundOptionsGroup();
+          haptic(6);
+        }
+      );
+    });
   }
 
   // Tee boxes the player used before, keyed by course name — so returning
@@ -4303,6 +4464,13 @@
     const normalizedCourse = normalizeCourse(course);
 
     state.roundSession = emptyRoundSession(normalizedCourse, startHole);
+
+    // A group chosen in the round-options sheet rides along into the
+    // fresh session (then clears — it's a one-shot handoff).
+    if (Array.isArray(state._pendingGroupPlayers)) {
+      state.roundSession.groupPlayers = state._pendingGroupPlayers;
+      state._pendingGroupPlayers = null;
+    }
 
     // Force hole geometry to re-apply even if the new round starts on the
     // same course/hole as the previous one.
@@ -5387,6 +5555,22 @@ out geom;`;
       ) {
         closeRoundMiniSheet();
       }
+      if (
+        event.key === 'Escape' &&
+        document
+          .getElementById('roundOptionsSheet')
+          ?.classList.contains('open')
+      ) {
+        closeRoundOptionsSheet();
+      }
+      if (
+        event.key === 'Escape' &&
+        document
+          .getElementById('quickStartSheet')
+          ?.classList.contains('open')
+      ) {
+        closeQuickStartSheet();
+      }
     });
   }
   function getRoundScoreDraftForHole(holeNumber) {
@@ -5847,21 +6031,69 @@ out geom;`;
     const qsDetails = $('quickStartDetailsBtn');
     if (qsDetails) {
       qsDetails.addEventListener('click', () => {
-        const found = state.quickStartSource;
         const course = state.quickStartCourse;
-        closeQuickStartSheet();
-        // Escalate to the full form with everything pre-loaded.
-        openRoundSetup();
-        if (found) selectSavedCourse(found);
-        else if (course) selectSavedCourse(course);
+        if (!course) return;
+        // Focused options sheet — not the full form. The course is
+        // already chosen; only tees, start hole, and group matter here.
+        openRoundOptionsSheet(course);
+      });
+    }
+
+    // Round-options sheet wiring.
+    const roClose = $('roundOptionsCloseBtn');
+    if (roClose) roClose.addEventListener('click', closeRoundOptionsSheet);
+    const roStart = $('optionsStartBtn');
+    if (roStart) {
+      roStart.addEventListener('click', () => {
+        const course = state.optionsCourse;
+        const startHole = clamp(
+          Math.round(num($('optionsStartHole')?.value, 1)),
+          1,
+          18
+        );
+        closeRoundOptionsSheet();
+        if (!course) return;
+        // Adopt the options-sheet group into the new session.
+        state._pendingGroupPlayers = (state.optionsGroupPlayers || []).map(
+          (p) => ({ ...p })
+        );
+        rememberCourseTees(course);
+        beginRound(course, startHole);
+      });
+    }
+    const roAdd = $('optionsAddPartner');
+    if (roAdd) {
+      roAdd.addEventListener('click', () => {
+        if ((state.optionsGroupPlayers || []).length >= GROUP_MAX_PARTNERS) {
+          setNotice(`Maximum ${GROUP_MAX_PARTNERS} partners.`, 'danger');
+          return;
+        }
+        const name = prompt('Partner name:');
+        if (!name || !name.trim()) return;
+        state.optionsGroupPlayers = state.optionsGroupPlayers || [];
+        state.optionsGroupPlayers.push({
+          id: cryptoId(),
+          name: name.trim().slice(0, 24),
+        });
+        renderRoundOptionsGroup();
+        haptic(6);
       });
     }
 
     if (els.roundScoreScrim) {
       els.roundScoreScrim.addEventListener('click', () => {
-        if (state.quickStartCourse) closeQuickStartSheet();
-        else if (state.roundMiniDraft) closeRoundMiniSheet();
-        else closeRoundScoreSheet();
+        const optsOpen = document
+          .getElementById('roundOptionsSheet')
+          ?.classList.contains('open');
+        if (optsOpen) {
+          closeRoundOptionsSheet();
+        } else if (state.quickStartCourse) {
+          closeQuickStartSheet();
+        } else if (state.roundMiniDraft) {
+          closeRoundMiniSheet();
+        } else {
+          closeRoundScoreSheet();
+        }
       });
     }
 
