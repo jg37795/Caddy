@@ -575,9 +575,22 @@ body.dark .tab-btn.active {
 }
 
 .tee-chip.active {
-  background: var(--green);
-  border-color: var(--green);
-  color: #fff;
+  background: rgba(21, 158, 91, 0.13);
+  border-color: rgba(21, 158, 91, 0.55);
+  color: var(--green);
+}
+
+body.dark .tee-chip.active {
+  background: rgba(86, 224, 140, 0.12);
+  border-color: rgba(86, 224, 140, 0.45);
+  color: #56e08c;
+}
+
+/* Solo tee set: nothing to switch to, so it reads as a set value,
+   not a button. */
+.tee-chip.static {
+  pointer-events: none;
+  cursor: default;
 }
 
 .hint,
@@ -1369,23 +1382,90 @@ body[data-dragging='1'] .gps-chip {
 
 /* No-round hero: one calm card, one obvious action */
 .round-hero {
+  position: relative;
   text-align: center;
-  padding: 26px 18px 6px;
+  padding: 30px 18px 10px;
+  overflow: hidden;
+}
+
+/* Soft course-green glow behind the mark — depth without noise */
+.round-hero::before {
+  content: '';
+  position: absolute;
+  top: -70px;
+  left: 50%;
+  width: 300px;
+  height: 170px;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    closest-side,
+    rgba(21, 158, 91, 0.16),
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* Abstract scorecard: 18 dots, a few already played */
+.hero-mark {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: 220px;
+  margin: 0 auto 16px;
+}
+
+.hero-mark i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.hero-mark i:nth-child(2) {
+  background: rgba(21, 158, 91, 0.55);
+}
+
+.hero-mark i:nth-child(5) {
+  background: rgba(21, 158, 91, 0.55);
+}
+
+.hero-mark i:nth-child(7) {
+  background: rgba(214, 57, 57, 0.55);
+}
+
+.hero-mark i:nth-child(11) {
+  background: rgba(22, 119, 255, 0.5);
 }
 
 .round-hero h3 {
+  position: relative;
   margin: 0 0 6px;
-  font-size: 19px;
-  font-weight: 750;
-  letter-spacing: -0.03em;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
 }
 
 .round-hero p {
+  position: relative;
   margin: 0 auto;
   max-width: 300px;
   color: var(--muted);
   font-size: 13.5px;
   line-height: 1.5;
+}
+
+.hero-last {
+  position: relative;
+  margin: 14px auto 0;
+  display: inline-block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--chip-bg, rgba(120, 130, 125, 0.14));
+  border-radius: 999px;
+  padding: 6px 13px;
 }
 
 .nearby-course-list {

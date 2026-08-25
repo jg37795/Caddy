@@ -2593,6 +2593,30 @@
       groupCard.hidden = !roundLive;
       hero.hidden = roundLive;
     }
+
+    // "Last time out" chip: the most recent saved round, if any.
+    const last = document.getElementById('heroLastRound');
+    if (last && !roundLive) {
+      const h = Array.isArray(state.history) ? state.history : [];
+      const prev = h[h.length - 1];
+      if (prev && prev.played) {
+        const toPar = Number(prev.toPar);
+        const vsPar =
+          Number.isFinite(toPar) && toPar !== 0
+            ? ` · ${toPar > 0 ? '+' : '−'}${Math.abs(toPar)}`
+            : ' · E';
+        const d = prev.date ? new Date(prev.date) : null;
+        const when = d && !Number.isNaN(d.getTime())
+          ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : '';
+        last.textContent = `Last time out · ${prev.totalScore} (${vsPar.trim()})${
+          when ? ` · ${when}` : ''
+        }`;
+        last.hidden = false;
+      } else {
+        last.hidden = true;
+      }
+    }
   }
 
   function renderRound() {
@@ -3268,10 +3292,13 @@
       return;
     }
     wrap.hidden = false;
+    const solo = sets.length === 1;
     row.innerHTML = sets
       .map((t) => {
         const on = t.name === course.activeTeeSet;
-        return `<button type="button" class="tee-chip${on ? ' active' : ''}"
+        return `<button type="button" class="tee-chip${on ? ' active' : ''}${
+          solo ? ' static' : ''
+        }"
           data-tee="${escapeHtml(t.name)}" aria-pressed="${on}">${escapeHtml(
           teeDisplayName(t.name)
         )}</button>`;
@@ -4255,10 +4282,13 @@
     }
 
     wrap.hidden = false;
+    const solo = sets.length === 1;
     row.innerHTML = sets
       .map((t) => {
         const on = t.name === course.activeTeeSet;
-        return `<button type="button" class="tee-chip${on ? ' active' : ''}"
+        return `<button type="button" class="tee-chip${on ? ' active' : ''}${
+          solo ? ' static' : ''
+        }"
           data-tee="${escapeHtml(t.name)}" aria-pressed="${on}">${escapeHtml(
           teeDisplayName(t.name)
         )}</button>`;
@@ -4905,6 +4935,10 @@ out geom;`;
     // Show the tee chips / start hole as soon as a course is chosen.
     const manual = document.getElementById('manualRoundWrap');
     if (manual) manual.open = true;
+    // Pars & yardages open too — verifying them against the physical
+    // scorecard is exactly what this moment is for.
+    const editor = document.getElementById('scorecardEditor');
+    if (editor) editor.open = true;
 
     state.nearbyCourseLoadingScorecard = true;
     renderNearbyCourses();
@@ -4921,6 +4955,11 @@ out geom;`;
 
       renderRoundSetupHoles(course.holes);
       renderTeeSetPicker(course);
+
+      // The scorecard just arrived — open the editor now so verifying
+      // pars/yardages against the physical card is the next natural step.
+      const editor = document.getElementById('scorecardEditor');
+      if (editor) editor.open = true;
 
       const r = course.importReport;
       els.nearbyCourseStatus.textContent = r && r.holesMapped
