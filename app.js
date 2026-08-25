@@ -6219,12 +6219,16 @@ out geom;`;
           1,
           18
         );
+        // QA-002: snapshot the group BEFORE closing — closeRoundOptionsSheet
+        // nulls optionsGroupPlayers, which used to leave the round Solo no
+        // matter what partners the player added in this sheet.
+        const group = (state.optionsGroupPlayers || []).map((p) => ({
+          ...p,
+        }));
         closeRoundOptionsSheet();
         if (!course) return;
         // Adopt the options-sheet group into the new session.
-        state._pendingGroupPlayers = (state.optionsGroupPlayers || []).map(
-          (p) => ({ ...p })
-        );
+        state._pendingGroupPlayers = group;
         rememberCourseTees(course);
         beginRound(course, startHole);
       });
