@@ -296,10 +296,10 @@
     selectedNearbyCourse: null,
     selectedCourseTemplate: null,
     setupHolesCount: 18,
-    courseProfiles: load(COURSE_PROFILES_KEY, []),
-    clubs: load('caddy:clubs', DEFAULT_CLUBS),
-    round: load('caddy:round', emptyRound()),
-    history: load('caddy:history', []),
+    courseProfiles: loadArr(COURSE_PROFILES_KEY, [], (c) => c && typeof c === 'object'),
+    clubs: loadArr('caddy:clubs', DEFAULT_CLUBS, (c) => c && typeof c === 'object'),
+    round: loadArr('caddy:round', emptyRound()),
+    history: loadArr('caddy:history', [], (h) => h && typeof h === 'object'),
     loc: savedLoc,
     locStale: !!savedLoc,
     watchId: null,
@@ -692,6 +692,15 @@
     try {
       localStorage.setItem(k, JSON.stringify(v));
     } catch { }
+  }
+  // QA-004: corruption isn't always a JSON syntax error — a partial or
+  // legacy write can leave VALID json of the WRONG shape (an object where
+  // an array belongs, null entries). Guard at hydration so a bad value
+  // falls back to the default instead of crashing the first render.
+  function loadArr(k, f, filterEntry) {
+    const v = load(k, f);
+    if (!Array.isArray(v)) return f;
+    return filterEntry ? v.filter(filterEntry) : v;
   }
   function clamp(n, mn, mx) {
     return Math.min(mx, Math.max(mn, n));
@@ -6827,10 +6836,10 @@ out geom;`;
   // Re-hydrate every in-memory structure from storage after a restore.
   function reloadStateFromStorage() {
     state.prefs = load('caddy:prefs', state.prefs);
-    state.clubs = load('caddy:clubs', DEFAULT_CLUBS);
-    state.courseProfiles = load(COURSE_PROFILES_KEY, []);
-    state.round = load('caddy:round', emptyRound());
-    state.history = load('caddy:history', []);
+    state.clubs = loadArr('caddy:clubs', DEFAULT_CLUBS, (c) => c && typeof c === 'object');
+    state.courseProfiles = loadArr(COURSE_PROFILES_KEY, [], (c) => c && typeof c === 'object');
+    state.round = loadArr('caddy:round', emptyRound());
+    state.history = loadArr('caddy:history', [], (h) => h && typeof h === 'object');
     state.roundSession = load('caddy:roundSession', null);
 
     // Invalidate every derived-data cache.
@@ -9274,9 +9283,18 @@ out geom;`;
   const SHOT_SANITY_HI = 1.60;      // hard reject above 160% of stock: mis-tagged club or GPS blowup
   const MISS_BIAS_MIN_N = 5;        // tracked shots with lateral data before miss-direction coaching activates
 
+  // QA-004: every value must be an array of shots — a string/number value
+  // here used to crash missDirectionSummary and the CSV export.
+  function sanitizeShotLog(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    const out = {};
+    for (const k of Object.keys(v)) if (Array.isArray(v[k])) out[k] = v[k];
+    return out;
+  }
+
   function loadShotLog() {
     const v = load(SHOTLOG_KEY, {});
-    return v && typeof v === 'object' ? v : {};
+    return sanitizeShotLog(v);
   }
   function saveShotLog(log) { save(SHOTLOG_KEY, log); }
 
@@ -9511,7 +9529,7 @@ out geom;`;
   function loadShotLog() {
     if (_shotLogCache) return _shotLogCache;
     const v = load(SHOTLOG_KEY, {});
-    _shotLogCache = v && typeof v === 'object' ? v : {};
+    _shotLogCache = sanitizeShotLog(v);
     return _shotLogCache;
   }
   function saveShotLog(log) {
