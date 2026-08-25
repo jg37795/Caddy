@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.50'; // scorecard taps always open compact quick-fix (full sheet via its own button); Quick start course cards fill the empty hero
+const CACHE_VERSION = 'v1.0.51'; // quick start preloads sheet instead of auto-starting; partners no longer carried between rounds; group editor always visible
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

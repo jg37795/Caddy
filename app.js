@@ -621,8 +621,9 @@
 
       // Group scoring. Lives ONLY on the session — it never merges into
       // state.round, so personal stats/history stay untouched by design.
-      // Seeded from the saved roster so your usual group is preloaded.
-      groupPlayers: loadGroupRoster().map((p) => ({ ...p })),
+      // Starts EMPTY: partners are added per round, not carried over —
+      // your group shouldn't follow you around uninvited.
+      groupPlayers: [],
       groupScores: {},
     };
   }
@@ -4003,27 +4004,11 @@
       card.addEventListener('click', () => {
         const found = profiles.find((c) => c.id === card.dataset.id);
         if (!found) return;
-        // Straight onto the tee: remembered tees, saved scorecard, go.
-        const course = normalizeCourse({ ...found });
-        let preferredTee = course.activeTeeSet || null;
-        try {
-          const mem = load('caddy:courseTees', {})[
-            String(course.name).trim().toLowerCase()
-          ];
-          if (mem && mem.activeTeeSet) preferredTee = mem.activeTeeSet;
-        } catch {
-          /* best-effort */
-        }
-        if (
-          Array.isArray(course.teeSets) &&
-          course.teeSets.length &&
-          preferredTee
-        ) {
-          applyTeeSet(course, preferredTee);
-        }
-        rememberCourseTees(course);
-        beginRound(course, 1);
-        haptic(10);
+        // Not auto-start: open the setup sheet with this course loaded —
+        // remembered tees applied, pars/yardages open for a glance, group
+        // and start hole right there. One confirmation tap to go.
+        openRoundSetup();
+        selectSavedCourse(found);
       });
     });
   }
