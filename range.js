@@ -287,11 +287,16 @@
     // v1.0.67: the strip is hole identity + scorecard dots only (and the
     // hole parts yield to the round HUD during a live round). Wind was
     // removed entirely — live weather owns wind display.
+    // v1.0.74: when there is nothing to show (no dots, no hole label), hide
+    // the whole strip — an empty glass pill was rendering as a stray dark
+    // dot on the map.
     const hudVisible = !!hudEl && !hudEl.hidden;
     if (root.stripHole) root.stripHole.hidden = true;
     if (root.stripHoleSep) root.stripHoleSep.hidden = true;
     const hasDots = !hudVisible && renderDotsInto();
     if (root.dots) root.dots.hidden = !hasDots;
+    const stripHasContent = hasDots; // hole label is permanently hidden now
+    if (root.strip) root.strip.hidden = !stripHasContent;
 
     // Live-round layout flag: shift the floating stack/dock clear of HUD.
     wrap.classList.toggle('rx-round-live', hudVisible);
