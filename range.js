@@ -120,6 +120,8 @@
   let lastNumText = null;
 
   function renderHero() {
+    // Hero capsule removed (v1.0.64) — numbers live in the sheet only.
+    return;
     if (!srcYards || !root.heroNum) return;
     const t = (srcYards.textContent || '').trim();
     if (t !== lastNumText) {
@@ -695,6 +697,14 @@
     watchText(hudHoleEl, renderStrip);
     watchAttrs(hudEl, renderStrip);
     watchText($('roundMapScore'), renderDotsRefresh);
+
+    // Live wind pill visibility → re-run renderWind so the DEMO strip button
+    // hides the moment app.js reveals real wind (no double wind controls).
+    const liveWindPill = $('windPill');
+    if (liveWindPill) {
+      watchAttrs(liveWindPill, renderWind);
+      watchText(liveWindPill, renderWind);
+    }
 
     function renderDotsRefresh() {
       renderStrip();
