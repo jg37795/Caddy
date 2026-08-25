@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.51'; // quick start preloads sheet instead of auto-starting; partners no longer carried between rounds; group editor always visible
+const CACHE_VERSION = 'v1.0.52'; // Prep studio add-on (prep.css/prep.js): wind dial, conditions, lie, shape, hole strategy
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
@@ -12,6 +12,8 @@ const APP_SHELL = [
   './index.html',
   './app.css',
   './app.js',
+  './prep.css',
+  './prep.js',
   './leaflet.css',
   './leaflet.js',
 ];
