@@ -18,6 +18,7 @@
     href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230f7a43'/%3E%3Ccircle cx='90' cy='72' r='36' fill='%23ffffff'/%3E%3Ccircle cx='76' cy='60' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Ccircle cx='104' cy='60' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Ccircle cx='90' cy='85' r='6.5' fill='%230f7a43' fill-opacity='.38'/%3E%3Cpath d='M78 117h24c-1.2 9.5-4.6 17.6-9.3 22.4-2.3 2.4-4.1 2.4-6.4 0-4.7-4.8-8.1-12.9-8.3-22.4Z' fill='%23ffffff'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./leaflet.css" />
   <link rel="stylesheet" href="./app.css" />
+  <link rel="stylesheet" href="./bag.css" />
 </head>
 
 <body>
@@ -535,29 +536,36 @@
       <!-- CLUBS -->
       <section id="clubsScreen" class="screen">
         <h1 class="large-title">Bag</h1>
-        <div class="card">
-          <div class="card-title">
-            <h2>Clubs</h2>
-            <button class="ghost-btn" id="resetClubsBtn">
-              Reset defaults
-            </button>
+        <!-- Premium club management UI — rendered by bag.js -->
+        <div id="bagRoot"></div>
+        <!-- Legacy flat editor kept in the DOM (hidden): app.js remains the
+             owner of the canonical club list, and bag.js mirrors edits into
+             these controls so every existing behaviour keeps working. -->
+        <div id="bagLegacyHost" hidden>
+          <div class="card">
+            <div class="card-title">
+              <h2>Clubs</h2>
+              <button class="ghost-btn" id="resetClubsBtn">
+                Reset defaults
+              </button>
+            </div>
+            <div class="hint">
+              Edit your stock carry distances in yards. Recommendations prefer
+              the longer club when between clubs, with an easy/choke-down note.
+            </div>
+            <div id="clubsList" style="margin-top: 10px"></div>
           </div>
-          <div class="hint">
-            Edit your stock carry distances in yards. Recommendations prefer
-            the longer club when between clubs, with an easy/choke-down note.
+          <div class="card">
+            <div class="card-title">
+              <h3>Add club</h3>
+            </div>
+            <div class="form-row">
+              <label class="field">Name <input id="newClubName" placeholder="e.g. 60°" /></label>
+              <label class="field">Carry yd
+                <input id="newClubYards" type="number" inputmode="numeric" placeholder="80" /></label>
+            </div>
+            <button class="primary-btn" id="addClubBtn">Add club</button>
           </div>
-          <div id="clubsList" style="margin-top: 10px"></div>
-        </div>
-        <div class="card">
-          <div class="card-title">
-            <h3>Add club</h3>
-          </div>
-          <div class="form-row">
-            <label class="field">Name <input id="newClubName" placeholder="e.g. 60°" /></label>
-            <label class="field">Carry yd
-              <input id="newClubYards" type="number" inputmode="numeric" placeholder="80" /></label>
-          </div>
-          <button class="primary-btn" id="addClubBtn">Add club</button>
         </div>
       </section>
 
@@ -1300,6 +1308,7 @@
 
   <script src="./leaflet.js"></script>
   <script src="./app.js"></script>
+  <script defer src="./bag.js"></script>
 </body>
 
 </html>

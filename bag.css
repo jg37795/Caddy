@@ -1,0 +1,799 @@
+/* ==========================================================================
+   bag.css — Premium Bag tab (club management) for Caddy.
+   Loaded after app.css; everything scoped under .bag- / #bagRoot so it
+   can never collide with the core stylesheet. Mirrors the app's glass
+   card aesthetic, spring easings and dark theme tokens.
+   ========================================================================== */
+
+/* Category palette — one hue per club family, tuned for both themes. */
+#bagRoot {
+  --bag-woods-a: #f2b13e;
+  --bag-woods-b: #d97c14;
+  --bag-irons-a: #4da3ff;
+  --bag-irons-b: #1668d9;
+  --bag-wedges-a: #b78cff;
+  --bag-wedges-b: #7c3aed;
+  --bag-putter-a: #34d183;
+  --bag-putter-b: #12925a;
+  --bag-track: rgba(127, 127, 127, 0.12);
+  --bag-pill-bg: rgba(127, 127, 127, 0.14);
+  --bag-editor-bg: rgba(127, 127, 127, 0.07);
+  --bag-input-bg: var(--card-solid);
+}
+
+body.dark #bagRoot {
+  --bag-woods-a: #e8a63c;
+  --bag-woods-b: #b96a10;
+  --bag-irons-a: #5ea8ff;
+  --bag-irons-b: #1f5fd0;
+  --bag-wedges-a: #b48bff;
+  --bag-wedges-b: #6d3fd6;
+  --bag-putter-a: #3ec98a;
+  --bag-putter-b: #158552;
+  --bag-track: rgba(255, 255, 255, 0.08);
+  --bag-pill-bg: rgba(255, 255, 255, 0.1);
+  --bag-editor-bg: rgba(255, 255, 255, 0.045);
+}
+
+#bagRoot {
+  --bag-cat-color: var(--bag-irons-a);
+  --bag-row-h: 54px;
+  --bag-bar-h: 16px;
+  --bag-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  color: var(--text);
+}
+
+/* ===== Entrance: soft staggered rise, once per render ================== */
+@keyframes bagRise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+#bagRoot .bag-rise {
+  animation: bagRise 0.45s var(--spring) both;
+}
+#bagRoot .bag-rise:nth-child(2) { animation-delay: 0.05s; }
+#bagRoot .bag-rise:nth-child(3) { animation-delay: 0.1s; }
+#bagRoot .bag-rise:nth-child(4) { animation-delay: 0.15s; }
+#bagRoot .bag-rise:nth-child(5) { animation-delay: 0.19s; }
+
+@media (prefers-reduced-motion: reduce) {
+  #bagRoot *,
+  #bagRoot *::before,
+  #bagRoot *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===== Toolbar (club count + reset) ==================================== */
+.bag-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 2px 4px 10px;
+}
+
+.bag-toolbar-cap {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.bag-reset-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  border-radius: 999px;
+  padding: 0 16px;
+  min-height: 44px;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease,
+    background 0.18s ease, transform 0.15s var(--spring-snappy);
+}
+.bag-reset-btn:active {
+  transform: scale(0.96);
+  color: var(--danger);
+  border-color: rgba(214, 69, 69, 0.35);
+  background: rgba(214, 69, 69, 0.08);
+}
+
+/* ===== Distance gapping chart ========================================== */
+.bag-chart-card .card-title {
+  margin-bottom: 4px;
+}
+
+.bag-subline {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0 1px 12px;
+}
+.bag-subline b {
+  color: var(--text);
+  font-weight: 750;
+}
+.bag-subline .bag-gap-flag {
+  color: var(--warn);
+  font-weight: 800;
+}
+
+.bag-chart {
+  position: relative;
+}
+
+.bag-chart-row {
+  display: grid;
+  grid-template-columns: 58px 1fr 52px;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 2px 0;
+  position: relative;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 10px;
+  transition: background 0.15s ease;
+}
+.bag-chart-row:active {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.bag-chart-name {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  text-align: right;
+}
+
+.bag-chart-track {
+  position: relative;
+  height: var(--bag-bar-h);
+  border-radius: 999px;
+  background: var(--bag-track);
+  overflow: visible;
+}
+
+/* The carry bar */
+.bag-bar-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0; /* animated to final width by JS */
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--bag-cat-a, var(--bag-irons-a)),
+    var(--bag-cat-b, var(--bag-irons-b))
+  );
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  transition: width 0.65s var(--spring);
+}
+
+/* Ghost extension carry → total */
+.bag-bar-ghost {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 999px;
+  background: repeating-linear-gradient(
+    -55deg,
+    rgba(127, 127, 127, 0.28),
+    rgba(127, 127, 127, 0.28) 3px,
+    transparent 3px,
+    transparent 7px
+  );
+  opacity: 0.85;
+  transition: width 0.65s var(--spring), left 0.65s var(--spring);
+}
+
+.bag-chart-yd {
+  font-size: 12.5px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* Gap pill straddling the divider above each row (except the shortest) */
+.bag-gap-pill {
+  position: absolute;
+  top: 0;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+  font-size: 10.5px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  background: var(--bag-pill-bg);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-radius: 999px;
+  padding: 2.5px 8px;
+  white-space: nowrap;
+}
+#bagRoot.bag-anim .bag-gap-pill {
+  animation: bagPillIn 0.4s var(--spring) both;
+  animation-delay: 0.35s;
+}
+.bag-gap-pill.wide {
+  color: #fff;
+  background: var(--warn);
+  box-shadow: 0 2px 8px rgba(211, 135, 19, 0.35);
+}
+@keyframes bagPillIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.bag-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 68px 0 68px;
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 12px;
+  font-size: 11px;
+  font-weight: 750;
+  color: var(--muted);
+}
+.bag-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.bag-chart-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--bag-cat-a, var(--bag-irons-a));
+}
+.bag-chart-legend .leg-ghost i {
+  background: transparent;
+  border: 1.5px dashed var(--muted-2);
+  border-radius: 3px;
+}
+
+/* Single-club or empty chart note */
+.bag-chart-note {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 2px 2px;
+}
+
+/* ===== Group cards ====================================================== */
+.bag-group {
+  overflow: hidden;
+}
+
+.bag-group-head {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 4px 2px;
+  margin: 0;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 12px;
+  transition: background 0.15s ease, transform 0.15s var(--spring-snappy);
+}
+.bag-group-head:active {
+  background: rgba(127, 127, 127, 0.08);
+  transform: scale(0.995);
+}
+
+.bag-group-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: linear-gradient(
+    135deg,
+    var(--bag-cat-a),
+    var(--bag-cat-b)
+  );
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+}
+
+.bag-group-name {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.bag-group-count {
+  font-size: 11.5px;
+  font-weight: 850;
+  color: var(--muted);
+  background: var(--bag-pill-bg);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-group-range {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-2);
+}
+
+.bag-chevron {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  color: var(--muted-2);
+  transition: transform 0.32s var(--spring);
+}
+.bag-group.collapsed .bag-chevron {
+  transform: rotate(-90deg);
+}
+
+/* Smooth collapse via grid rows */
+.bag-group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.38s var(--spring), opacity 0.28s ease;
+}
+.bag-group.collapsed .bag-group-body {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+.bag-group-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ===== Club rows ======================================================== */
+.bag-club {
+  border-top: 1px solid var(--line);
+}
+.bag-club:first-child {
+  border-top: 0;
+}
+
+.bag-club-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bag-club-top .bag-sync-chip {
+  flex: 0 0 auto;
+  margin-right: 2px;
+}
+
+.bag-club .ic,
+.bag-group-head .ic {
+  display: block;
+}
+
+
+.bag-club-main {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: var(--bag-row-h);
+  padding: 6px 2px;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 12px;
+  transition: background 0.15s ease, transform 0.12s var(--spring-snappy);
+}
+.bag-club-main:active {
+  background: rgba(127, 127, 127, 0.09);
+  transform: scale(0.985);
+}
+
+.bag-club-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--bag-cat-a), var(--bag-cat-b));
+}
+
+.bag-club-id {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.bag-club-name {
+  font-size: 15.5px;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bag-club-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bag-club-meta .dot-sep::before {
+  content: '·';
+  color: var(--muted-2);
+}
+
+.bag-club-yards {
+  font-size: 16px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+.bag-club-yards small {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--muted-2);
+}
+
+/* Measured-carry adoption chip surfaced from app.js stats */
+.bag-sync-chip {
+  appearance: none;
+  border: 1px solid rgba(24, 164, 91, 0.35);
+  background: var(--green-3);
+  color: var(--green);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+  border-radius: 999px;
+  padding: 5px 10px;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.14s var(--spring-snappy), filter 0.15s ease;
+}
+.bag-sync-chip:active {
+  transform: scale(0.94);
+  filter: brightness(1.08);
+}
+
+.bag-club-chev {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  color: var(--muted-2);
+  transition: transform 0.32s var(--spring);
+}
+.bag-club.open .bag-club-chev {
+  transform: rotate(90deg);
+}
+
+/* ===== Detail editor ==================================================== */
+.bag-club-detail {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.38s var(--spring);
+}
+.bag-club.open .bag-club-detail {
+  grid-template-rows: 1fr;
+}
+.bag-club-detail-in {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bag-editor {
+  background: var(--bag-editor-bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px 13px 14px;
+  margin: 2px 0 12px;
+}
+
+.bag-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.bag-field {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  min-width: 0;
+}
+.bag-field.full {
+  grid-column: 1 / -1;
+}
+
+.bag-input {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bag-input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* prevents iOS focus zoom */
+  font-weight: 650;
+  border-radius: 12px;
+  padding: 9px 12px;
+  width: 100%;
+  min-height: 44px;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.bag-input::placeholder {
+  color: var(--muted-2);
+  font-weight: 500;
+}
+.bag-input:focus {
+  border-color: var(--green-2);
+  box-shadow: 0 0 0 3.5px rgba(24, 164, 91, 0.18);
+}
+textarea.bag-input {
+  resize: none;
+  line-height: 1.35;
+  min-height: 66px;
+}
+
+select.bag-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' d='m1.5 1.75 4.5 4.5 4.5-4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  padding-right: 34px;
+}
+
+/* Category picker as iOS-style segmented control */
+.bag-cat-seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  background: var(--bag-pill-bg);
+  border-radius: 12px;
+  padding: 3px;
+}
+.bag-cat-opt {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  border-radius: 10px;
+  min-height: 38px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease,
+    box-shadow 0.18s ease, transform 0.14s var(--spring-snappy);
+}
+.bag-cat-opt:active {
+  transform: scale(0.96);
+}
+.bag-cat-opt.active {
+  background: var(--card-solid);
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+}
+
+.bag-editor-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.bag-delete-btn {
+  appearance: none;
+  border: 1px solid rgba(214, 69, 69, 0.28);
+  background: rgba(214, 69, 69, 0.1);
+  color: var(--danger);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 800;
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 0 18px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  cursor: pointer;
+  transition: transform 0.14s var(--spring-snappy), filter 0.15s ease;
+}
+.bag-delete-btn:active {
+  transform: scale(0.95);
+  filter: brightness(1.1);
+}
+
+.bag-loft-badge {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== Add-club row per group ========================================== */
+.bag-add-row {
+  appearance: none;
+  border: 1.5px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+  width: 100%;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 800;
+  border-radius: 13px;
+  min-height: 44px;
+  margin: 10px 0 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  transition: color 0.18s ease, border-color 0.18s ease,
+    background 0.18s ease, transform 0.14s var(--spring-snappy);
+}
+.bag-add-row:active {
+  transform: scale(0.98);
+  color: var(--green);
+  border-color: rgba(24, 164, 91, 0.4);
+  background: rgba(24, 164, 91, 0.07);
+}
+.bag-add-row svg {
+  width: 14px;
+  height: 14px;
+}
+
+.bag-add-form {
+  display: grid;
+  grid-template-columns: 1.4fr 0.9fr auto auto;
+  gap: 8px;
+  align-items: end;
+  margin: 10px 0 2px;
+  animation: bagFormIn 0.32s var(--spring) both;
+}
+@keyframes bagFormIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.bag-add-form .bag-input {
+  min-height: 44px;
+}
+.bag-add-go {
+  appearance: none;
+  border: 0;
+  background: var(--green-2);
+  color: #fff;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 850;
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 0 16px;
+  cursor: pointer;
+  transition: transform 0.14s var(--spring-snappy), filter 0.15s ease;
+}
+.bag-add-go:active {
+  transform: scale(0.94);
+  filter: brightness(1.08);
+}
+.bag-add-cancel {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 800;
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.bag-add-cancel:active {
+  color: var(--text);
+}
+
+/* ===== Empty state ====================================================== */
+.bag-empty {
+  text-align: center;
+  padding: 44px 20px 30px;
+}
+.bag-empty svg {
+  width: 74px;
+  height: 74px;
+  color: var(--muted-2);
+  opacity: 0.85;
+  margin-bottom: 6px;
+}
+.bag-empty h2 {
+  margin: 10px 0 6px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.bag-empty p {
+  margin: 0 auto 20px;
+  max-width: 270px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.bag-empty .bag-add-go {
+  min-width: 190px;
+}
+.bag-empty-card {
+  padding-bottom: 26px;
+}
+
+/* ===== Bottom hint ====================================================== */
+.bag-foot-hint {
+  text-align: center;
+  color: var(--muted-2);
+  font-size: 11.5px;
+  line-height: 1.4;
+  margin: 4px 16px 0;
+}
+
+/* Narrow phones: keep the add-form usable */
+@media (max-width: 374px) {
+  .bag-add-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .bag-add-form .bag-add-go,
+  .bag-add-form .bag-add-cancel {
+    min-width: 0;
+  }
+}
