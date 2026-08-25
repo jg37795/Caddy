@@ -194,6 +194,12 @@
     roundMiniPlusBtn: $('roundMiniPlusBtn'),
     roundShotReadout: $('roundShotReadout'),
     roundActionBtn: $('roundActionBtn'),
+    courseMappingPill: $('courseMappingPill'),
+    courseMappingSpinner: $('courseMappingSpinner'),
+    courseMappingText: $('courseMappingText'),
+    courseMappingSub: $('courseMappingSub'),
+    courseMappingRetryBtn: $('courseMappingRetry'),
+    appToast: $('appToast'),
     roundSubActions: $('roundSubActions'),
     roundDiscardBtn: $('roundDiscardBtn'),
     roundNextHoleBtn: $('roundNextHoleBtn'),
@@ -291,6 +297,11 @@
     _courseSearchSeq: 0,
     nearbyCourseLoading: false,
     nearbyCourseLoadingScorecard: false,
+    // 'idle' | 'mapping' | 'failed' — hard-blocks Start round while a
+    // course scorecard is being fetched/built from OpenStreetMap.
+    courseMappingState: 'idle',
+    courseMappingName: '',
+    courseMappingRetry: null,
     nearbySearchRequested: false,
     nearbySearchError: null,
     selectedNearbyCourse: null,
@@ -1102,6 +1113,9 @@
       initMap();
       closeWindPop();
       renderPendingShot();
+      // Keep the mapping pill honest after returning to the Play map
+      // (mapping/failed state intentionally persists across tab switches).
+      renderCourseMappingPill();
       setTimeout(() => {
         if (state.map) {
           state.map.invalidateSize();
@@ -2863,7 +2877,116 @@
   });
 
 
+  /* ---- Course mapping state: pill UI + Start-round hard block ---- */
+
+  function courseMappingBlocked() {
+    return state.courseMappingState === 'mapping' || state.courseMappingState === 'failed';
+  }
+
+  function setCourseMapping(kind, opts = {}) {
+    state.courseMappingState = kind;
+    if (opts.name !== undefined) state.courseMappingName = opts.name;
+    if (opts.retry !== undefined) state.courseMappingRetry = opts.retry;
+    renderCourseMappingPill();
+    syncStartRoundGate();
+  }
+
+  function clearCourseMapping() {
+    if (state.courseMappingState === 'idle') return;
+    setCourseMapping('idle', { name: '', retry: null });
+  }
+
+  function renderCourseMappingPill(successHint = null) {
+    const pill = els.courseMappingPill;
+    if (!pill) return;
+    const kind = state.courseMappingState;
+
+    if (kind === 'idle') {
+      pill.hidden = true;
+      return;
+    }
+
+    pill.hidden = false;
+    pill.classList.toggle('is-error', kind === 'failed');
+
+    if (els.courseMappingSpinner) {
+      els.courseMappingSpinner.style.display = kind === 'failed' ? 'none' : '';
+    }
+    if (els.courseMappingRetryBtn) {
+      els.courseMappingRetryBtn.hidden = kind !== 'failed';
+    }
+
+    const name = state.courseMappingName || 'course';
+    if (kind === 'mapping') {
+      if (els.courseMappingText) els.courseMappingText.textContent = `Mapping ${name}…`;
+      if (els.courseMappingSub) {
+        els.courseMappingSub.textContent =
+          'Fetching greens & holes from OpenStreetMap…';
+      }
+    } else if (kind === 'failed') {
+      if (els.courseMappingText) {
+        els.courseMappingText.textContent = `Couldn't map ${name}`;
+      }
+      if (els.courseMappingSub) {
+        els.courseMappingSub.textContent =
+          'Scorecard lookup failed — round start is blocked.';
+      }
+    } else if (kind === 'success' && successHint) {
+      // Transient success flash handled by caller via fade-out.
+      if (els.courseMappingText) els.courseMappingText.textContent = name;
+      if (els.courseMappingSub) els.courseMappingSub.textContent = successHint;
+    }
+  }
+
+  let _mappingFadeTimer = null;
+  function flashMappingSuccess(hint) {
+    setCourseMapping('success', { name: state.courseMappingName, retry: null });
+    renderCourseMappingPill(hint);
+    clearTimeout(_mappingFadeTimer);
+    _mappingFadeTimer = setTimeout(() => {
+      if (state.courseMappingState === 'success') clearCourseMapping();
+    }, 1600);
+  }
+
+  let _toastTimer = null;
+  function showAppToast(text) {
+    const toast = els.appToast;
+    if (!toast) return;
+    toast.textContent = text;
+    toast.hidden = false;
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => {
+      toast.hidden = true;
+    }, 2600);
+  }
+
+  // Disables the Start-round entry points while a mapping request is in
+  // flight or has failed. Casual play (no course selected / idle) passes.
+  function syncStartRoundGate() {
+    const btn = els.roundActionBtn;
+    if (!btn) return;
+    const blocked =
+      roundStatus() === 'idle' && courseMappingBlocked();
+    // Keep the button clickable so a tap can explain WHY it's blocked
+    // (startRound() hard-rejects while mapping); visual state only here.
+    btn.classList.toggle('mapping-blocked', blocked);
+    if (blocked) btn.textContent = 'Still mapping…';
+  }
+
   function startRound() {
+    // HARD BLOCK: a course scorecard is still being mapped (or its lookup
+    // failed without a successful retry). Casual play (no pending course)
+    // is unaffected.
+    if (courseMappingBlocked()) {
+      showAppToast(
+        state.courseMappingState === 'failed'
+          ? 'Course mapping failed — tap Retry on the map (or clear the course) before starting.'
+          : `Still mapping ${state.courseMappingName || 'the course'} — hang on a second.`
+      );
+      haptic(20);
+      return;
+    }
+
     // Course setup is available.
     if (
       els.roundSetupSheet &&
@@ -3547,6 +3670,8 @@
       els.roundActionBtn.textContent = 'Finish shot';
       els.roundActionBtn.className = 'primary-btn';
     }
+    // Re-apply the mapping gate (it can override the idle label).
+    syncStartRoundGate();
 
     // Sub-actions + end button visibility
     const inRound = status !== 'idle';
@@ -4472,6 +4597,8 @@
 
     state.selectedNearbyCourse = null;
     state.selectedCourseTemplate = course;
+    // A saved course loads locally — any pending/failed mapping is moot.
+    clearCourseMapping();
     applyTemplateHoleCount(course);
 
     // Auto-apply tees: what this player used last time here, else the
@@ -5436,6 +5563,12 @@ out geom;`;
     state.nearbyCourseLoadingScorecard = true;
     renderNearbyCourses();
 
+    // Visible mapping state on the Play map + hard block on Start round.
+    setCourseMapping('mapping', {
+      name: candidate.name,
+      retry: () => selectNearbyCourse(candidate),
+    });
+
     try {
       const elements = await fetchAutoCourseScorecard(candidate);
       const course = buildAutoCourse(candidate, elements);
@@ -5458,8 +5591,21 @@ out geom;`;
       els.nearbyCourseStatus.textContent = r && r.holesMapped
         ? `Selected ${course.name}. ${describeImport(course)}. Review flagged holes before starting.`
         : `Selected ${course.name}. No mapped scorecard was found; add pars and yardages manually.`;
+
+      flashMappingSuccess(
+        r && r.holesMapped
+          ? `${(course.holes || []).length} holes mapped ✓`
+          : 'No OSM scorecard found — manual entry'
+      );
     } catch (error) {
       console.warn('Auto scorecard lookup failed:', error);
+
+      // Mapping failed: Start stays blocked until a successful retry or
+      // the user explicitly clears the course selection.
+      setCourseMapping('failed', {
+        name: candidate.name,
+        retry: () => selectNearbyCourse(candidate),
+      });
 
       state.selectedCourseTemplate = normalizeCourse({
         id: `local:${cryptoId()}`,
@@ -5687,6 +5833,10 @@ out geom;`;
 
       state.selectedNearbyCourse = null;
       state.selectedCourseTemplate = null;
+      // User explicitly cleared/re-picked the course: drop any stale
+      // mapping-failed block. (An in-flight mapping is never cleared here —
+      // it only resolves via its own success/failure.)
+      if (state.courseMappingState === 'failed') clearCourseMapping();
 
       if (!selectedId) {
         els.roundSetupCourseName.value = '';
@@ -6472,6 +6622,19 @@ out geom;`;
           startShot();
         } else {
           finishShot(false);
+        }
+      });
+    }
+
+    // Course-mapping pill retry: re-run the failed scorecard lookup.
+    if (els.courseMappingRetryBtn) {
+      els.courseMappingRetryBtn.addEventListener('click', () => {
+        const retry = state.courseMappingRetry;
+        if (typeof retry === 'function') {
+          haptic(6);
+          retry();
+        } else {
+          clearCourseMapping();
         }
       });
     }
