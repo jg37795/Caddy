@@ -389,6 +389,12 @@
         <button class="ghost-btn prep-live-btn" id="prepLiveBtn" type="button">Use live weather & elevation</button>
       </div>
 
+      <!-- HOLE FLYOVER (side-profile strip) -->
+      <div class="card prep-flyover-card" id="prepFlyoverCard" hidden>
+        <div class="prep-kicker">Hole flyover</div>
+        <div id="prepFlyoverBody"></div>
+      </div>
+
       <!-- RECOMMENDATION -->
       <div class="card prep-rec" id="prepRecCard">
         <div class="prep-kicker">Pre-shot number</div>
@@ -484,12 +490,14 @@
       if (unbound) unbound.hidden = false;
       shotCard.hidden = true;
       recCard.hidden = true;
+      renderFlyover();
       renderStrategy();
       return;
     }
     if (unbound) unbound.hidden = true;
     shotCard.hidden = false;
     recCard.hidden = false;
+    renderFlyover();
 
     $('prepTargetChip').textContent = `Hole ${boundHole.number}`;
     const g = boundHole.green || {};
@@ -826,6 +834,150 @@
   function hazardAlongYd(sub) {
     const m = /~(\d+)\s*yd/.exec(String(sub || ''));
     return m ? Number(m[1]) : null;
+  }
+
+  /* ======================================================================
+     HOLE FLYOVER — glanceable side-profile strip (tee left, green right)
+     ====================================================================== */
+  function flyoverProfile(h) {
+    if (!h || !Number.isFinite(h.yards) || h.yards < 60) return null;
+    const yards = Math.round(h.yards);
+
+    // Yardage ticks every ~50 yd between tee and green.
+    const marks = [];
+    for (let d = 50; d <= yards - 20; d += 50) {
+      marks.push({ yd: d, pct: d / yards });
+    }
+
+    // Hazards with a mapped along-the-line distance.
+    const hazards = [];
+    const hzList = Array.isArray(h.hazards) ? h.hazards : [];
+    for (const hz of hzList) {
+      const along = hazardAlongYd(hz && hz.sub);
+      if (along == null || along <= 0 || along >= yards) continue;
+      hazards.push({
+        type: hz.type === 'water' ? 'water' : 'bunker',
+        along,
+        pct: along / yards,
+      });
+    }
+
+    // Green band from front/back carry distances.
+    const g = h.green || {};
+    let green = null;
+    if (
+      Number.isFinite(g.front) &&
+      Number.isFinite(g.back) &&
+      g.back > g.front
+    ) {
+      green = {
+        startPct: clamp(g.front / yards, 0, 1),
+        endPct: clamp(g.back / yards, 0, 1),
+      };
+    }
+
+    // Elevation trend (yd → ft). Flat line when the course isn't surveyed.
+    let elev = null;
+    const ev = h.elevation;
+    if (
+      Array.isArray(ev) &&
+      ev.length >= 2 &&
+      ev.every((p) => p && Number.isFinite(p.yd) && Number.isFinite(p.ft))
+    ) {
+      elev = ev
+        .map((p) => ({ pct: clamp(p.yd / yards, 0, 1), ft: p.ft }))
+        .sort((a, b) => a.pct - b.pct);
+    }
+
+    if (!marks.length && !hazards.length && !green) return null;
+    return { yards, marks, hazards, green, elev };
+  }
+
+  function flyoverSvg(p) {
+    if (!p) return '';
+    const W = 320;
+    const H = 96;
+    const L = 14;
+    const R = W - 16;
+    const BASE = 62;
+    const span = R - L;
+    const x = (pct) => L + span * clamp(pct, 0, 1);
+
+    const parts = [];
+
+    // Elevation trend: surveyed points, or a calm flat baseline.
+    if (p.elev) {
+      const fts = p.elev.map((e) => e.ft);
+      const lo = Math.min(...fts);
+      const hi = Math.max(...fts);
+      const spread = Math.max(hi - lo, 1);
+      const pts = p.elev.map(
+        (e) => `${x(e.pct).toFixed(1)},${(BASE - 8 - ((e.ft - lo) / spread) * 22).toFixed(1)}`
+      );
+      parts.push(
+        `<polyline class="prep-fv-elev" points="${pts.join(' ')}" />`
+      );
+    } else {
+      parts.push(`<line class="prep-fv-base" x1="${L}" y1="${BASE}" x2="${R}" y2="${BASE}" />`);
+    }
+
+    // Distance markers every 50 yd.
+    for (const m of p.marks) {
+      const mx = x(m.pct);
+      parts.push(
+        `<line class="prep-fv-tick" x1="${mx.toFixed(1)}" y1="${BASE + (p.elev ? -30 : 3)}" x2="${mx.toFixed(1)}" y2="${BASE + (p.elev ? -26 : 7)}" />` +
+          `<text class="prep-fv-ticklabel" x="${mx.toFixed(1)}" y="${H - 6}">${m.yd}</text>`
+      );
+    }
+
+    // Green band + flag on the right end.
+    if (p.green) {
+      const gx = x(p.green.startPct);
+      const gw = Math.max(x(p.green.endPct) - gx, 5);
+      parts.push(
+        `<rect class="prep-fv-green" x="${gx.toFixed(1)}" y="${BASE - 4}" width="${gw.toFixed(1)}" height="8" rx="4" />`
+      );
+    }
+    parts.push(
+      `<line class="prep-fv-flagpole" x1="${R}" y1="${BASE - 24}" x2="${R}" y2="${BASE}" />` +
+        `<path class="prep-fv-flag" d="M ${R} ${BASE - 24} l 10 4 l -10 4 Z" />`
+    );
+
+    // Tee pad on the left.
+    parts.push(
+      `<rect class="prep-fv-tee" x="${L - 6}" y="${BASE - 3}" width="7" height="6" rx="1.5" />`
+    );
+
+    // Hazard markers, proportionally placed above the line.
+    for (const hz of p.hazards) {
+      const hx = x(hz.pct);
+      if (hz.type === 'water') {
+        parts.push(
+          `<path class="prep-fv-hz water" d="M ${hx - 5} ${BASE - 12} q 2.5 -4 5 0 q 2.5 4 5 0 l 0 3 q -2.5 3 -5 0.5 q -2.5 2.5 -5 -0.5 Z" transform="translate(-0,0)" />`
+        );
+      } else {
+        parts.push(
+          `<ellipse class="prep-fv-hz bunker" cx="${hx.toFixed(1)}" cy="${BASE - 10}" rx="5.5" ry="3" />`
+        );
+      }
+    }
+
+    return `<svg class="prep-fv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Side profile of the hole: ${p.yards} yards">${parts.join('')}</svg>`;
+  }
+
+  function renderFlyover() {
+    const card = $('prepFlyoverCard');
+    const body = $('prepFlyoverBody');
+    if (!card || !body) return;
+    const prof = boundHole ? flyoverProfile(boundHole) : null;
+    const svg = flyoverSvg(prof);
+    if (!svg) {
+      card.hidden = true;
+      body.innerHTML = '';
+      return;
+    }
+    body.innerHTML = svg;
+    card.hidden = false;
   }
 
   function renderStrategy() {
