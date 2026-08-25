@@ -176,16 +176,16 @@ body[data-detent='full'] .rx-reticle {
   top: calc(var(--safe-top) + 152px);
 }
 
-/* Sheet raised (half/full): the hero capsule duplicates the sheet's own
-   numbers, so fade it out — the strip (hole · wind) stays useful on the map. */
+/* Sheet raised: the hero capsule duplicates the sheet's own numbers, so fade
+   it out continuously via --rx-hero-fade (set on .range-wrap every frame
+   during drag/snap by app.js setReveal). 1 = collapsed (visible), 0 = sheet
+   at/above half. Detent attr kills taps once fully snapped open. */
 .rx-hero {
-  transition: transform 0.42s var(--spring), opacity 0.3s ease,
-    visibility 0s linear 0.3s;
+  opacity: var(--rx-hero-fade, 1);
 }
 
 body[data-detent='half'] .rx-hero,
 body[data-detent='full'] .rx-hero {
-  opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }

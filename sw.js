@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.62'; // + prep course search, manual calc removed, mapping progress + start block
+const CACHE_VERSION = 'v1.0.63'; // + hero capsule fades continuously with sheet position (fixes stale overlap)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

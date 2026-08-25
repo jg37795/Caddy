@@ -7164,6 +7164,9 @@ out geom;`;
       // Mirror onto the wrap so the floating pills (siblings of the sheet)
       // can fade live during the drag.
       wrap.style.setProperty('--detail-reveal', detailR.toFixed(3));
+      // Continuous hero-capsule fade: 1 when sheet collapsed → 0 as it rises
+      // past half. Driven every frame, so no reliance on detent snapping.
+      wrap.style.setProperty('--rx-hero-fade', (1 - fcbR).toFixed(3));
     }
     function followFrameDuringDrag() {
       if (!state.followUser || !state.loc || !state.map || followRafPending)
@@ -7210,18 +7213,22 @@ out geom;`;
         sheet.style.setProperty('--fcb-reveal', String(r.fcb));
         sheet.style.setProperty('--detail-reveal', String(r.detail));
         wrap.style.setProperty('--detail-reveal', String(r.detail));
+        // Hero fade mirrors the detent: visible only when fully collapsed.
+        wrap.style.setProperty('--rx-hero-fade', name === 'collapsed' ? '1' : '0');
         void sheet.offsetHeight;
         requestAnimationFrame(() => {
           document.body.removeAttribute('data-dragging');
           sheet.style.removeProperty('--fcb-reveal');
           sheet.style.removeProperty('--detail-reveal');
           wrap.style.removeProperty('--detail-reveal');
+          wrap.style.removeProperty('--rx-hero-fade');
           sheet.classList.add('animate');
         });
       } else {
         sheet.style.removeProperty('--fcb-reveal');
         sheet.style.removeProperty('--detail-reveal');
         wrap.style.removeProperty('--detail-reveal');
+        wrap.style.removeProperty('--rx-hero-fade');
       }
 
       if (
@@ -7326,6 +7333,7 @@ out geom;`;
         sheet.style.removeProperty('--fcb-reveal');
         sheet.style.removeProperty('--detail-reveal');
         wrap.style.removeProperty('--detail-reveal');
+        wrap.style.removeProperty('--rx-hero-fade');
         cycleUp();
         return;
       }
