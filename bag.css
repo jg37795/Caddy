@@ -798,3 +798,20 @@ select.bag-input {
     min-width: 0;
   }
 }
+
+/* ---- club confidence markers (quiet) ------------------------------------ */
+
+.bag-conf {
+  display: inline-block;
+  margin-left: 5px;
+  font-size: 11px;
+  line-height: 1;
+  vertical-align: 1px;
+  opacity: .55;
+  cursor: default;
+}
+.bag-conf-trusted { color: var(--bag-accent, #34c77b); }
+.bag-conf-untested { color: var(--label-secondary, #8e8e93); opacity: .45; }
+.bag-chart-name .bag-conf { font-size: 10px; }
+.bag-conf-count { white-space: nowrap; }
+.bag-conf-count .bag-conf { margin-left: 0; margin-right: 2px; }

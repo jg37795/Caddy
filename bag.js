@@ -375,6 +375,62 @@
     })).filter((g) => g.clubs.length > 0);
   }
 
+  /* ------------- club confidence (from tracked-shot history) -------------- */
+
+  const SHOTLOG_KEY_BAG = 'caddy:shotLog:v1'; // same store app.js owns — read-only here
+  const CONF_UNTESTED_N = 3;   // fewer recorded shots than this → 'untested'
+  const CONF_TRUSTED_N = 8;    // shots before a club can earn 'trusted'
+  const CONF_TRUSTED_REL_SD = 0.12; // …and carry SD within 12% of average
+
+  let _confCacheRaw = null, _confCache = null;
+  function readShotConfidence() {
+    // Returns null when the player has no shot history at all (show nothing),
+    // else { map: id -> 'untested'|'trusted', trusted: n, untested: n }.
+    let raw = null;
+    try { raw = localStorage.getItem(SHOTLOG_KEY_BAG); } catch (_) { return null; }
+    if (_confCache && raw === _confCacheRaw) return _confCache;
+    _confCacheRaw = raw;
+    _confCache = computeShotConfidence(raw);
+    return _confCache;
+  }
+
+  function computeShotConfidence(raw) {
+    let log = null;
+    try { log = JSON.parse(raw || 'null'); } catch (_) { return null; }
+    const norm = (e) => {
+      if (Number.isFinite(e)) return e > 0 ? e : null;
+      if (!e || typeof e !== 'object') return null;
+      const d = Number(e.d);
+      return Number.isFinite(d) && d > 0 ? d : null;
+    };
+    const map = {};
+    let any = false;
+    if (log && typeof log === 'object') Object.keys(log).forEach((cid) => {
+      const arr = Array.isArray(log[cid]) ? log[cid].map(norm).filter(Boolean) : [];
+      if (!arr.length) return;
+      any = true;
+      if (arr.length < CONF_UNTESTED_N) { map[cid] = 'untested'; return; }
+      if (arr.length < CONF_TRUSTED_N) return; // enough to be interesting, not yet proven
+      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const sd = Math.sqrt(arr.reduce((a, b) => a + (b - avg) * (b - avg), 0) / arr.length);
+      if (avg > 0 && sd / avg <= CONF_TRUSTED_REL_SD) map[cid] = 'trusted';
+    });
+    if (!any) return null;
+    let trusted = 0, untested = 0;
+    Object.keys(map).forEach((k) => (map[k] === 'trusted' ? trusted++ : untested++));
+    return { map: map, trusted: trusted, untested: untested };
+  }
+
+  function confMarkHTML(cid, conf) {
+    if (!conf || !conf.map[cid]) return '';
+    const kind = conf.map[cid];
+    return kind === 'trusted'
+      ? '<span class="bag-conf bag-conf-trusted" title="Trusted — ' +
+          'consistent carry over many tracked shots" aria-label="Trusted club">✓</span>'
+      : '<span class="bag-conf bag-conf-untested" title="Untested — few tracked shots yet" ' +
+          'aria-label="Untested club">·</span>';
+  }
+
   function chartModel() {
     const list = visibleClubs().slice().sort((a, b) => a.yards - b.yards);
     const model = { list, rows: [], lo: 0, hi: 1, widest: 0, widestFlagged: false, axisMax: 0 };
@@ -455,7 +511,7 @@
       ' aria-expanded="' + (open ? 'true' : 'false') + '">' +
       '<span class="bag-club-dot" style="' + catVarStyle(c.cat) + '"></span>' +
       '<span class="bag-club-id">' +
-      '<span class="bag-club-name">' + esc(c.name) + '</span>' +
+      '<span class="bag-club-name">' + esc(c.name) + confMarkHTML(c.id, readShotConfidence()) + '</span>' +
       '<span class="bag-club-meta">' + meta + '</span>' +
       '</span>' +
       '<span class="bag-club-yards">' + c.yards + '<small>yd</small></span>' +
@@ -575,15 +631,23 @@
     const subline =
       '<b>' + n + '</b> clubs · longest <b>' + esc(longest.name) + ' ' + longest.yards + '</b> · widest gap ' +
       (m.widestFlagged ? '<b class="bag-gap-flag">' : '<b>') + widestTxt + '</b>';
+    const conf = readShotConfidence();
+    const confTxt =
+      conf && conf.trusted
+        ? ' · <span class="bag-conf-count"><span class="bag-conf bag-conf-trusted">✓</span> ' +
+          conf.trusted + ' trusted' +
+          (conf.untested ? ' · <span class="bag-conf bag-conf-untested">·</span> ' + conf.untested + ' untested' : '') +
+          '</span>'
+        : '';
 
     const rows = m.rows
-      .map((r) => chartRowHTML(r, animate, true))
+      .map((r) => chartRowHTML(r, animate, true, conf))
       .join('');
 
     return (
       '<section class="card bag-chart-card' + (animate ? ' bag-rise' : '') + '">' +
       '<div class="card-title"><h2>Distance gapping</h2></div>' +
-      '<div class="bag-subline">' + subline + '</div>' +
+      '<div class="bag-subline">' + subline + confTxt + '</div>' +
       '<div class="bag-chart">' + rows + '</div>' +
       '<div class="bag-chart-axis"><span>' + m.list[0].yards + '</span><span>carry (yd)</span><span>' + m.axisMax + '</span></div>' +
       legendHTML(m) +
@@ -591,7 +655,7 @@
     );
   }
 
-  function chartRowHTML(r, animate, withPill) {
+  function chartRowHTML(r, animate, withPill, conf) {
     const style =
       ' style="' + catVarStyle(r.c.cat) + '"';
     const fill =
@@ -609,7 +673,7 @@
         : '';
     return (
       '<div class="bag-chart-row" role="button" tabindex="0" data-act="chart-goto" data-id="' + esc(r.c.id) + '"' + style + '>' +
-      '<span class="bag-chart-name">' + esc(r.c.name) + '</span>' +
+      '<span class="bag-chart-name">' + esc(r.c.name) + confMarkHTML(r.c.id, conf) + '</span>' +
       '<span class="bag-chart-track">' + fill + ghost + pill + '</span>' +
       '<span class="bag-chart-yd">' + r.c.yards + '</span>' +
       '</div>'
