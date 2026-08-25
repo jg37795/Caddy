@@ -160,9 +160,11 @@
      2. DATA LOADING
      ====================================================================== */
   const PRESETS = [
-    { name: 'Ankeny test green', lat: 41.95, lng: -93.75 },
-    { name: 'Ankeny — Timber Ridge', lat: 41.9547, lng: -93.7308 },
-    { name: 'Des Moines — Blankonell', lat: 41.6394, lng: -93.7019 }
+    // Real OSM-mapped green (golf=green way) with strong 3DEP LiDAR relief
+    // (5.3m over 40m) — verified by coordinator. Old default was a flat field.
+    { name: 'Test green — real OSM green, hilly', lat: 41.91314, lng: -93.60971 },
+    { name: 'Test green 2 — same complex', lat: 41.91391, lng: -93.60242 },
+    { name: 'Ankeny — Timber Ridge area', lat: 41.9547, lng: -93.7308 }
   ];
   const SPAN_M = 40;         // bbox side, metres
   const GRID_N = 64;         // cells per side
