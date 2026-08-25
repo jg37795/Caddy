@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.47'; // round tab two-state layout, sheet restructured around course-finding, tap-opens-score-sheet, quiet Clear, SW cache-bypass
+const CACHE_VERSION = 'v1.0.48'; // round tab: orphan card removed, Group above scorecard, mini quick-fix sheet, "Regular tees", pars editor auto-opens
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

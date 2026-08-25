@@ -186,6 +186,12 @@
     clearRoundBtn: $('clearRoundBtn'),
     roundStatusChip: $('roundStatusChip'),
     roundShotHint: $('roundShotHint'),
+    roundMiniSheet: $('roundMiniSheet'),
+    roundMiniTitle: $('roundMiniTitle'),
+    roundMiniMeta: $('roundMiniMeta'),
+    roundMiniValue: $('roundMiniValue'),
+    roundMiniMinusBtn: $('roundMiniMinusBtn'),
+    roundMiniPlusBtn: $('roundMiniPlusBtn'),
     roundShotReadout: $('roundShotReadout'),
     roundActionBtn: $('roundActionBtn'),
     roundSubActions: $('roundSubActions'),
@@ -383,7 +389,7 @@
       id: 'casual',
       name: 'Casual Round',
       holesCount: 18,
-      teeName: 'Default tees',
+      teeName: 'Regular tees',
       source: 'manual',
       updatedAt: Date.now(),
 
@@ -2697,7 +2703,13 @@
         const btn = e.target.closest('[data-act]');
         if (!btn) return;
         if (btn.dataset.act === 'score' || btn.dataset.act === 'putts') {
-          openRoundScoreSheet(i + 1);
+          if (i + 1 === getCurrentHoleNumber()) {
+            // Current hole: the full sheet (FIR/GIR/penalties belong here).
+            openRoundScoreSheet(i + 1);
+          } else {
+            // Older hole: compact quick-fix (score + putts only).
+            openRoundMiniSheet(i + 1);
+          }
           haptic(6);
         } else {
           cycleRoundCell(i, btn.dataset.act);
@@ -3261,7 +3273,7 @@
         const on = t.name === course.activeTeeSet;
         return `<button type="button" class="tee-chip${on ? ' active' : ''}"
           data-tee="${escapeHtml(t.name)}" aria-pressed="${on}">${escapeHtml(
-          t.name
+          teeDisplayName(t.name)
         )}</button>`;
       })
       .join('');
@@ -3280,6 +3292,15 @@
       });
     });
   }
+  // Tee names: OSM courses without tagged tee colors import as 'default'.
+  // Display that as "Regular tees" everywhere; stored keys stay 'default'
+  // so tee memory and set matching keep working.
+  function teeDisplayName(name) {
+    const n = String(name || '').trim();
+    if (!n || n.toLowerCase() === 'default') return 'Regular tees';
+    return n;
+  }
+
   function renderRoundHoleHeader() {
     if (!els.roundHoleStrip) return;
 
@@ -3305,7 +3326,7 @@
     const holeMeta = [
       `Par ${hole.par || 4}`,
       hole.yards ? `${hole.yards} yd` : null,
-      course?.teeName || null,
+      course?.teeName ? teeDisplayName(course.teeName) : null,
     ]
       .filter(Boolean)
       .join(' · ');
@@ -3780,7 +3801,7 @@
 
     const savedSetup = load(LAST_ROUND_SETUP_KEY, {
       courseName: 'Casual Round',
-      teeName: 'Default tees',
+      teeName: 'Regular tees',
       startHole: 1,
       holes: defaultCourseHoles(),
     });
@@ -3797,7 +3818,7 @@
     // path; saved courses and manual entry live below it.
     state.selectedCourseTemplate = null;
     els.roundSetupCourseName.value = '';
-    els.roundSetupTeeName.value = 'Default tees';
+    els.roundSetupTeeName.value = 'Regular tees';
 
     const manual = document.getElementById('manualRoundWrap');
     if (manual) manual.open = false;
@@ -3859,7 +3880,7 @@
           (course) =>
             `<option value="${escapeHtml(course.id)}">${escapeHtml(
               course.name
-            )} · ${escapeHtml(course.teeName || 'Default tees')}</option>`
+            )} · ${escapeHtml(teeDisplayName(course.teeName))}</option>`
         )
         .join('');
   }
@@ -3900,7 +3921,7 @@
             type="button" data-id="${escapeHtml(course.id)}">
             <span class="sc-name">${escapeHtml(course.name)}</span>
             <span class="sc-meta">${escapeHtml(
-              course.teeName || 'Default tees'
+              teeDisplayName(course.teeName)
             )} · ${holes}</span>
           </button>`;
       })
@@ -3964,6 +3985,10 @@
     // so the selection is visible, not hidden inside a collapsed drawer.
     const manual = document.getElementById('manualRoundWrap');
     if (manual) manual.open = true;
+    // Pars & yardages open with the course — that's the thing worth
+    // reviewing before teeing off.
+    const editor = document.getElementById('scorecardEditor');
+    if (editor) editor.open = true;
 
     renderRoundSetupHoles(course.holes);
     renderTeeSetPicker(course);
@@ -3971,7 +3996,7 @@
 
     if (els.nearbyCourseStatus) {
       els.nearbyCourseStatus.textContent = `${course.name} · ${
-        course.teeName || 'Default tees'
+        teeDisplayName(course.teeName)
       }`;
     }
     haptic(8);
@@ -4095,7 +4120,7 @@
       teeName:
         els.roundSetupTeeName.value.trim() ||
         template?.teeName ||
-        'Default tees',
+        'Regular tees',
 
       source: template?.source || nearby?.source || 'manual',
 
@@ -4235,7 +4260,7 @@
         const on = t.name === course.activeTeeSet;
         return `<button type="button" class="tee-chip${on ? ' active' : ''}"
           data-tee="${escapeHtml(t.name)}" aria-pressed="${on}">${escapeHtml(
-          t.name
+          teeDisplayName(t.name)
         )}</button>`;
       })
       .join('');
@@ -4720,7 +4745,7 @@
     return normalizeCourse({
       id: `local:${cryptoId()}`,
       name: candidate.name || (candidate.tags && candidate.tags.name) || 'Imported course',
-      teeName: bestSet ? bestSet.name : 'Default tees',
+      teeName: bestSet ? bestSet.name : 'Regular tees',
       source: 'openstreetmap',
       location: candPt
         ? { lat: candPt.lat, lng: candPt.lng }
@@ -4874,7 +4899,7 @@ out geom;`;
 
     els.roundSetupCourseSelect.value = '';
     els.roundSetupCourseName.value = candidate.name;
-    els.roundSetupTeeName.value = 'Default tees';
+    els.roundSetupTeeName.value = 'Regular tees';
     els.roundSetupSaveCourse.checked = true;
 
     // Show the tee chips / start hole as soon as a course is chosen.
@@ -4907,7 +4932,7 @@ out geom;`;
       state.selectedCourseTemplate = normalizeCourse({
         id: `local:${cryptoId()}`,
         name: candidate.name,
-        teeName: 'Default tees',
+        teeName: 'Regular tees',
         source: 'openstreetmap',
         location: { lat: candidate.lat, lng: candidate.lng },
         holes: defaultCourseHoles(),
@@ -5133,7 +5158,7 @@ out geom;`;
 
       if (!selectedId) {
         els.roundSetupCourseName.value = '';
-        els.roundSetupTeeName.value = 'Default tees';
+        els.roundSetupTeeName.value = 'Regular tees';
         els.roundSetupSaveCourse.checked = true;
 
         state.setupHolesCount = 18;
@@ -5409,6 +5434,109 @@ out geom;`;
     state.roundScoreDraft = null;
   }
 
+  // ---- Quick-fix mini-sheet (older holes: score + putts only) ----------
+  function openRoundMiniSheet(holeNumber) {
+    if (!els.roundMiniSheet || !els.roundScoreScrim) return;
+    if (roundStatus() === 'idle') return;
+    if (roundStatus() === 'pending') {
+      setNotice(
+        'Finish or discard the current shot before editing scores.',
+        'danger'
+      );
+      haptic(12);
+      return;
+    }
+
+    state.roundMiniDraft = getRoundScoreDraftForHole(holeNumber);
+    renderRoundMiniSheet();
+
+    els.roundMiniSheet.classList.add('open');
+    els.roundMiniSheet.setAttribute('aria-hidden', 'false');
+    els.roundScoreScrim.classList.add('open');
+    haptic(8);
+  }
+
+  function closeRoundMiniSheet() {
+    if (!els.roundMiniSheet) return;
+    els.roundMiniSheet.classList.remove('open');
+    els.roundMiniSheet.setAttribute('aria-hidden', 'true');
+    state.roundMiniDraft = null;
+    // Only drop the scrim if the full score sheet isn't open behind it.
+    if (els.roundScoreSheet && !els.roundScoreSheet.classList.contains('open')) {
+      els.roundScoreScrim.classList.remove('open');
+    }
+  }
+
+  function renderRoundMiniSheet() {
+    const draft = state.roundMiniDraft;
+    if (!draft || !els.roundMiniValue) return;
+
+    const course = getCurrentCourse();
+    const hole = course?.holes?.[draft.hole - 1] || defaultHole(draft.hole);
+
+    els.roundMiniTitle.textContent = `Edit Hole ${draft.hole}`;
+    els.roundMiniMeta.textContent = [
+      `Par ${hole.par || 4}`,
+      hole.yards ? `${hole.yards} yd` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    els.roundMiniValue.textContent = String(draft.score);
+
+    // Live vs-par tint, same convention as the main sheet.
+    const parNow = clamp(Math.round(num(hole.par, 4)), 3, 6);
+    els.roundMiniValue.classList.toggle('under', draft.score < parNow);
+    els.roundMiniValue.classList.toggle('over', draft.score > parNow);
+
+    document
+      .querySelectorAll('#roundMiniPuttsOptions button')
+      .forEach((button) => {
+        const value = Number(button.dataset.putts);
+        const active =
+          draft.putts !== '' &&
+          (value === 4
+            ? Number(draft.putts) >= 4
+            : Number(draft.putts) === value);
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+  }
+
+  function saveRoundMiniDraft() {
+    const draft = state.roundMiniDraft;
+    if (!draft || !state.roundSession) return;
+
+    const holeIndex = draft.hole - 1;
+    const existing = state.round[holeIndex] || {};
+
+    state.round[holeIndex] = {
+      ...existing,
+      hole: draft.hole,
+      score: String(Math.max(1, Math.round(draft.score))),
+      // Mini-sheet never touches FIR/GIR/penalties — preserve them.
+      putts:
+        draft.putts === ''
+          ? ''
+          : String(Math.max(0, Math.round(draft.putts))),
+    };
+
+    syncRoundScorecard();
+    if (draft.putts !== '')
+      save(LAST_PUTTS_KEY, Math.max(0, Math.round(draft.putts)));
+
+    closeRoundMiniSheet();
+
+    renderRound();
+    renderRoundShotUI();
+    renderRoundHoleHeader();
+    renderRoundMapHud();
+    renderStats();
+
+    setNotice(`Hole ${draft.hole} updated.`, 'greenish');
+    haptic(10);
+  }
+
   function saveRoundScoreDraft(andNext = false) {
     const draft = state.roundScoreDraft;
     const rs = state.roundSession;
@@ -5487,8 +5615,55 @@ out geom;`;
       els.roundScoreCloseBtn.addEventListener('click', closeRoundScoreSheet);
     }
 
+    // Quick-fix mini-sheet wiring.
+    const miniClose = $('roundMiniCloseBtn');
+    if (miniClose) miniClose.addEventListener('click', closeRoundMiniSheet);
+    if (els.roundMiniMinusBtn) {
+      els.roundMiniMinusBtn.addEventListener('click', () => {
+        if (!state.roundMiniDraft) return;
+        state.roundMiniDraft.score = Math.max(
+          1,
+          state.roundMiniDraft.score - 1
+        );
+        renderRoundMiniSheet();
+        haptic(4);
+      });
+    }
+    if (els.roundMiniPlusBtn) {
+      els.roundMiniPlusBtn.addEventListener('click', () => {
+        if (!state.roundMiniDraft) return;
+        state.roundMiniDraft.score = Math.min(
+          15,
+          state.roundMiniDraft.score + 1
+        );
+        renderRoundMiniSheet();
+        haptic(4);
+      });
+    }
+    const miniPutts = $('roundMiniPuttsOptions');
+    if (miniPutts) {
+      miniPutts.querySelectorAll('button').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!state.roundMiniDraft) return;
+          const value = Number(button.dataset.putts);
+          state.roundMiniDraft.putts =
+            state.roundMiniDraft.putts !== '' &&
+            Number(state.roundMiniDraft.putts) === value
+              ? ''
+              : value;
+          renderRoundMiniSheet();
+          haptic(4);
+        });
+      });
+    }
+    const miniSave = $('roundMiniSaveBtn');
+    if (miniSave) miniSave.addEventListener('click', saveRoundMiniDraft);
+
     if (els.roundScoreScrim) {
-      els.roundScoreScrim.addEventListener('click', closeRoundScoreSheet);
+      els.roundScoreScrim.addEventListener('click', () => {
+        if (state.roundMiniDraft) closeRoundMiniSheet();
+        else closeRoundScoreSheet();
+      });
     }
 
     if (els.roundScoreMinusBtn) {
@@ -11154,7 +11329,7 @@ out geom;`;
     for (const c of state.courseProfiles || []) {
       opts.push({
         id: c.id,
-        name: `${c.name} · ${c.teeName || 'Default tees'}`,
+        name: `${c.name} · ${teeDisplayName(c.teeName)}`,
         course: normalizeCourse(c),
       });
     }
