@@ -6216,6 +6216,8 @@ out geom;`;
   const BACKUP_KEYS = [
     ['prefs', 'caddy:prefs'],
     ['clubs', 'caddy:clubs'],
+    ['bagClubs', 'caddy.bag.clubs.v1'],   // premium Bag tab: category/loft/shaft/notes (bag.js)
+    ['bagUi', 'caddy.bag.ui.v1'],         // premium Bag tab: collapsed groups
     ['courseProfiles', COURSE_PROFILES_KEY],
     ['shotLog', 'caddy:shotLog:v1'],    // literal on purpose: SHOTLOG_KEY is declared later in the file (Block 0), and reading it here would throw a TDZ ReferenceError at startup
     ['roundSession', 'caddy:roundSession'],
