@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.75'; // + bag gap pills solid (not transparent) + correct positions at launch
+const CACHE_VERSION = 'v1.0.76'; // + gap pills tinted with club-category colors
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

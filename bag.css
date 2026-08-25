@@ -219,9 +219,9 @@ body.dark #bagRoot {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   color: var(--text);
-  /* v1.0.75: solid pill (user: transparent pills were unreadable) — matches
-     the wide/warning pill's opacity, tinted neutral instead of orange. */
-  background: var(--bag-accent-soft, #e8ece9);
+  /* v1.0.76: pill tinted with its row's club-category colors — same gradient
+     the club dots and bars use (--bag-cat-a/b are set per-row in bag.js). */
+  background: linear-gradient(135deg, var(--bag-cat-a, var(--bag-irons-a)), var(--bag-cat-b, var(--bag-irons-b)));
   border: 1px solid rgba(127, 127, 127, 0.35);
   border-radius: 999px;
   padding: 2.5px 8px;
