@@ -4238,6 +4238,163 @@
     });
   }
 
+  // ---- Add/rename partner sheet (replaces browser prompt) --------------
+  function openPartnerSheet(editId = null) {
+    const sheet = document.getElementById('partnerSheet');
+    const input = document.getElementById('partnerNameInput');
+    if (!sheet || !input) return;
+
+    state.partnerSheetEditId = editId;
+    const editing = editId ? findPartnerAnywhere(editId) : null;
+
+    const title = document.getElementById('partnerSheetTitle');
+    if (title) title.textContent = editing ? 'Partner' : 'Add partner';
+    const save = document.getElementById('partnerSaveBtn');
+    if (save) save.textContent = editing ? 'Save' : 'Add';
+    input.value = editing ? editing.name : '';
+
+    // Remove only makes sense for an existing partner.
+    const removeBtn = document.getElementById('partnerRemoveBtn');
+    if (removeBtn) removeBtn.hidden = !editing;
+
+    renderPartnerSuggestions();
+    sheet.classList.add('open');
+    sheet.setAttribute('aria-hidden', 'false');
+    els.roundScoreScrim?.classList.add('open');
+
+    setTimeout(() => input.focus(), reduceMotion ? 0 : 320);
+    haptic(8);
+  }
+
+  function findPartnerAnywhere(id) {
+    const inOptions = (state.optionsGroupPlayers || []).find(
+      (p) => p.id === id
+    );
+    if (inOptions) return inOptions;
+    const rs = state.roundSession;
+    if (rs && Array.isArray(rs.groupPlayers)) {
+      return rs.groupPlayers.find((p) => p.id === id) || null;
+    }
+    return null;
+  }
+
+  function closePartnerSheet() {
+    const sheet = document.getElementById('partnerSheet');
+    if (!sheet) return;
+    sheet.classList.remove('open');
+    sheet.setAttribute('aria-hidden', 'true');
+    state.partnerSheetEditId = null;
+    const input = document.getElementById('partnerNameInput');
+    if (input) input.blur();
+
+    // Drop the scrim only if the options sheet isn't open behind us.
+    const optsOpen = document
+      .getElementById('roundOptionsSheet')
+      ?.classList.contains('open');
+    if (!optsOpen) els.roundScoreScrim?.classList.remove('open');
+  }
+
+  function commitPartnerSheet() {
+    const input = document.getElementById('partnerNameInput');
+    const name = (input?.value || '').trim().slice(0, 24);
+    if (!name) {
+      closePartnerSheet();
+      return;
+    }
+
+    const editId = state.partnerSheetEditId;
+    if (editId) {
+      const p = findPartnerAnywhere(editId);
+      if (p) p.name = name;
+      const rs = state.roundSession;
+      if (rs) saveRoundSession();
+    } else if (state.optionsCourse) {
+      state.optionsGroupPlayers = state.optionsGroupPlayers || [];
+      state.optionsGroupPlayers.push({ id: cryptoId(), name });
+      // Remember them for next time's suggestions.
+      mergePartnersIntoRoster([{ id: cryptoId(), name }]);
+    } else if (state.roundSession) {
+      // Adding mid-round.
+      if (
+        (state.roundSession.groupPlayers || []).length >= GROUP_MAX_PARTNERS
+      ) {
+        setNotice(`Maximum ${GROUP_MAX_PARTNERS} partners.`, 'danger');
+        return;
+      }
+      state.roundSession.groupPlayers = state.roundSession.groupPlayers || [];
+      const p = { id: cryptoId(), name };
+      state.roundSession.groupPlayers.push(p);
+      mergePartnersIntoRoster([p]);
+      saveRoundSession();
+    }
+
+    closePartnerSheet();
+    renderRoundOptionsGroup();
+    renderGroupUI();
+    haptic(10);
+  }
+
+  function removePartnerFromSheet() {
+    const editId = state.partnerSheetEditId;
+    if (!editId) return;
+
+    const rs = state.roundSession;
+    if (state.optionsCourse) {
+      state.optionsGroupPlayers = (state.optionsGroupPlayers || []).filter(
+        (x) => x.id !== editId
+      );
+      renderRoundOptionsGroup();
+    } else if (rs && Array.isArray(rs.groupPlayers)) {
+      rs.groupPlayers = rs.groupPlayers.filter((x) => x.id !== editId);
+      if (rs.groupScores) delete rs.groupScores[editId];
+      saveRoundSession();
+      renderGroupUI();
+    }
+
+    closePartnerSheet();
+    haptic(10);
+  }
+
+  function renderPartnerSuggestions() {
+    const wrap = document.getElementById('partnerSuggestions');
+    if (!wrap) return;
+    const existing = new Set(
+      (state.optionsGroupPlayers || []).map((p) =>
+        p.name.trim().toLowerCase()
+      )
+    );
+    const suggestions = loadGroupRoster()
+      .filter(
+        (p) =>
+          !existing.has(p.name.trim().toLowerCase())
+      )
+      .slice(0, 4);
+
+    if (!suggestions.length) {
+      wrap.hidden = true;
+      wrap.innerHTML = '';
+      return;
+    }
+
+    wrap.hidden = false;
+    wrap.innerHTML = suggestions
+      .map(
+        (p) =>
+          `<button type="button" class="club-chip" data-name="${escapeHtml(
+            p.name
+          )}">${escapeHtml(p.name)}</button>`
+      )
+      .join('');
+
+    wrap.querySelectorAll('.club-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const input = document.getElementById('partnerNameInput');
+        if (input) input.value = chip.dataset.name;
+        commitPartnerSheet();
+      });
+    });
+  }
+
   // Tee boxes the player used before, keyed by course name — so returning
   // to a course auto-sets the same tees everywhere (map geometry,
   // yardages, scorecard).
@@ -5571,6 +5728,12 @@ out geom;`;
       ) {
         closeQuickStartSheet();
       }
+      if (
+        event.key === 'Escape' &&
+        document.getElementById('partnerSheet')?.classList.contains('open')
+      ) {
+        closePartnerSheet();
+      }
     });
   }
   function getRoundScoreDraftForHole(holeNumber) {
@@ -6068,20 +6231,40 @@ out geom;`;
           setNotice(`Maximum ${GROUP_MAX_PARTNERS} partners.`, 'danger');
           return;
         }
-        const name = prompt('Partner name:');
-        if (!name || !name.trim()) return;
-        state.optionsGroupPlayers = state.optionsGroupPlayers || [];
-        state.optionsGroupPlayers.push({
-          id: cryptoId(),
-          name: name.trim().slice(0, 24),
-        });
-        renderRoundOptionsGroup();
-        haptic(6);
+        openPartnerSheet();
+      });
+    }
+
+    // Add/rename partner sheet wiring.
+    const pClose = $('partnerSheetCloseBtn');
+    if (pClose) pClose.addEventListener('click', closePartnerSheet);
+    const pCancel = $('partnerCancelBtn');
+    if (pCancel) pCancel.addEventListener('click', closePartnerSheet);
+    const pSave = $('partnerSaveBtn');
+    if (pSave) pSave.addEventListener('click', commitPartnerSheet);
+    const pRemove = $('partnerRemoveBtn');
+    if (pRemove) {
+      pRemove.addEventListener('click', removePartnerFromSheet);
+    }
+    const pInput = $('partnerNameInput');
+    if (pInput) {
+      pInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commitPartnerSheet();
+        }
       });
     }
 
     if (els.roundScoreScrim) {
       els.roundScoreScrim.addEventListener('click', () => {
+        const partnerOpen = document
+          .getElementById('partnerSheet')
+          ?.classList.contains('open');
+        if (partnerOpen) {
+          closePartnerSheet();
+          return;
+        }
         const optsOpen = document
           .getElementById('roundOptionsSheet')
           ?.classList.contains('open');
@@ -12208,7 +12391,6 @@ out geom;`;
         ? `${1 + partners.length} players`
         : 'Solo';
     }
-    renderGroupEditor();
     renderGroupTable();
   }
 
@@ -12332,7 +12514,9 @@ out geom;`;
                 value="${escapeHtml(v)}" data-pid="${escapeHtml(p.id)}"
                 data-i="${i}" aria-label="${escapeHtml(p.name)} hole ${i + 1}" /></td>`;
         }).join('');
-        return sumRow(`<td>${escapeHtml(p.name)}</td>${scoreCells}${totalCell}`);
+        return `<tr class="group-partner-row" data-pid="${escapeHtml(
+          p.id
+        )}"><td class="group-name-cell">${escapeHtml(p.name)}</td>${scoreCells}${totalCell}</tr>`;
       })
       .join('');
 
@@ -12363,6 +12547,17 @@ out geom;`;
         renderGroupTable();
       });
     });
+
+    // Tap a partner's name → rename (or long-press-style second option:
+    // remove) via the partner sheet — no separate editor list needed.
+    els.groupTableWrap
+      .querySelectorAll('.group-partner-row .group-name-cell')
+      .forEach((cell) => {
+        cell.addEventListener('click', () => {
+          const pid = cell.closest('.group-partner-row')?.dataset.pid;
+          if (pid) openPartnerSheet(pid);
+        });
+      });
   }
 
   function renderScoreSheetChips() {
@@ -12401,31 +12596,18 @@ out geom;`;
 
   function initGroupEvents() {
     if (!els.addPartnerBtn) return;
+    // Premium path: the partner sheet (same one the options sheet uses),
+    // not the browser prompt. Adding mid-round goes straight to the
+    // session; the roster merge happens inside the sheet's commit.
     els.addPartnerBtn.addEventListener('click', () => {
       if (groupPartners().length >= GROUP_MAX_PARTNERS) {
-        alert(`Maximum ${GROUP_MAX_PARTNERS} partners (foursome).`);
+        setNotice(
+          `Maximum ${GROUP_MAX_PARTNERS} partners (foursome).`,
+          'danger'
+        );
         return;
       }
-      const name = (prompt('Partner name:') || '').trim();
-      if (!name) return;
-
-      const player = { id: cryptoId(), name: name.slice(0, 24) };
-
-      // Live round: add to the session (giving them a score lane)…
-      if (state.roundSession) {
-        if (!Array.isArray(state.roundSession.groupPlayers))
-          state.roundSession.groupPlayers = [];
-        state.roundSession.groupPlayers.push(player);
-        saveRoundSession();
-      }
-
-      // …and always remember them for future rounds.
-      const roster = loadGroupRoster();
-      roster.push(player);
-      saveGroupRoster(roster);
-
-      renderGroupUI();
-      haptic(8);
+      openPartnerSheet();
     });
   }
   // ============================================================

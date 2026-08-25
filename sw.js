@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.53'; // quick start "change details" now opens a focused options sheet (tees/start hole/group), not the full form; back-navigation preserved
+const CACHE_VERSION = 'v1.0.54'; // partner sheet replaces prompt(): name input + roster suggestions + Remove; group table is the single source (no duplicate editor)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

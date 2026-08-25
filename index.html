@@ -743,17 +743,15 @@
             <h3>Group</h3>
             <span class="chip" id="groupCountChip">Solo</span>
           </div>
-          <div id="groupEditorList" style="margin-top: 10px"></div>
-          <button class="ghost-btn" id="addPartnerBtn" type="button"
-            style="margin-top: 10px; width: 100%">
-            Add partner
+          <div id="groupTableWrap" style="margin-top: 4px"></div>
+          <button class="ghost-btn add-partner-btn" id="addPartnerBtn" type="button"
+            style="margin-top: 10px">
+            + Add partner
           </button>
           <div class="hint" style="margin-top: 8px">
-            Up to 3 partners. Enter their scores here or via the score
-            sheet — partner scores never affect your personal stats or
-            history.
+            Tap a partner's name in the table to rename; their scores never
+            affect your stats.
           </div>
-          <div id="groupTableWrap" style="margin-top: 12px"></div>
         </div>
         <div class="card" id="scorecardCard" hidden>
           <div class="card-title">
@@ -1207,9 +1205,8 @@
     <div class="round-score-section" style="margin-top: 14px">
       <div class="round-score-label">Playing partners</div>
       <div id="optionsGroupList" style="margin-top: 6px"></div>
-      <button class="ghost-btn" id="optionsAddPartner" type="button"
-        style="width: 100%; margin-top: 8px">
-        Add partner
+      <button class="ghost-btn add-partner-btn" id="optionsAddPartner" type="button">
+        + Add partner
       </button>
       <div class="hint" style="margin-top: 8px">
         Up to 3 partners. Their scores never affect your stats.
@@ -1219,6 +1216,39 @@
     <div class="round-score-actions">
       <button class="primary-btn" id="optionsStartBtn" type="button" style="width: 100%">
         Start Round
+      </button>
+    </div>
+  </section>
+
+  <!-- Add / rename partner -->
+  <section class="round-score-sheet glass mini-sheet" id="partnerSheet" aria-label="Add partner" aria-hidden="true">
+    <div class="sheet-handle" style="margin: 6px auto 12px"></div>
+
+    <div class="round-score-head">
+      <div>
+        <h2 id="partnerSheetTitle">Add partner</h2>
+        <p id="partnerSheetMeta">Scores stay separate from your stats</p>
+      </div>
+
+      <button class="icon-btn" id="partnerSheetCloseBtn" type="button" aria-label="Cancel">
+        ×
+      </button>
+    </div>
+
+    <input id="partnerNameInput" class="sheet-input" type="text"
+      maxlength="24" placeholder="Name" autocomplete="off" />
+
+    <div class="chip-row" id="partnerSuggestions" hidden></div>
+
+    <div class="round-score-actions">
+      <button class="ghost-btn danger-ghost" id="partnerRemoveBtn" type="button" hidden>
+        Remove
+      </button>
+      <button class="ghost-btn" id="partnerCancelBtn" type="button">
+        Cancel
+      </button>
+      <button class="primary-btn" id="partnerSaveBtn" type="button">
+        Add
       </button>
     </div>
   </section>

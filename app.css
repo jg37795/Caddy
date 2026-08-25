@@ -1997,6 +1997,22 @@ body.dark #roundSummaryScore.over {
   grid-template-columns: 1fr;
 }
 
+/* Partner sheet: Remove | Cancel | Add */
+#partnerSheet .round-score-actions {
+  grid-template-columns: auto 1fr 1fr;
+  gap: 9px;
+}
+
+#partnerSheet .round-score-actions .ghost-btn {
+  width: auto;
+  padding: 0 16px;
+}
+
+.danger-ghost {
+  color: var(--danger) !important;
+  border-color: rgba(214, 57, 57, 0.35) !important;
+}
+
 .round-score-actions .ghost-btn,
 .round-score-actions .primary-btn {
   min-height: 49px;
@@ -5105,6 +5121,38 @@ body.dark .plan-green-tile {
 .group-editor-row input {
   flex: 1;
   min-width: 0;
+}
+
+/* Compact "+ Add partner" affordance */
+.add-partner-btn {
+  width: auto !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13.5px;
+}
+
+/* Text input inside a sheet (partner name) */
+.sheet-input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 16px; /* ≥16px prevents iOS zoom-on-focus */
+  font-weight: 650;
+  color: var(--text);
+  background: var(--card-solid);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  outline: none;
+}
+
+.sheet-input:focus {
+  border-color: var(--green);
+}
+
+/* Suggestion chips (recently played-with partners) */
+#partnerSuggestions {
+  margin-top: 10px;
 }
 
 .group-editor-remove {
