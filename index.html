@@ -394,11 +394,9 @@
             <div class="sheet-drag" id="sheetDrag" role="button" tabindex="0" aria-expanded="false"
               aria-label="Expand yardage panel">
               <div class="sheet-handle"></div>
-              <!-- Collapsed peek row: just the sheet's own numbers —
-                   "143 yd · plays 138" (restored per user, v1.0.70). -->
-              <div class="sheet-oneliner" id="sheetOneLiner">
-                <div class="ol-main"><span class="ol-dist" id="olDist">Tap map to set target</span><span class="ol-club" id="olClub"></span></div>
-              </div>
+              <!-- Collapsed peek row REMOVED (v1.0.72): user preference —
+                   collapsed sheet shows the handle only; numbers live in the
+                   sheet at half+. -->
               <div class="sheet-peek">
                 <div class="sheet-yards">
                   <div class="big-number" id="rawYards" aria-live="polite">

@@ -141,12 +141,12 @@ setTimeout(() => {
             // so clear the guard to get a fresh closure per scenario.
             const load = () => { delete global.window.__rxRangePremium; new Function(src)(); };
             load();
-            check('peek shows "178 yd · plays 176"',
-              els.olDist.textContent === '178 yd · plays 176');
+            check('peek row removed (v1.0.72)',
+              els.oneLiner == null || els.oneLiner.textContent === '');
             els.playsLikeYards.textContent = '—';
             els.rawYards.textContent = '—';
             load();
-            check('no target → hint text', els.olDist.textContent === 'Tap map to set target');
+            check('no target → no peek text', !els.olDist || els.olDist.textContent === '');
 
             console.log(failures ? `\n${failures} FAILURES` : '\nALL SMOKE TESTS PASSED');
             process.exit(failures ? 1 : 0);

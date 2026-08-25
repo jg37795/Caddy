@@ -11080,7 +11080,18 @@ out geom;`;
       els.windMetric.textContent = state.context.weather ? `${fmt(w.windMph)} mph` : 'Neutral';
       els.windSubMetric.textContent = '';
       if (windCompass) windCompass.hidden = true;
-      if (els.windPill) els.windPill.hidden = true;
+      // Wind pill stays visible even when neutral/no data (user: reassurance
+      // that it isn't broken) — shows a calm state instead of disappearing.
+      if (els.windPill) {
+        const pillNeedle = $('windPillNeedle');
+        if (pillNeedle) pillNeedle.style.transform = 'rotate(0deg)';
+        if (els.windPillText) {
+          els.windPillText.textContent = state.context.weather
+            ? `${fmt(w.windMph)} mph · calm`
+            : 'Calm';
+        }
+        els.windPill.hidden = false;
+      }
     }
     els.tempMetric.textContent = state.context.weather
       ? `${fmt(w.tempF)}° / ${fmt(w.rh)}%` : `${STD_TEMP_F}° / ${STD_RH}%`;

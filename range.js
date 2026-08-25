@@ -342,6 +342,8 @@
   }
 
   function renderOneLiner() {
+    // Peek row removed (v1.0.72) — collapsed sheet is handle-only.
+    return;
     if (!root.oneLiner || !srcYards) return;
     const raw = peekNum(srcYards);
     const pl = peekNum(srcPlays);
