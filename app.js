@@ -4004,13 +4004,77 @@
       card.addEventListener('click', () => {
         const found = profiles.find((c) => c.id === card.dataset.id);
         if (!found) return;
-        // Not auto-start: open the setup sheet with this course loaded —
-        // remembered tees applied, pars/yardages open for a glance, group
-        // and start hole right there. One confirmation tap to go.
-        openRoundSetup();
-        selectSavedCourse(found);
+        // Two-tap start: confirm card first (tees, holes, group shown),
+        // then go — or escalate to the full form from there.
+        openQuickStartSheet(found);
       });
     });
+  }
+
+  // ---- Quick-start confirm sheet ---------------------------------------
+  function openQuickStartSheet(found) {
+    const course = normalizeCourse({ ...found });
+
+    // Apply the remembered tee set so the summary reflects reality.
+    let preferredTee = course.activeTeeSet || null;
+    try {
+      const mem = load('caddy:courseTees', {})[
+        String(course.name).trim().toLowerCase()
+      ];
+      if (mem && mem.activeTeeSet) preferredTee = mem.activeTeeSet;
+    } catch {
+      /* best-effort */
+    }
+    if (
+      Array.isArray(course.teeSets) &&
+      course.teeSets.length &&
+      preferredTee
+    ) {
+      applyTeeSet(course, preferredTee);
+    }
+
+    state.quickStartCourse = course;
+    state.quickStartSource = found;
+
+    const sheet = document.getElementById('quickStartSheet');
+    const scrim = els.roundScoreScrim;
+    if (!sheet || !scrim) {
+      // No sheet available (shouldn't happen) — start directly.
+      rememberCourseTees(course);
+      beginRound(course, 1);
+      return;
+    }
+
+    const title = document.getElementById('quickStartTitle');
+    const meta = document.getElementById('quickStartMeta');
+    if (title) title.textContent = course.name || 'Casual Round';
+    if (meta) {
+      const holes = Number(course.holesCount) === 9 ? '9 holes' : '18 holes';
+      meta.textContent = [
+        teeDisplayName(course.teeName),
+        holes,
+        'Hole 1',
+        'Solo',
+      ].join(' · ');
+    }
+
+    sheet.classList.add('open');
+    sheet.setAttribute('aria-hidden', 'false');
+    scrim.classList.add('open');
+    haptic(8);
+  }
+
+  function closeQuickStartSheet() {
+    const sheet = document.getElementById('quickStartSheet');
+    if (!sheet) return;
+    sheet.classList.remove('open');
+    sheet.setAttribute('aria-hidden', 'true');
+    state.quickStartCourse = null;
+    state.quickStartSource = null;
+    // Only drop the scrim if no other sheet is open behind it.
+    const miniOpen = els.roundMiniSheet?.classList.contains('open');
+    const fullOpen = els.roundScoreSheet?.classList.contains('open');
+    if (!miniOpen && !fullOpen) els.roundScoreScrim.classList.remove('open');
   }
 
   // Tee boxes the player used before, keyed by course name — so returning
@@ -5767,9 +5831,36 @@ out geom;`;
       });
     }
 
+    // Quick-start confirm sheet wiring.
+    const qsClose = $('quickStartCloseBtn');
+    if (qsClose) qsClose.addEventListener('click', closeQuickStartSheet);
+    const qsGo = $('quickStartGoBtn');
+    if (qsGo) {
+      qsGo.addEventListener('click', () => {
+        const course = state.quickStartCourse;
+        closeQuickStartSheet();
+        if (!course) return;
+        rememberCourseTees(course);
+        beginRound(course, 1);
+      });
+    }
+    const qsDetails = $('quickStartDetailsBtn');
+    if (qsDetails) {
+      qsDetails.addEventListener('click', () => {
+        const found = state.quickStartSource;
+        const course = state.quickStartCourse;
+        closeQuickStartSheet();
+        // Escalate to the full form with everything pre-loaded.
+        openRoundSetup();
+        if (found) selectSavedCourse(found);
+        else if (course) selectSavedCourse(course);
+      });
+    }
+
     if (els.roundScoreScrim) {
       els.roundScoreScrim.addEventListener('click', () => {
-        if (state.roundMiniDraft) closeRoundMiniSheet();
+        if (state.quickStartCourse) closeQuickStartSheet();
+        else if (state.roundMiniDraft) closeRoundMiniSheet();
         else closeRoundScoreSheet();
       });
     }

@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.51'; // quick start preloads sheet instead of auto-starting; partners no longer carried between rounds; group editor always visible
+const CACHE_VERSION = 'v1.0.52'; // quick start: two-tap confirm sheet (course/tees/holes/solo summary → Start), full form one tap away
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
