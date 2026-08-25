@@ -399,6 +399,9 @@
         c,
         w: pct(c.yards),
         prevPct: prev ? pct(prev.yards) : null,
+        // Anchor the pill midway through the gap (between previous bar tip
+        // and this bar's start) so it doesn't sit on top of bars.
+        pillPct: prev ? pct(prev.yards) + (pct(c.yards) - pct(prev.yards)) / 2 : null,
         gap,
         ghostL,
         ghostW,
@@ -600,9 +603,9 @@
         : '<i class="bag-bar-ghost" style="left:' + r.ghostL.toFixed(2) + '%;width:' +
           r.ghostW.toFixed(2) + '%"></i>';
     const pill =
-      withPill && r.prevPct != null
-        ? '<span class="bag-gap-pill' + (r.wide ? ' wide' : '') + '" style="left:' +
-          r.prevPct.toFixed(2) + '%"' + (animate ? '' : ' data-noin') + '>+' + r.gap + '</span>'
+      withPill && r.pillPct != null
+        ? '<span class="bag-gap-pill' + (r.wide ? ' wide' : '') + '" data-pos="' +
+          r.pillPct.toFixed(2) + '"' + (animate ? '' : ' data-noin') + '>+' + r.gap + '</span>'
         : '';
     return (
       '<div class="bag-chart-row" role="button" tabindex="0" data-act="chart-goto" data-id="' + esc(r.c.id) + '"' + style + '>' +
@@ -611,6 +614,23 @@
       '<span class="bag-chart-yd">' + r.c.yards + '</span>' +
       '</div>'
     );
+  }
+
+  // Clamp each gap pill horizontally so it stays fully inside its track:
+  // center must be within [halfWidth + pad, trackWidth - halfWidth - pad].
+  function fixGapPills(scope) {
+    (scope || document).querySelectorAll('.bag-gap-pill[data-pos]').forEach(function (pill) {
+      const track = pill.closest('.bag-chart-track');
+      if (!track) return;
+      const tw = track.clientWidth;
+      const half = pill.offsetWidth / 2;
+      const pad = 4;
+      const minPx = Math.min(half + pad, tw / 2);
+      const maxPx = Math.max(tw - half - pad, tw / 2);
+      let x = (parseFloat(pill.dataset.pos) / 100) * tw;
+      x = clamp(x, minPx, maxPx);
+      pill.style.left = ((x / tw) * 100).toFixed(2) + '%';
+    });
   }
 
   function legendHTML(m) {
@@ -678,6 +698,7 @@
 
     root.innerHTML = html;
     root.classList.toggle('bag-anim', !!animate);
+    fixGapPills(root);
 
     if (animate && !reduceMotion) {
       // Two frames so the zero-width bars are committed before growing.
