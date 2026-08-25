@@ -2617,6 +2617,8 @@
         last.hidden = true;
       }
     }
+
+    renderQuickStart();
   }
 
   function renderRound() {
@@ -2718,22 +2720,17 @@
         <b>${totalPlayed ? `${totalScore} (${toPar > 0 ? '+' + toPar : toPar})` : '—'}</b>
       </div>`;
 
-    // Tap behavior: score & putts open the full score sheet for THAT hole
-    // (steppers + putts/FIR/GIR/penalties — one tap fixes any mis-tap);
-    // FIR/GIR are two-state marks, so they stay quick-cycle.
+    // Tap behavior: score & putts ALWAYS open the compact quick-fix sheet
+    // (steppers + putts — the thing a mis-tap needs). The full sheet with
+    // FIR/GIR/penalties stays one tap away inside it, and on the map's
+    // Score button.
     els.roundRows.querySelectorAll('.round-row[data-i]').forEach((row) => {
       const i = Number(row.dataset.i);
       row.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-act]');
         if (!btn) return;
         if (btn.dataset.act === 'score' || btn.dataset.act === 'putts') {
-          if (i + 1 === getCurrentHoleNumber()) {
-            // Current hole: the full sheet (FIR/GIR/penalties belong here).
-            openRoundScoreSheet(i + 1);
-          } else {
-            // Older hole: compact quick-fix (score + putts only).
-            openRoundMiniSheet(i + 1);
-          }
+          openRoundMiniSheet(i + 1);
           haptic(6);
         } else {
           cycleRoundCell(i, btn.dataset.act);
@@ -3958,6 +3955,75 @@
       card.addEventListener('click', () => {
         const found = profiles.find((c) => c.id === card.dataset.id);
         if (found) selectSavedCourse(found);
+      });
+    });
+  }
+
+  // Quick-start cards on the no-round screen: recent courses, one tap to
+  // tee off with the remembered tee set. Fills the dead space below the
+  // Start button with the action players actually want.
+  function renderQuickStart() {
+    const wrap = document.getElementById('quickStartWrap');
+    const list = document.getElementById('quickStartList');
+    if (!wrap || !list) return;
+
+    const profiles = Array.isArray(state.courseProfiles)
+      ? state.courseProfiles
+      : [];
+
+    if (state.roundSession || !profiles.length) {
+      wrap.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+
+    // Most recently played first (saveCourseProfile bumps updatedAt).
+    const recent = profiles
+      .slice()
+      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+      .slice(0, 3);
+
+    wrap.hidden = false;
+    list.innerHTML = recent
+      .map((course) => {
+        const holes =
+          Number(course.holesCount) === 9 ? '9 holes' : '18 holes';
+        return `
+          <button class="saved-course-card" type="button"
+            data-id="${escapeHtml(course.id)}">
+            <span class="sc-name">${escapeHtml(course.name)}</span>
+            <span class="sc-meta">${escapeHtml(
+              teeDisplayName(course.teeName)
+            )} · ${holes}</span>
+          </button>`;
+      })
+      .join('');
+
+    list.querySelectorAll('.saved-course-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const found = profiles.find((c) => c.id === card.dataset.id);
+        if (!found) return;
+        // Straight onto the tee: remembered tees, saved scorecard, go.
+        const course = normalizeCourse({ ...found });
+        let preferredTee = course.activeTeeSet || null;
+        try {
+          const mem = load('caddy:courseTees', {})[
+            String(course.name).trim().toLowerCase()
+          ];
+          if (mem && mem.activeTeeSet) preferredTee = mem.activeTeeSet;
+        } catch {
+          /* best-effort */
+        }
+        if (
+          Array.isArray(course.teeSets) &&
+          course.teeSets.length &&
+          preferredTee
+        ) {
+          applyTeeSet(course, preferredTee);
+        }
+        rememberCourseTees(course);
+        beginRound(course, 1);
+        haptic(10);
       });
     });
   }
@@ -5266,6 +5332,12 @@ out geom;`;
       ) {
         closeRoundScoreSheet();
       }
+      if (
+        event.key === 'Escape' &&
+        els.roundMiniSheet?.classList.contains('open')
+      ) {
+        closeRoundMiniSheet();
+      }
     });
   }
   function getRoundScoreDraftForHole(holeNumber) {
@@ -5697,6 +5769,18 @@ out geom;`;
     }
     const miniSave = $('roundMiniSaveBtn');
     if (miniSave) miniSave.addEventListener('click', saveRoundMiniDraft);
+
+    // Escape hatch: jump from the quick-fix to the full sheet, same hole.
+    const miniFull = $('roundMiniFullBtn');
+    if (miniFull) {
+      miniFull.addEventListener('click', () => {
+        const draft = state.roundMiniDraft;
+        if (!draft) return;
+        const hole = draft.hole;
+        closeRoundMiniSheet();
+        openRoundScoreSheet(hole);
+      });
+    }
 
     if (els.roundScoreScrim) {
       els.roundScoreScrim.addEventListener('click', () => {

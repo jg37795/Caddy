@@ -704,6 +704,14 @@
           <button class="primary-btn" id="roundActionBtn" type="button" style="width: 100%; margin-top: 12px">
             Start round
           </button>
+          <div id="quickStartWrap" hidden>
+            <div class="setup-section-label" style="margin-top: 16px">Quick start</div>
+            <div class="saved-course-list" id="quickStartList" style="margin-top: 8px"></div>
+            <div class="hint" style="margin-top: 8px; text-align: center">
+              Your recent courses — one tap to tee off. Everything else is
+              under Start round.
+            </div>
+          </div>
           <div class="grid-3" id="roundSubActions" style="margin-top: 8px; display: none">
             <button class="ghost-btn" id="roundPrevHoleBtn" type="button">
               Previous
@@ -1143,6 +1151,11 @@
         Save
       </button>
     </div>
+
+    <button class="ghost-btn" id="roundMiniFullBtn" type="button"
+      style="width: 100%; margin-top: 8px; font-size: 13px">
+      Fairways, greens &amp; penalties…
+    </button>
   </section>
 
   <!-- Round-end summary -->

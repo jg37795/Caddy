@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.49'; // round hero: scorecard mark + last-round chip; pars editor auto-opens on every course selection; tee chips restyled
+const CACHE_VERSION = 'v1.0.50'; // scorecard taps always open compact quick-fix (full sheet via its own button); Quick start course cards fill the empty hero
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
