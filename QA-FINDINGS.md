@@ -7,6 +7,11 @@ project self-test harness (40/40 passing before changes).
 Severity: **P0** crash / data loss · **P1** wrong behavior · **P2** polish.
 Fix policy: P0/P1 fixed surgically, one commit per finding. P2 recorded only.
 
+**Post-fix verification:** all four findings re-tested live against the fixed
+build — 15/15 corruption shapes boot + tab-switch clean, map Score saves into
+the current hole, options-sheet partners ride into the round, duplicate
+add/rename rejected in all three editors, self-test harness 40/40.
+
 ---
 
 ## P0 — crash / data loss
@@ -43,7 +48,8 @@ Fix policy: P0/P1 fixed surgically, one commit per finding. P2 recorded only.
   the commit message "no more duplicate names" promised a real guard.
 - **Expected:** Case-insensitive duplicate names are rejected with a notice (rename keeps
   its own name).
-- **Status:** ✅ FIXED (commit `fix(qa-003)`).
+- **Status:** ✅ FIXED (commits `fix(qa-003)` + `fix(qa-003b)` — the second covers the
+  round-options sheet's own inline rename editor, found during fix verification).
 
 ### QA-004 · Corrupted localStorage of the wrong *shape* crashes rendering (6 modes, one root cause)
 - **Where:** `app.js` — hydration (`state` init ~L299, `reloadStateFromStorage()` ~L6786) stores
