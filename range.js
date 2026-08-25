@@ -36,7 +36,6 @@
     }
   }
 
-  const WIND_KEY = 'caddy.range.wind'; // ONLY key this layer writes
   const CLUBS_KEY = 'caddy:clubs'; // read-only mirror of the bag
   const SESSION_KEY = 'caddy:roundSession'; // read-only mirror of the round
 
@@ -81,10 +80,9 @@
     stripHole: $('rxStripHole'),
     stripHoleSep: $('rxStripHoleSep'),
     dots: $('rxDots'),
-    wind: $('rxWind'),
-    windArrow: $('rxWindArrow'),
-    windText: $('rxWindText'),
-    windTag: $('rxWindTag'),
+    oneLiner: $('sheetOneLiner'),
+    olDist: $('olDist'),
+    olClub: $('olClub'),
     hero: $('rxHero'),
     heroKicker: $('rxHeroKicker'),
     heroNum: $('rxHeroNum'),
@@ -102,11 +100,6 @@
     clubList: $('rxClubList'),
     clubPopSub: $('rxClubPopSub'),
     clubPopClose: $('rxClubPopClose'),
-    windPop: $('rxWindPop'),
-    windPopClose: $('rxWindPopClose'),
-    speedRow: $('rxSpeedRow'),
-    dirGrid: $('rxDirGrid'),
-    windClear: $('rxWindClear'),
   };
   if (!wrap || !root.reticle) return; // wrong page / partial HTML (dock removed v1.0.66)
 
@@ -279,7 +272,7 @@
     openSheet(root.clubPop);
   }
 
-  /* ================= 3. CONTEXT STRIP — hole · scorecard dots · wind ======== */
+  /* ================= 3. CONTEXT STRIP — hole · scorecard dots ========== */
 
   const hudEl = $('roundMapHud');
   const hudHoleEl = $('roundMapHole');
@@ -291,9 +284,9 @@
   }
 
   function renderStrip() {
-    // v1.0.65: during a live round the round HUD card (#roundMapHud) owns
-    // hole identity + scorecard dots — the strip shows wind only, so the
-    // same info never renders twice.
+    // v1.0.67: the strip is hole identity + scorecard dots only (and the
+    // hole parts yield to the round HUD during a live round). Wind was
+    // removed entirely — live weather owns wind display.
     const hudVisible = !!hudEl && !hudEl.hidden;
     if (root.stripHole) root.stripHole.hidden = true;
     if (root.stripHoleSep) root.stripHoleSep.hidden = true;
@@ -302,8 +295,6 @@
 
     // Live-round layout flag: shift the floating stack/dock clear of HUD.
     wrap.classList.toggle('rx-round-live', hudVisible);
-
-    renderWind();
   }
 
   function renderDotsInto() {
@@ -335,135 +326,36 @@
     return true;
   }
 
-  /* ================= 4. WIND WIDGET =================
-     Manual wind lives under `caddy.range.wind`. With no manual entry and
-     no live data the widget shows a clearly-tagged DEMO state. When the
-     app's own live wind pill appears and nothing manual is set, this
-     widget steps aside. */
+  /* ================= 4. COLLAPSED ONE-LINER =================
+     At the collapsed detent the sheet's visible band is the drag handle
+     plus one compact line: "<distance> yd · <club short name>" (or a tap-
+     to-target hint). Fades out via --fcb-reveal as the sheet rises; see
+     .sheet-oneliner in app.css. */
 
-  const COMPASS_8 = [
-    ['N', 0], ['NE', 45], ['E', 90], ['SE', 135],
-    ['S', 180], ['SW', 225], ['W', 270], ['NW', 315],
-  ];
-  const SPEEDS = [0, 5, 8, 12, 18, 25];
-  const DEMO_WIND = { mph: 8, fromDeg: 315 }; // NW @ 8 — placeholder only
+  let lastOneLiner = '';
 
-  function getManualWind() {
-    const w = loadJSON(WIND_KEY, null);
-    if (!w || typeof w !== 'object') return null;
-    const mph = Number(w.mph);
-    const fromDeg = Number(w.fromDeg);
-    if (!Number.isFinite(mph) || !Number.isFinite(fromDeg)) return null;
-    return { mph, fromDeg };
-  }
-
-  function compass8(deg) {
-    let best = COMPASS_8[0][0];
-    let bd = 999;
-    for (const [nm, d] of COMPASS_8) {
-      const dd = Math.abs(((deg - d + 540) % 360) - 180);
-      if (dd < bd) {
-        bd = dd;
-        best = nm;
-      }
+  function renderOneLiner() {
+    if (!root.oneLiner || !srcYards) return;
+    const raw = parseNum(srcYards.textContent);
+    const yd = parseNum(srcPlays && srcPlays.textContent) ?? raw;
+    let text = 'Tap map to set target';
+    if (yd != null && yd > 0) {
+      const clubs = getClubs();
+      const best = clubs.length ? bestCarryMatch(yd, clubs) : null;
+      text =
+        `${Math.round(yd)} yd` + (best ? ` · ${best.club.name}` : '');
     }
-    return best;
-  }
-
-  function renderWind() {
-    if (!root.wind) return;
-    const manual = getManualWind();
-    const liveShowing = (() => {
-      const pill = $('windPill');
-      return !!pill && !pill.hidden;
-    })();
-    const hudVisible = !!hudEl && !hudEl.hidden;
-    // Live weather beats everything except an explicit manual entry.
-    // During a live round the DEMO placeholder must NEVER show: if the
-    // app's real wind pill hasn't been revealed yet (renderWind can run
-    // before app.js's first updateWeatherUI, and observers only help
-    // after that), show nothing rather than fake data.
-    if (!manual && (liveShowing || hudVisible)) {
-      root.wind.hidden = true;
-      return;
+    if (text === lastOneLiner) return;
+    lastOneLiner = text;
+    if (yd != null && yd > 0) {
+      // Split so the club can take the accent color via CSS.
+      const sep = text.indexOf(' · ');
+      root.olDist.textContent = sep === -1 ? text : text.slice(0, sep);
+      root.olClub.textContent = sep === -1 ? '' : text.slice(sep); // keeps " · Club"
+    } else {
+      root.olDist.textContent = text;
+      root.olClub.textContent = '';
     }
-    root.wind.hidden = false;
-    const w = manual || DEMO_WIND;
-    const toward = (w.fromDeg + 180) % 360;
-    if (root.windArrow) root.windArrow.style.transform = `rotate(${toward}deg)`;
-    if (root.windText) {
-      root.windText.textContent = w.mph === 0 ? 'calm' : `${Math.round(w.mph)} ${compass8(w.fromDeg)}`;
-    }
-    if (root.windTag) {
-      root.windTag.hidden = false;
-      root.windTag.textContent = manual ? 'MANUAL' : 'DEMO';
-      root.windTag.classList.toggle('manual', !!manual);
-    }
-    root.wind.classList.toggle('is-demo', !manual);
-  }
-
-  function buildWindEditor() {
-    if (!root.speedRow || !root.dirGrid) return;
-    root.speedRow.innerHTML = '';
-    SPEEDS.forEach((s) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'rx-pill-btn';
-      b.dataset.speed = String(s);
-      b.textContent = s === 0 ? 'Calm' : String(s);
-      b.addEventListener('click', () => {
-        const cur = getManualWind() || DEMO_WIND;
-        saveWind({ mph: s, fromDeg: cur.fromDeg });
-        haptic(s === 0);
-      });
-      root.speedRow.appendChild(b);
-    });
-    root.dirGrid.innerHTML = '';
-    COMPASS_8.forEach(([nm, deg]) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'rx-pill-btn';
-      b.dataset.deg = String(deg);
-      b.textContent = nm;
-      b.addEventListener('click', () => {
-        const cur = getManualWind() || DEMO_WIND;
-        saveWind({ mph: cur.mph || 8, fromDeg: deg });
-        haptic(false);
-      });
-      root.dirGrid.appendChild(b);
-    });
-  }
-
-  function syncWindEditor() {
-    const w = getManualWind();
-    if (root.speedRow) {
-      root.speedRow.querySelectorAll('.rx-pill-btn').forEach((b) => {
-        b.classList.toggle('on', !!w && Number(b.dataset.speed) === w.mph);
-      });
-    }
-    if (root.dirGrid) {
-      root.dirGrid.querySelectorAll('.rx-pill-btn').forEach((b) => {
-        b.classList.toggle('on', !!w && Number(b.dataset.deg) === w.fromDeg);
-      });
-    }
-    if (root.windClear) root.windClear.style.display = w ? '' : 'none';
-  }
-
-  function saveWind(w) {
-    try {
-      localStorage.setItem(WIND_KEY, JSON.stringify(w));
-    } catch {}
-    renderWind();
-    syncWindEditor();
-  }
-
-  function clearWind() {
-    try {
-      localStorage.removeItem(WIND_KEY);
-    } catch {}
-    renderWind();
-    syncWindEditor();
-    haptic(true);
   }
 
   /* ================= 5. RETICLE POSITIONING =================
@@ -541,6 +433,72 @@
     pingReticle();
     haptic(true);
     tapMapAt(p.x, p.y);
+  }
+
+  /* ---------- long-press = set target pin (v1.0.67) ----------
+     A ~500 ms hold anywhere on the map drops/moves the shot target at
+     that point by replaying the exact tap path (tapMapAt → app.js's
+     Leaflet click handler). Cancels if the finger moves > 10 px (map
+     pan) or leaves the map, and never fires for control chrome. */
+
+  const LP_MS = 500;
+  const LP_MOVE_PX = 10;
+  let lpTimer = 0;
+  let lpStart = null;
+
+  function cancelLongPress() {
+    lpStart = null;
+    if (lpTimer) {
+      clearTimeout(lpTimer);
+      lpTimer = 0;
+    }
+  }
+
+  // Small expanding-ring confirm animation at the press point.
+  function lpPing(x, y) {
+    if (!wrap || reduceMotion) return;
+    const el = document.createElement('span');
+    el.className = 'rx-lp-ping';
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    wrap.appendChild(el);
+    setTimeout(() => el.remove(), 650);
+  }
+
+  function fireLongPress(x, y) {
+    cancelLongPress();
+    haptic(true); // strong tick: target set
+    lpPing(x, y);
+    tapMapAt(x, y);
+    // Note: iOS may still deliver a real click on finger-lift at the same
+    // point — that re-sets the identical target, which is idempotent.
+  }
+
+  function initLongPress() {
+    if (!mapEl) return;
+    mapEl.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      // Never hijack presses that start on Leaflet/app controls.
+      if (
+        e.target &&
+        e.target.closest &&
+        e.target.closest('.leaflet-control, .range-top-ui, a, button')
+      ) return;
+      cancelLongPress();
+      lpStart = { x: e.clientX, y: e.clientY };
+      lpTimer = setTimeout(() => {
+        if (!lpStart) return;
+        fireLongPress(lpStart.x, lpStart.y);
+      }, LP_MS);
+    });
+    mapEl.addEventListener('pointermove', (e) => {
+      if (!lpStart || !lpTimer) return;
+      const dx = e.clientX - lpStart.x;
+      const dy = e.clientY - lpStart.y;
+      if (dx * dx + dy * dy > LP_MOVE_PX * LP_MOVE_PX) cancelLongPress();
+    });
+    mapEl.addEventListener('pointerup', cancelLongPress);
+    mapEl.addEventListener('pointercancel', cancelLongPress);
   }
 
   function trackShot() {
@@ -692,26 +650,23 @@
   }
 
   function initObservers() {
-    watchText(srcYards, renderHero);
+    watchText(srcYards, renderSheetMirrors);
     watchText(srcLabel, renderHero);
     watchText(srcPlays, () => {
       renderHero();
       // Class flips (pl-long/pl-short) ride the same node.
       renderHero();
     });
-    watchAttrs(srcPlays, renderHero);
+    watchAttrs(srcPlays, renderSheetMirrors);
+
+    function renderSheetMirrors() {
+      renderHero(); // legacy no-op path (hero capsule removed)
+      renderOneLiner();
+    }
 
     watchText(hudHoleEl, renderStrip);
     watchAttrs(hudEl, renderStrip);
     watchText($('roundMapScore'), renderDotsRefresh);
-
-    // Live wind pill visibility → re-run renderWind so the DEMO strip button
-    // hides the moment app.js reveals real wind (no double wind controls).
-    const liveWindPill = $('windPill');
-    if (liveWindPill) {
-      watchAttrs(liveWindPill, renderWind);
-      watchText(liveWindPill, renderWind);
-    }
 
     function renderDotsRefresh() {
       renderStrip();
@@ -753,12 +708,11 @@
 
     // Cross-tab / settings-driven data refreshes.
     window.addEventListener('storage', (e) => {
-      if (e.key === CLUBS_KEY) renderClubChip();
-      if (e.key === SESSION_KEY) renderStrip();
-      if (e.key === WIND_KEY) {
-        renderWind();
-        syncWindEditor();
+      if (e.key === CLUBS_KEY) {
+        renderClubChip();
+        renderOneLiner();
       }
+      if (e.key === SESSION_KEY) renderStrip();
     });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
@@ -791,31 +745,20 @@
     if (root.actCenter) root.actCenter.addEventListener('click', centerOnMe);
     if (root.actSat) root.actSat.addEventListener('click', toggleSatellite);
 
-    if (root.wind) {
-      root.wind.addEventListener('click', () => {
-        haptic(false);
-        syncWindEditor();
-        openSheet(root.windPop);
-      });
-    }
-    if (root.windPopClose) root.windPopClose.addEventListener('click', () => closePops());
     if (root.clubPopClose) root.clubPopClose.addEventListener('click', () => closePops());
-    if (root.windClear) root.windClear.addEventListener('click', clearWind);
     if (root.scrim) root.scrim.addEventListener('click', () => closePops());
+
+    initLongPress();
   }
 
   function init() {
-    buildWindEditor();
     initObservers();
     initEvents();
     placeReticle();
     renderHero();
+    renderOneLiner();
     renderStrip();
-    renderWind();
     syncDock();
-    // Belt-and-suspenders poll: catches a wind-pill reveal that happened
-    // before these observers attached (script-order race on cold start).
-    setInterval(renderWind, 2000);
   }
 
   if (document.readyState === 'loading') {

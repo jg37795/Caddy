@@ -351,21 +351,9 @@
               <span class="rx-strip-hole" id="rxStripHole" hidden></span>
               <span class="rx-strip-sep" id="rxStripHoleSep" hidden></span>
               <span class="rx-dots" id="rxDots" aria-hidden="true"></span>
-              <button class="rx-wind" id="rxWind" type="button"
-                aria-haspopup="dialog" aria-label="Wind — tap to set manual wind">
-                <span class="rx-wind-mini" aria-hidden="true">
-                  <svg class="rose" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10.4" stroke="currentColor" stroke-width="1" stroke-opacity="0.3" />
-                    <path d="M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6" stroke="currentColor" stroke-width="1.2" stroke-opacity="0.4" stroke-linecap="round" />
-                  </svg>
-                  <svg class="arrow" id="rxWindArrow" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 3.4l4.8 7H7.2z" fill="currentColor" />
-                    <path d="M12 10.6v8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-opacity="0.55" />
-                  </svg>
-                </span>
-                <span class="rx-wind-text" id="rxWindText">—</span>
-                <span class="rx-wind-tag" id="rxWindTag">DEMO</span>
-              </button>
+              <!-- Wind segment REMOVED (v1.0.67): DEMO/manual wind controls
+                   deleted. Wind comes from live weather only (wind pill +
+                   sheet weather metrics) — never fake data. -->
             </div>
             <!-- Hero capsule REMOVED (v1.0.64): duplicated the sheet's numbers
                  and crowded the map. All distance readouts live in the sheet. -->
@@ -390,32 +378,18 @@
             <div class="rx-club-note"></div>
           </section>
 
-          <section class="rx-sheet glass" id="rxWindPop" role="dialog" aria-label="Manual wind" hidden>
-            <div class="rx-sheet-grab" aria-hidden="true"></div>
-            <div class="rx-sheet-head">
-              <div>
-                <div class="rx-sheet-title">Wind</div>
-                <div class="rx-sheet-sub">Set what you feel on the tee — Caddy tags it Manual.</div>
-              </div>
-              <button class="rx-sheet-close" id="rxWindPopClose" type="button" aria-label="Close">×</button>
-            </div>
-            <div class="rx-wind-sec">
-              <div class="rx-wind-label">Speed · mph</div>
-              <div class="rx-speed-row" id="rxSpeedRow"></div>
-            </div>
-            <div class="rx-wind-sec">
-              <div class="rx-wind-label">From</div>
-              <div class="rx-dir-grid" id="rxDirGrid"></div>
-            </div>
-            <div class="rx-wind-actions">
-              <button class="rx-pill-btn rx-wind-clear" id="rxWindClear" type="button">Clear manual wind</button>
-            </div>
-          </section>
+          <!-- Manual wind sheet REMOVED (v1.0.67): wind is live weather only. -->
 
           <section class="sheet glass" id="sheet" aria-label="Yardage details">
             <div class="sheet-drag" id="sheetDrag" role="button" tabindex="0" aria-expanded="false"
               aria-label="Expand yardage panel">
               <div class="sheet-handle"></div>
+              <!-- Collapsed one-liner (v1.0.67): at the collapsed detent the
+                   visible band is handle + one compact line. Fades out as
+                   --fcb-reveal rises; full numbers live in .sheet-peek. -->
+              <div class="sheet-oneliner" id="sheetOneLiner" aria-hidden="true">
+                <span class="ol-dist" id="olDist"></span><span class="ol-club" id="olClub"></span>
+              </div>
               <div class="sheet-peek">
                 <div class="sheet-yards">
                   <div class="big-number" id="rawYards" aria-live="polite">

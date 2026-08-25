@@ -981,6 +981,75 @@ body.dark .tee-chip.active {
   display: none;
 }
 
+/* ---- Hole-advance prompt (v1.0.67): glass card on the Play map.
+     Appears after the current hole is scored; bottom lane, above the
+     sheet's collapsed peek and below toasts. Lifts with --ui-lift like
+     the dock family so it never collides with the raised sheet. ---- */
+.rx-hole-prompt {
+  position: absolute;
+  z-index: 660;
+  left: 50%;
+  bottom: calc(var(--ui-lift, var(--sheet-peek)) + 14px);
+  transform: translateX(-50%) translateY(10px);
+  width: min(86vw, 320px);
+  padding: 13px 15px 12px;
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.34s var(--spring-snappy, ease);
+}
+
+.rx-hole-prompt.show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.rx-hole-prompt .hp-text {
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.rx-hole-prompt .hp-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.rx-hole-prompt .hp-btn {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  min-height: 40px;
+  flex: 1 1 50%;
+  border-radius: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.rx-hole-prompt .hp-next {
+  background: var(--green);
+  color: #fff;
+}
+
+body.dark .rx-hole-prompt .hp-next {
+  background: #1d9d5a;
+  color: #f2fff6;
+}
+
+.rx-hole-prompt .hp-later {
+  background: rgba(127, 127, 127, 0.14);
+  color: inherit;
+}
+
+
 /* Live round: the round HUD card occupies the top-left lane (top ≈ +60px)
    and the context strip sits at ≈ +152px — drop the mapping pill below
    both so the error toast can never render on top of the HUD. */
@@ -2811,6 +2880,7 @@ body[data-dragging='1'] .detail-block {
 }
 
 .sheet-drag {
+  position: relative;
   padding: 10px 18px 14px;
   cursor: grab;
   touch-action: none;
@@ -2841,6 +2911,73 @@ body.dark .sheet-handle {
   justify-content: space-between;
   gap: 14px;
   padding: 0 2px;
+}
+
+/* ---- Collapsed one-liner (v1.0.67) ----
+   Collapsed detent shows ONLY the handle + one compact line
+   "<distance> yd · <club>". The full number band (.sheet-peek) fades out
+   and the one-liner fades in; both are driven by data-detent at rest and
+   by --fcb-reveal frame-by-frame during a drag, so the swap rides the
+   finger. Geometry is unchanged: .sheet-peek stays in flow (opacity only)
+   so the sheet's collapsed height — and thus every detent position — is
+   identical to before. */
+
+.sheet-oneliner {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--text, inherit);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sheet-oneliner .ol-dist {
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-oneliner .ol-club {
+  color: var(--green);
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.dark .sheet-oneliner .ol-club {
+  color: #37e07f;
+}
+
+body[data-detent='collapsed'] .sheet-oneliner {
+  opacity: 1;
+}
+
+body[data-detent='half'] .sheet-oneliner,
+body[data-detent='full'] .sheet-oneliner {
+  opacity: 0;
+}
+
+body[data-dragging='1'] .sheet-oneliner {
+  opacity: calc(1 - var(--fcb-reveal, 0));
+  transition: none !important;
+}
+
+body[data-dragging='1'] .sheet-peek {
+  opacity: var(--fcb-reveal, 0);
+  transition: none !important;
+}
+
+body[data-detent='collapsed'] .sheet-peek {
+  opacity: 0;
 }
 
 .sheet-yards {

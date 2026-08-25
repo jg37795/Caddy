@@ -2824,6 +2824,9 @@
     renderRoundHoleHeader();
     renderRoundMapHud();
     renderGroupTable();
+    // Hole just scored? Offer the next one (v1.0.67).
+    maybePromptNextHole(i + 1, state.round[i].score);
+    syncHoleAdvancePrompt();
   }
   function sanitizeInt(v) {
     if (v === '' || v == null) return '';
@@ -3411,6 +3414,90 @@
     haptic(6);
   }
 
+  /* ---- Hole-advance prompt (v1.0.67) ----
+     After the current hole is scored, offer "Next hole?" as a glass card
+     on the Play map. Auto-shows once per holed hole per round (tracked in
+     localStorage); [Later] just dismisses — never nags. */
+
+  let holePromptEl = null;
+  let holePromptHole = 0;
+  const HOLE_ADV_KEY = 'caddy:holeAdvPrompt';
+
+  function hideHoleAdvancePrompt() {
+    holePromptHole = 0;
+    if (holePromptEl) holePromptEl.classList.remove('show');
+  }
+
+  // Safety: if the round moved on by any path, take the card down.
+  function syncHoleAdvancePrompt() {
+    const rs = state.roundSession;
+    if (
+      holePromptEl &&
+      (!rs || holePromptHole !== rs.hole || rs.status === 'pending')
+    ) {
+      hideHoleAdvancePrompt();
+    }
+  }
+
+  function maybePromptNextHole(holeNumber, score) {
+    const rs = state.roundSession;
+    const sc = Number(score);
+    if (!rs || rs.status === 'pending') return;
+    if (!Number.isFinite(sc) || sc < 1) return;
+    if (holeNumber !== rs.hole) return; // only the hole you're playing
+    const total = getCourseHoleCount();
+    if (!(rs.hole < total)) return; // last hole: round-end flow owns it
+
+    let done = null;
+    try {
+      done = JSON.parse(localStorage.getItem(HOLE_ADV_KEY) || 'null');
+    } catch {}
+    if (done && done.round === rs.startedAt && done.hole >= holeNumber)
+      return; // already offered for this hole this round
+    try {
+      localStorage.setItem(
+        HOLE_ADV_KEY,
+        JSON.stringify({ round: rs.startedAt, hole: holeNumber })
+      );
+    } catch {}
+
+    const course = getCurrentCourse();
+    const par =
+      (course &&
+        course.holes &&
+        Number(course.holes[holeNumber - 1] && course.holes[holeNumber - 1].par)) ||
+      4;
+
+    const wrap = document.getElementById('rangeWrap');
+    if (!wrap) return;
+    if (!holePromptEl) {
+      holePromptEl = document.createElement('div');
+      holePromptEl.className = 'rx-hole-prompt glass';
+      holePromptEl.setAttribute('role', 'alertdialog');
+      holePromptEl.setAttribute('aria-label', 'Hole complete');
+      holePromptEl.innerHTML =
+        '<div class="hp-text"></div>' +
+        '<div class="hp-actions">' +
+        '<button type="button" class="hp-btn hp-next">Next hole</button>' +
+        '<button type="button" class="hp-btn hp-later">Later</button>' +
+        '</div>';
+      wrap.appendChild(holePromptEl);
+      holePromptEl.querySelector('.hp-next').addEventListener('click', () => {
+        hideHoleAdvancePrompt();
+        nextHole(); // existing advance logic (blocks while a shot is pending)
+      });
+      holePromptEl.querySelector('.hp-later').addEventListener('click', () => {
+        haptic(6);
+        hideHoleAdvancePrompt();
+      });
+    }
+    holePromptEl.querySelector('.hp-text').textContent =
+      `Hole ${holeNumber} done — ${Math.round(sc)} · par ${par}. Next hole?`;
+    holePromptHole = holeNumber;
+    requestAnimationFrame(() => holePromptEl.classList.add('show'));
+    haptic(10);
+  }
+
   // Mid-round tee-box chips: re-apply an imported tee set onto the LIVE
   // round course (per-hole yardages, tee points, per-tee pars), then
   // refresh everything that displays them. Shown whenever the course
@@ -3649,6 +3736,7 @@
     const rs = state.roundSession;
     const status = roundStatus();
     syncRoundTabState();
+    syncHoleAdvancePrompt();
     renderRoundHoleHeader();
     syncHoleGeometry();
     renderRoundTeePicker();
@@ -6250,6 +6338,9 @@ out geom;`;
 
     setNotice(`Hole ${draft.hole} updated.`, 'greenish');
     haptic(10);
+    // Hole just scored? Offer the next one (v1.0.67).
+    maybePromptNextHole(draft.hole, state.round[holeIndex].score);
+    syncHoleAdvancePrompt();
   }
 
   function saveRoundScoreDraft(andNext = false) {
@@ -6320,6 +6411,12 @@ out geom;`;
     }
 
     haptic(10);
+    // Hole just scored (and we didn't already auto-advance)? Offer the
+    // next one (v1.0.67).
+    if (!draft.partnerId && !shouldAdvance) {
+      maybePromptNextHole(draft.hole, state.round[holeIndex].score);
+    }
+    syncHoleAdvancePrompt();
   }
   function initRoundMode() {
     if (els.roundMapScoreBtn) {

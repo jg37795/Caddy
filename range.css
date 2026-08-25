@@ -150,7 +150,7 @@ body[data-detent='full'] .rx-reticle {
 }
 
 /* ==========================================================================
-   2. Top stack — context strip (hole · scorecard dots · wind) above the
+   2. Top stack — context strip (hole · scorecard dots) above the
       hero distance capsule. Centered, clear of the top-right controls.
    ========================================================================== */
 
@@ -270,73 +270,25 @@ body.dark .rx-dot.over {
   background: #6cb2ff;
 }
 
-/* ---------- wind widget (inside the strip) ---------- */
+/* ---------- long-press target ping (v1.0.67) ---------- */
 
-button.rx-wind {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 2px;
-  min-height: 24px;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-
-button.rx-wind:active {
-  transform: scale(0.94);
-}
-
-.rx-wind-mini {
-  position: relative;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-}
-
-.rx-wind-mini svg.rose,
-.rx-wind-mini svg.arrow {
+.rx-lp-ping {
   position: absolute;
-  inset: 0;
+  z-index: 640;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: rgba(24, 164, 91, 0.35);
+  box-shadow: 0 0 0 2px rgba(24, 164, 91, 0.5);
+  animation: rx-lp-ping 0.62s var(--spring, ease-out) forwards;
 }
 
-.rx-wind-mini svg.arrow {
-  transform-origin: 50% 50%;
-  transition: transform 0.45s var(--spring);
-}
-
-.rx-wind-text {
-  font-variant-numeric: tabular-nums;
-  font-weight: 900;
-}
-
-.rx-wind-tag {
-  font-size: 7.5px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  padding: 2px 4px;
-  border-radius: 5px;
-  background: rgba(211, 135, 19, 0.16);
-  color: var(--warn);
-  text-transform: uppercase;
-}
-
-.rx-wind-tag.manual {
-  background: rgba(24, 164, 91, 0.16);
-  color: var(--green-2);
-}
-
-body.dark .rx-wind-tag.manual {
-  color: #37e07f;
-}
-
-.rx-wind.is-demo {
-  opacity: 0.72;
+@keyframes rx-lp-ping {
+  0% { transform: scale(0.4); opacity: 1; }
+  70% { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(3); opacity: 0; }
 }
 
 /* ==========================================================================
@@ -590,7 +542,7 @@ body.dark .rx-act.armed svg {
 }
 
 /* ==========================================================================
-   5. Popovers — club alternatives & manual wind editor. Bottom mini-sheets
+   5. Popovers — club alternatives. Bottom mini-sheets
       matching the app's existing sheet vocabulary.
    ========================================================================== */
 
@@ -782,77 +734,6 @@ body.dark .rx-club-row .df.hot {
   font-weight: 700;
   line-height: 1.4;
   opacity: 0.62;
-}
-
-/* ---------- wind editor ---------- */
-
-.rx-wind-sec {
-  margin-top: 4px;
-}
-
-.rx-wind-label {
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  opacity: 0.55;
-  margin-bottom: 7px;
-}
-
-.rx-speed-row,
-.rx-dir-grid {
-  display: grid;
-  gap: 6px;
-}
-
-.rx-speed-row {
-  grid-template-columns: repeat(6, 1fr);
-}
-
-.rx-dir-grid {
-  grid-template-columns: repeat(4, 1fr);
-}
-
-.rx-pill-btn {
-  appearance: none;
-  border: 1px solid var(--line);
-  background: rgba(127, 127, 127, 0.08);
-  color: inherit;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 850;
-  font-variant-numeric: tabular-nums;
-  min-height: 44px;
-  border-radius: 13px;
-  cursor: pointer;
-  transition: transform 0.15s var(--spring-snappy), background 0.2s ease,
-    color 0.2s ease, border-color 0.2s ease;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-
-.rx-pill-btn:active {
-  transform: scale(0.94);
-}
-
-.rx-pill-btn.on {
-  background: rgba(24, 164, 91, 0.16);
-  border-color: rgba(24, 164, 91, 0.4);
-  color: var(--green);
-}
-
-body.dark .rx-pill-btn.on {
-  color: #37e07f;
-}
-
-.rx-wind-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.rx-wind-clear {
-  flex: 1 1 auto;
 }
 
 /* ==========================================================================
