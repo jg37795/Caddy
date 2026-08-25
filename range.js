@@ -108,7 +108,7 @@
     dirGrid: $('rxDirGrid'),
     windClear: $('rxWindClear'),
   };
-  if (!wrap || !root.reticle || !root.dock) return; // wrong page / partial HTML
+  if (!wrap || !root.reticle) return; // wrong page / partial HTML (dock removed v1.0.66)
 
   /* ================= 1. HERO DISTANCE MIRROR =================
      Mirrors the sheet's numbers into a glanceable top-center capsule. */
@@ -572,6 +572,8 @@
   }
 
   function syncDock() {
+    // Dock removed (v1.0.66) — all actions live in their original controls.
+    return;
     // Track-shot mirror: idle → dimmed hint · active → armed · pending → amber finish.
     const fabUsable = !!roundFab && !!roundFabWrap && !roundFabWrap.hidden;
     if (root.actTrack) {

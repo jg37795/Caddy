@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.65'; // + play-tab overlay audit: dedupe hole info, sane distance fallback, mapping-pill layout, live wind priority
+const CACHE_VERSION = 'v1.0.66'; // + removed duplicate quick-action dock (Center/Sat/Track/Pin already exist)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

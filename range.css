@@ -491,23 +491,14 @@ button.rx-club-chip:active {
 }
 
 /* ==========================================================================
-   4. Quick-action dock — four one-tap controls floating above the tab bar,
-      riding the shared --ui-lift so they track the sheet.
+   4. Quick-action dock — REMOVED in v1.0.66: every action duplicated an
+      existing control (Center = recenter FAB, Sat = layer segment,
+      Track = round FAB, Pin = map tap). Rule below keeps any cached HTML
+      from ever rendering it.
    ========================================================================== */
 
 .rx-dock {
-  position: absolute;
-  z-index: 600;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%) translateY(calc(-1 * var(--ui-lift, 160px) - 52px));
-  display: inline-flex;
-  align-items: stretch;
-  gap: 4px;
-  padding: 5px;
-  border-radius: 26px;
-  transition: transform 0.42s var(--spring), opacity 0.3s ease;
-  will-change: transform;
+  display: none !important;
 }
 
 /* During a live round the Start-shot FAB owns the lane above the GPS pill —
