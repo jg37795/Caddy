@@ -1038,3 +1038,58 @@ body.dark .prep-strat-advice {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ==========================================================================
+   UNBOUND EMPTY STATE + PLANNER COURSE SEARCH
+   ========================================================================== */
+.prep-unbound-card {
+  text-align: center;
+  padding: 26px 18px;
+}
+
+.prep-unbound-title {
+  margin: 6px 0 8px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+#planCourseSearchResults {
+  margin-top: 8px;
+}
+
+.prep-search-status {
+  padding: 10px 4px;
+  color: var(--text-dim, #9a9a9a);
+  font-size: 13px;
+}
+
+.prep-search-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(127, 127, 127, 0.08);
+  margin-bottom: 6px;
+  color: inherit;
+  font: inherit;
+}
+
+.prep-search-row b {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.prep-search-row span {
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.prep-search-row:active {
+  background: rgba(127, 200, 127, 0.14);
+}

@@ -730,6 +730,16 @@
               <option value="">Choose a course…</option>
             </select>
           </label>
+          <div class="hint" id="planSaveBar" hidden>
+            Searched course — not saved.
+            <button class="ghost-btn" id="planSaveCourseBtn" type="button">Save course</button>
+          </div>
+          <label class="field" style="margin-top: 8px">
+            Find a course by name
+            <input id="planCourseSearch" type="search" placeholder="e.g. Muirfield Village"
+                   autocomplete="off" enterkeyhint="search" />
+          </label>
+          <div id="planCourseSearchResults" hidden></div>
           <div class="hint" style="margin-top: 8px">
             Study every hole before you play — suggested club sequences,
             marked hazards and green shape, straight from your saved

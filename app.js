@@ -253,6 +253,11 @@
     planDetailCard: $('planDetailCard'),
     planDetailTitle: $('planDetailTitle'),
     planDetailBody: $('planDetailBody'),
+    // Planner course search (ephemeral prep course)
+    planCourseSearch: $('planCourseSearch'),
+    planCourseSearchResults: $('planCourseSearchResults'),
+    planSaveBar: $('planSaveBar'),
+    planSaveCourseBtn: $('planSaveCourseBtn'),
     // Course name search (round setup)
     courseSearchInput: $('courseSearchInput'),
     // Group scoring
@@ -12035,6 +12040,84 @@ out geom;`;
       });
   }
 
+  // Shared free-text course lookup: Photon geocoder first (sub-second),
+  // Overpass regex lookup as automatic fallback when Photon comes back
+  // empty or fails. Used by BOTH the round-setup nearby list and the Prep
+  // course picker, so there is exactly one network code path.
+  async function courseNameSearch(term, loc) {
+    const { lat, lng } = loc;
+    const cacheKey =
+      OSM_CACHE_PREFIX +
+      `search:${COURSE_SEARCH_RADIUS_M}:${lat.toFixed(2)},${lng.toFixed(
+        2
+      )}:${term.toLowerCase()}`;
+    const pat = osmEscapeQueryString(term);
+    const query = `
+    [out:json][timeout:20];
+    (
+      nwr["leisure"="golf_course"]["name"~"${pat}",i](around:${COURSE_SEARCH_RADIUS_M},${lat},${lng});
+      nwr["golf"="course"]["name"~"${pat}",i](around:${COURSE_SEARCH_RADIUS_M},${lat},${lng});
+    );
+    out center tags ${COURSE_SEARCH_FETCH_LIMIT};
+  `;
+
+    let results = [];
+    try {
+      results = await photonCourseSearch(term, loc);
+    } catch (photonError) {
+      console.warn('Photon search failed, falling back to Overpass:', photonError);
+    }
+
+    if (!results.length) {
+      const data = await overpassFetch(query, {
+        timeoutMs: 12000,
+        cacheKey,
+        cacheTtlMs: COURSE_SEARCH_TTL_MS,
+      });
+
+      const seen = new Set();
+      results = (Array.isArray(data) ? data : [])
+        .map((item) => {
+          const name = String(item.tags?.name || '').trim();
+          const point = item.center || item;
+
+          if (
+            !name ||
+            !Number.isFinite(Number(point.lat)) ||
+            !Number.isFinite(Number(point.lon))
+          ) {
+            return null;
+          }
+
+          return {
+            id: `osm:${item.type}:${item.id}`,
+            osmType: item.type,
+            osmId: Number(item.id),
+            name,
+            lat: Number(point.lat),
+            lng: Number(point.lon),
+            source: 'openstreetmap',
+          };
+        })
+        .filter(Boolean)
+        .filter((course) => {
+          const key = `${course.name.toLowerCase()}|${course.lat.toFixed(
+            4
+          )}|${course.lng.toFixed(4)}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            haversineMeters(loc, a) - haversineMeters(loc, b)
+        )
+        .slice(0, COURSE_SEARCH_MAX_RESULTS);
+    }
+
+    return results;
+  }
+
   async function runCourseSearch() {
     if (!els.courseSearchInput) return;
     const term = els.courseSearchInput.value.trim();
@@ -12065,76 +12148,8 @@ out geom;`;
     state.courseSearchError = null;
     renderCourseSearchResults();
 
-    const { lat, lng } = state.loc;
-    const cacheKey =
-      OSM_CACHE_PREFIX +
-      `search:${COURSE_SEARCH_RADIUS_M}:${lat.toFixed(2)},${lng.toFixed(
-        2
-      )}:${term.toLowerCase()}`;
-    const pat = osmEscapeQueryString(term);
-    const query = `
-    [out:json][timeout:20];
-    (
-      nwr["leisure"="golf_course"]["name"~"${pat}",i](around:${COURSE_SEARCH_RADIUS_M},${lat},${lng});
-      nwr["golf"="course"]["name"~"${pat}",i](around:${COURSE_SEARCH_RADIUS_M},${lat},${lng});
-    );
-    out center tags ${COURSE_SEARCH_FETCH_LIMIT};
-  `;
-
     try {
-      let results = [];
-      try {
-        results = await photonCourseSearch(term, state.loc);
-      } catch (photonError) {
-        console.warn('Photon search failed, falling back to Overpass:', photonError);
-      }
-
-      if (!results.length) {
-        const data = await overpassFetch(query, {
-          timeoutMs: 12000,
-          cacheKey,
-          cacheTtlMs: COURSE_SEARCH_TTL_MS,
-        });
-
-        const seen = new Set();
-        results = (Array.isArray(data) ? data : [])
-          .map((item) => {
-            const name = String(item.tags?.name || '').trim();
-            const point = item.center || item;
-
-            if (
-              !name ||
-              !Number.isFinite(Number(point.lat)) ||
-              !Number.isFinite(Number(point.lon))
-            ) {
-              return null;
-            }
-
-            return {
-              id: `osm:${item.type}:${item.id}`,
-              osmType: item.type,
-              osmId: Number(item.id),
-              name,
-              lat: Number(point.lat),
-              lng: Number(point.lon),
-              source: 'openstreetmap',
-            };
-          })
-          .filter(Boolean)
-          .filter((course) => {
-            const key = `${course.name.toLowerCase()}|${course.lat.toFixed(
-              4
-            )}|${course.lng.toFixed(4)}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          })
-          .sort(
-            (a, b) =>
-              haversineMeters(state.loc, a) - haversineMeters(state.loc, b)
-          )
-          .slice(0, COURSE_SEARCH_MAX_RESULTS);
-      }
+      const results = await courseNameSearch(term, state.loc);
 
       // Drop the answer if the query it belongs to is no longer current.
       if (mySeq !== state._courseSearchSeq) return;
@@ -12164,10 +12179,23 @@ out geom;`;
 
   const PLAN_MAX_SEQ_CLUBS = 4;
 
-  // Courses available to the planner: the active round's course first,
-  // then every saved profile.
+  // Ephemeral prep course: a course found via name search that is mapped
+  // for planning but NOT saved. Lives only for this session — the save
+  // bar promotes it into state.courseProfiles via saveCourseProfile.
+  let prepEphemeralCourse = null;
+  const PREP_EPHEMERAL_ID = '@prep-search';
+
+  // Courses available to the planner: an ephemeral searched course first,
+  // then the active round's course, then every saved profile.
   function planCourseOptions() {
     const opts = [];
+    if (prepEphemeralCourse) {
+      opts.push({
+        id: PREP_EPHEMERAL_ID,
+        name: `${prepEphemeralCourse.name} · not saved`,
+        course: prepEphemeralCourse,
+      });
+    }
     const active = state.roundSession ? getCurrentCourse() : null;
     if (active) {
       opts.push({
@@ -12228,6 +12256,10 @@ out geom;`;
 
   function renderPlannerCourse() {
     const course = getPlannerCourse();
+    // The "not saved" bar only ever shows for an ephemeral searched course.
+    const ephemeralActive =
+      state.planCourseId === PREP_EPHEMERAL_ID && !!prepEphemeralCourse;
+    if (els.planSaveBar) els.planSaveBar.hidden = !ephemeralActive;
     if (!course || !els.planCourseCard) {
       if (els.planCourseCard) els.planCourseCard.hidden = true;
       return;
@@ -12508,6 +12540,158 @@ out geom;`;
     haptic(6);
   }
 
+  /* ---------- Planner course search (ephemeral until saved) ----------
+     Reuses the round-setup search pipeline (courseNameSearch → Photon
+     with Overpass fallback) and the scorecard import pipeline
+     (fetchAutoCourseScorecard + buildAutoCourse). A picked course is
+     mapped and bound to the planner as EPHEMERAL — it is never written
+     to state.courseProfiles unless the user taps Save. */
+  let planSearchResults = [];
+  let planSearchSeq = 0;
+  let planSearchTimer = null;
+
+  function planSearchStatus(html) {
+    if (!els.planCourseSearchResults) return;
+    els.planCourseSearchResults.hidden = false;
+    els.planCourseSearchResults.innerHTML =
+      `<div class="prep-search-status">${html}</div>`;
+  }
+
+  function clearPlannerSearch() {
+    if (els.planCourseSearch) els.planCourseSearch.value = '';
+    if (els.planCourseSearchResults) {
+      els.planCourseSearchResults.hidden = true;
+      els.planCourseSearchResults.innerHTML = '';
+    }
+    planSearchResults = [];
+    planSearchSeq++;
+  }
+
+  async function runPlannerCourseSearch() {
+    if (!els.planCourseSearch || !els.planCourseSearchResults) return;
+    const term = els.planCourseSearch.value.trim();
+
+    if (term.length < COURSE_SEARCH_MIN_CHARS) {
+      clearPlannerSearch();
+      return;
+    }
+    const mySeq = ++planSearchSeq;
+
+    if (!state.loc) {
+      planSearchStatus('Turn on location to search courses near you.');
+      planSearchResults = [];
+      return;
+    }
+
+    planSearchStatus(`Searching courses named “${escapeHtml(term)}”…`);
+    try {
+      const results = await courseNameSearch(term, state.loc);
+      if (mySeq !== planSearchSeq) return;
+      planSearchResults = results;
+      if (!results.length) {
+        planSearchStatus('No courses matched that name.');
+        return;
+      }
+      els.planCourseSearchResults.innerHTML = results
+        .map((c, i) => {
+          const km = haversineMeters(state.loc, c) / 1000;
+          const dist = km >= 1 ? `${Math.round(km)} km` : `${Math.round(km * 1000)} m`;
+          return `
+            <button type="button" class="prep-search-row" data-idx="${i}">
+              <b>${escapeHtml(c.name)}</b>
+              <span>${dist} away · not saved</span>
+            </button>`;
+        })
+        .join('');
+    } catch (error) {
+      console.warn('Planner course search failed:', error);
+      if (mySeq !== planSearchSeq) return;
+      planSearchResults = [];
+      const msg =
+        error && error.name === 'AbortError'
+          ? 'Search is taking too long right now.'
+          : 'Name search is unavailable right now.';
+      planSearchStatus(
+        `${escapeHtml(msg)} <button type="button" class="ghost-btn" id="planSearchRetryBtn">Try again</button>`
+      );
+      const retry = document.getElementById('planSearchRetryBtn');
+      if (retry) retry.addEventListener('click', runPlannerCourseSearch);
+    }
+  }
+
+  function bindEphemeralCourse(course) {
+    prepEphemeralCourse = course;
+    state.planCourseId = PREP_EPHEMERAL_ID;
+    clearPlannerSearch();
+    renderPlanner();
+    renderPlannerCourse();
+    haptic(10);
+  }
+
+  async function pickPlannerSearchedCourse(candidate) {
+    if (!candidate) return;
+
+    // Already saved under this exact name? Just select the profile.
+    const saved = getSavedCourseMatch(candidate.name);
+    if (saved) {
+      prepEphemeralCourse = null;
+      state.planCourseId = saved.id;
+      clearPlannerSearch();
+      renderPlanner();
+      renderPlannerCourse();
+      haptic(8);
+      return;
+    }
+
+    planSearchStatus(`Mapping ${escapeHtml(candidate.name)}…`);
+    try {
+      const elements = await fetchAutoCourseScorecard(candidate);
+      const course = normalizeCourse(buildAutoCourse(candidate, elements));
+      bindEphemeralCourse(course);
+    } catch (error) {
+      console.warn('Planner course mapping failed:', error);
+      planSearchStatus(
+        `Couldn’t map ${escapeHtml(candidate.name)} right now. <button type="button" class="ghost-btn" id="planSearchRetryBtn">Try again</button>`
+      );
+      const retry = document.getElementById('planSearchRetryBtn');
+      if (retry)
+        retry.addEventListener('click', () =>
+          pickPlannerSearchedCourse(candidate)
+        );
+    }
+  }
+
+  function savePlannerEphemeralCourse() {
+    if (!prepEphemeralCourse) return;
+    const name = prepEphemeralCourse.name;
+    const course = prepEphemeralCourse;
+    prepEphemeralCourse = null;
+    saveCourseProfile(course); // existing save path; re-renders planner
+    const savedProfile = getSavedCourseMatch(name);
+    state.planCourseId = savedProfile ? savedProfile.id : '';
+    clearPlannerSearch();
+    renderPlanner();
+    renderPlannerCourse();
+    haptic(12);
+  }
+
+  function wirePlannerCourseSearch() {
+    if (!els.planCourseSearch) return;
+
+    els.planCourseSearch.addEventListener('input', () => {
+      clearTimeout(planSearchTimer);
+      planSearchTimer = setTimeout(runPlannerCourseSearch, 400); // debounce
+    });
+
+    els.planCourseSearchResults?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.prep-search-row');
+      if (!btn) return;
+      pickPlannerSearchedCourse(planSearchResults[Number(btn.dataset.idx)]);
+    });
+
+    els.planSaveCourseBtn?.addEventListener('click', savePlannerEphemeralCourse);
+  }
+
   function initPlanner() {
     if (!els.planCourseSelect) return;
     els.planCourseSelect.addEventListener('change', () => {
@@ -12515,6 +12699,7 @@ out geom;`;
       renderPlannerCourse();
       haptic(5);
     });
+    wirePlannerCourseSearch();
     renderPlanner();
   }
   // ============================================================
@@ -13058,6 +13243,55 @@ out geom;`;
         mem ? `set=${mem.activeTeeSet}` : 'missing');
 
       state.courseProfiles = sProfiles;
+    }
+
+    // 17. Planner course search: ephemeral binding + save promotion.
+    {
+      const sProfiles = state.courseProfiles;
+      const sPlanId = state.planCourseId;
+      const sEphem = prepEphemeralCourse;
+      try {
+        state.courseProfiles = [];
+
+        const mkCourse = (id, name) => normalizeCourse({
+          id, name, teeName: 'Regular tees', holesCount: 9,
+          holes: Array.from({ length: 9 }, (_, i) => ({ number: i + 1, par: 4, yards: 320 })),
+        });
+
+        // Ephemeral course shows up as '@prep-search · not saved'.
+        prepEphemeralCourse = mkCourse('eph-test', 'Search Test GC');
+        state.planCourseId = PREP_EPHEMERAL_ID;
+        const opts = planCourseOptions();
+        ok('ephemeral searched course appears in planner options',
+          opts.some((o) => o.id === PREP_EPHEMERAL_ID && /not saved/.test(o.name)),
+          opts.map((o) => o.id).join(','));
+
+        // holeInfo resolves through the ephemeral course too.
+        const info = window.CaddyPrep.holeInfo(1);
+        ok('holeInfo binds via ephemeral course',
+          !!info && info.number === 1,
+          info ? `course=${info.courseName}` : 'null');
+
+        // Saving promotes it into courseProfiles and re-points the picker.
+        state.planCourseId = PREP_EPHEMERAL_ID;
+        savePlannerEphemeralCourse();
+        ok('save promotes ephemeral course into profiles',
+          state.courseProfiles.length === 1 &&
+            state.planCourseId === state.courseProfiles[0].id &&
+            prepEphemeralCourse === null,
+          `profiles=${state.courseProfiles.length} planId=${state.planCourseId}`);
+
+        // Picking a name that matches a saved profile selects it — no dup.
+        pickPlannerSearchedCourse({ name: 'search test gc', lat: 33, lng: -84 });
+        ok('picking a saved course name selects the profile (no dup)',
+          state.courseProfiles.length === 1 &&
+            state.planCourseId === state.courseProfiles[0].id,
+          `profiles=${state.courseProfiles.length} planId=${state.planCourseId}`);
+      } finally {
+        state.courseProfiles = sProfiles;
+        state.planCourseId = sPlanId;
+        prepEphemeralCourse = sEphem;
+      }
     }
 
     console.log(out.join('\n'));

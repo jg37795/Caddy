@@ -122,15 +122,14 @@
     surface: 'medium',
   });
   const shot = lsLoad('shot', {
-    mode: 'number',        // 'number' | 'hole'
-    yards: 150,
     greenPoint: 'middle',  // front | middle | back
-    bearing: 0,
     lie: 'fairway',
     shape: 'straight',
   });
 
   let boundHole = null; // holeInfo object when a planner hole is open
+                       // Prep ALWAYS works from a bound course hole — there
+                       // is no manual-yardage fallback anymore.
 
   const persist = () => {
     lsSave('cond', cond);
@@ -342,22 +341,24 @@
         </div>
       </div>
 
+      <!-- NO HOLE BOUND — clean empty state -->
+      <div class="card prep-unbound-card" id="prepUnboundCard" hidden>
+        <div class="prep-kicker">No hole bound</div>
+        <h3 class="prep-unbound-title">Bind a course hole to prep your shot</h3>
+        <p class="hint">Pick a course above and tap a hole — conditions, the
+        play and hole strategy come alive here.</p>
+      </div>
+
       <!-- THE SHOT -->
       <div class="card" id="prepShotCard">
         <div class="card-title">
           <h2>The shot</h2>
-          <span class="chip" id="prepTargetChip">Manual number</span>
-        </div>
-
-        <div class="prep-seg" id="prepModeSeg" style="--n:2; margin-bottom: 12px">
-          <span class="prep-seg-thumb"></span>
-          <button type="button" class="prep-seg-opt" data-mode="hole">Planned hole</button>
-          <button type="button" class="prep-seg-opt" data-mode="number">Any number</button>
+          <span class="chip" id="prepTargetChip">Hole —</span>
         </div>
 
         <div id="prepTargetMeta" class="prep-target-meta"></div>
 
-        <div id="prepHolePane" hidden>
+        <div id="prepHolePane">
           <div class="prep-mini-label">Playing to</div>
           <div class="prep-green-picker" id="prepGreenPicker">
             <button type="button" class="prep-point-btn" data-point="front"><i>Front</i><b>—</b></button>
@@ -365,19 +366,6 @@
             <button type="button" class="prep-point-btn" data-point="back"><i>Back</i><b>—</b></button>
           </div>
           <div class="hint" id="prepGreenHint" style="margin-top: 7px"></div>
-        </div>
-
-        <div id="prepNumPane">
-          <div class="prep-slider-row" style="grid-template-columns: auto 1fr auto;">
-            <label for="prepYardsInput">Yards out</label>
-            <input id="prepYardsInput" class="prep-yards-input" type="number" inputmode="decimal" min="1" max="650" value="${Math.round(num(shot.yards, 150))}"/>
-            <div class="prep-stepper" id="prepBearingStep">
-              <button type="button" class="prep-step-btn" data-step="bearing" data-dir="-1">−</button>
-              <span class="prep-step-val" id="prepBearingVal">${fmt(shot.bearing)}°<small>${compass16(shot.bearing)}</small></span>
-              <button type="button" class="prep-step-btn" data-step="bearing" data-dir="1">+</button>
-            </div>
-          </div>
-          <div class="hint" style="margin-top: 6px">Bearing is the shot direction — it tells the dial how wind relates to your line.</div>
         </div>
 
         <div class="section-gap" style="margin-top: 13px">
@@ -473,13 +461,10 @@
 
     $('prepAltVal').innerHTML = `${fmt(cond.altFt, 0)}<small>feet</small>`;
     $('prepElevVal').innerHTML = `${sgn(cond.elevFt, 0)}<small>feet</small>`;
-    $('prepBearingVal').innerHTML = `${fmt(shot.bearing)}°<small>${compass16(shot.bearing)}</small>`;
 
     paintSeg('prepSurfaceSeg', 'surface', cond.surface);
     const surf = SURFACES.find((s) => s.id === cond.surface) || SURFACES[1];
     $('prepSurfaceNote').textContent = surf.note;
-
-    paintSeg('prepModeSeg', 'mode', shot.mode);
 
     [...$('prepLieRow').children].forEach((c) =>
       c.classList.toggle('active', c.dataset.lie === shot.lie)
@@ -490,47 +475,42 @@
   }
 
   function paintTarget() {
-    // Effective mode: 'hole' is only real while a planner hole is bound.
-    const effMode = boundHole && shot.mode === 'hole' ? 'hole' : 'number';
-    paintSeg('prepModeSeg', 'mode', effMode);
-    $('prepModeSeg')
-      .querySelector('[data-mode="hole"]')
-      .toggleAttribute('disabled', !boundHole);
+    // Prep is always bound to a course hole. No hole → clean empty state.
+    const unbound = $('prepUnboundCard');
+    const shotCard = $('prepShotCard');
+    const recCard = $('prepRecCard');
 
-    const holeBound = effMode === 'hole';
-    $('prepHolePane').hidden = !holeBound;
-    $('prepNumPane').hidden = holeBound;
-
-    if (holeBound) {
-      $('prepTargetChip').textContent = `Hole ${boundHole.number}`;
-      const g = boundHole.green || {};
-      const pts = { front: g.front, middle: g.center, back: g.back };
-      const shown = pts[shot.greenPoint];
-      $('prepTargetMeta').innerHTML =
-        `${escapeHtml(boundHole.courseName)} · Par ${boundHole.par ?? '—'}` +
-        (boundHole.yards ? ` · ${Math.round(boundHole.yards)} yd tee-to-green` : '') +
-        (shown != null
-          ? ` · playing <b>${shown} yd</b> to the ${shot.greenPoint}`
-          : '');
-      [...$('prepGreenPicker').children].forEach((b) => {
-        const v = pts[b.dataset.point];
-        b.querySelector('b').textContent = v != null ? v : '—';
-        b.classList.toggle('active', b.dataset.point === shot.greenPoint);
-        b.toggleAttribute('disabled', v == null);
-      });
-      const anyMapped = Object.values(pts).some((v) => v != null);
-      $('prepGreenHint').textContent = anyMapped
-        ? 'Carries below update live with your conditions.'
-        : 'Green edges are not mapped — playing to the center estimate.';
-    } else {
-      $('prepTargetChip').textContent = 'Manual number';
-      const brg = shot.bearing;
-      $('prepTargetMeta').innerHTML =
-        `Shooting <b>${Math.round(num(shot.yards))} yd</b> on a bearing of ${fmt(brg)}° (${compass16(brg)})` +
-        (boundHole
-          ? ' — open a hole above to bind this panel to its green.'
-          : '');
+    if (!boundHole) {
+      if (unbound) unbound.hidden = false;
+      shotCard.hidden = true;
+      recCard.hidden = true;
+      renderStrategy();
+      return;
     }
+    if (unbound) unbound.hidden = true;
+    shotCard.hidden = false;
+    recCard.hidden = false;
+
+    $('prepTargetChip').textContent = `Hole ${boundHole.number}`;
+    const g = boundHole.green || {};
+    const pts = { front: g.front, middle: g.center, back: g.back };
+    const shown = pts[shot.greenPoint];
+    $('prepTargetMeta').innerHTML =
+      `${escapeHtml(boundHole.courseName)} · Par ${boundHole.par ?? '—'}` +
+      (boundHole.yards ? ` · ${Math.round(boundHole.yards)} yd tee-to-green` : '') +
+      (shown != null
+        ? ` · playing <b>${shown} yd</b> to the ${shot.greenPoint}`
+        : '');
+    [...$('prepGreenPicker').children].forEach((b) => {
+      const v = pts[b.dataset.point];
+      b.querySelector('b').textContent = v != null ? v : '—';
+      b.classList.toggle('active', b.dataset.point === shot.greenPoint);
+      b.toggleAttribute('disabled', v == null);
+    });
+    const anyMapped = Object.values(pts).some((v) => v != null);
+    $('prepGreenHint').textContent = anyMapped
+      ? 'Carries below update live with your conditions.'
+      : 'Green edges are not mapped — playing to the center estimate.';
   }
 
   function wireControls() {
@@ -572,7 +552,6 @@
         const kind = btn.dataset.step;
         if (kind === 'alt') cond.altFt = clamp(cond.altFt + dir * 250, 0, 12000);
         if (kind === 'elev') cond.elevFt = clamp(cond.elevFt + dir * 5, -200, 200);
-        if (kind === 'bearing') shot.bearing = norm360(shot.bearing + dir * 5);
         haptic(4);
         persist();
         paintControls();
@@ -591,17 +570,6 @@
       recompute({ pulse: true });
     });
 
-    $('prepModeSeg').addEventListener('click', (e) => {
-      const opt = e.target.closest('.prep-seg-opt');
-      if (!opt || opt.hasAttribute('disabled')) return;
-      shot.mode = opt.dataset.mode;
-      haptic(6);
-      persist();
-      paintControls();
-      paintTarget();
-      recompute({ pulse: true });
-    });
-
     $('prepGreenPicker').addEventListener('click', (e) => {
       const btn = e.target.closest('.prep-point-btn');
       if (!btn || btn.hasAttribute('disabled')) return;
@@ -610,23 +578,6 @@
       persist();
       paintTarget();
       recompute({ pulse: true });
-    });
-
-    const yardsInput = $('prepYardsInput');
-    let yardsTimer = null;
-    yardsInput.addEventListener('input', () => {
-      clearTimeout(yardsTimer);
-      yardsTimer = setTimeout(() => {
-        const v = num(yardsInput.value, NaN);
-        if (Number.isFinite(v) && v > 0) {
-          shot.yards = clamp(v, 1, 650);
-          persist();
-          recompute({ pulse: true });
-        }
-      }, 260);
-    });
-    yardsInput.addEventListener('blur', () => {
-      yardsInput.value = Math.round(num(shot.yards, 150));
     });
 
     $('prepLieRow').addEventListener('click', (e) => {
@@ -687,24 +638,18 @@
      5. COMPUTE PIPELINE
      ====================================================================== */
   function currentBearing() {
-    if (shot.mode === 'hole' && boundHole) {
-      return Math.round(num(boundHole.bearing, 0));
-    }
-    return Math.round(norm360(shot.bearing));
+    return boundHole ? Math.round(num(boundHole.bearing, 0)) : 0;
   }
 
   function currentTargetYd() {
-    if (shot.mode === 'hole' && boundHole) {
-      const g = boundHole.green || {};
-      const pt = shot.greenPoint === 'front' ? g.front
-        : shot.greenPoint === 'back' ? g.back
-          : g.center;
-      if (pt != null) return pt;
-      if (boundHole.yards) return Math.round(boundHole.yards);
-      return null;
-    }
-    const v = num(shot.yards, NaN);
-    return Number.isFinite(v) && v > 0 ? v : null;
+    if (!boundHole) return null;
+    const g = boundHole.green || {};
+    const pt = shot.greenPoint === 'front' ? g.front
+      : shot.greenPoint === 'back' ? g.back
+        : g.center;
+    if (pt != null) return pt;
+    if (boundHole.yards) return Math.round(boundHole.yards);
+    return null;
   }
 
   // One full physics solve under the CURRENT panel conditions.
@@ -885,7 +830,7 @@
 
   function renderStrategy() {
     const card = $('prepStrategyCard');
-    if (!(boundHole && shot.mode === 'hole')) {
+    if (!(boundHole)) {
       card.hidden = true;
       return;
     }
@@ -1004,7 +949,8 @@
     const yd = currentTargetYd();
     if (!yd) {
       $('prepRecMain').textContent = 'Set a target';
-      $('prepReason').textContent = 'Enter a yardage (or bind a planned hole above) to get the play.';
+      $('prepReason').textContent =
+        'Bind a course hole above to get the play for its green.';
       $('prepAdjChips').innerHTML = '';
       $('cellCarry').textContent = '—';
       $('cellRelease').textContent = '—';
@@ -1029,11 +975,8 @@
     const info = api.holeInfo(number);
     if (!info) return;
     boundHole = info;
-    if (shot.mode !== 'hole') {
-      shot.mode = 'hole';
-      shot.greenPoint = 'middle';
-      persist();
-    }
+    shot.greenPoint = 'middle';
+    persist();
     paintControls();
     paintTarget();
     recompute({ pulse: true });
