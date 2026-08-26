@@ -1380,11 +1380,12 @@
         // 18Birdies look: 3D views default to the classic topo rainbow.
         elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t) });
     ds.mesh = state.mesh;
-    // Downhill arrows on the surface, every 3rd cell (like 2D flow layer).
+    // Downhill arrows on the surface. v2: sparse & bold like 18Birdies —
+    // ~every 8th refined cell (≈40 arrows), uniform bold styling, not fuzz.
     const arr = [];
-    const step = 3;
-    for (let y = 1; y < g.H - 1; y += step)
-      for (let x = 1; x < g.W - 1; x += step) {
+    const step = 8;
+    for (let y = 4; y < g.H - 1; y += step)
+      for (let x = 4; x < g.W - 1; x += step) {
         const i = y * g.W + x;
         if (!state.mask[i] || !state.field.valid[i]) continue;
         const gxv = state.field.gx[i], gyv = state.field.gy[i];
@@ -1394,7 +1395,7 @@
           mx: (x + 0.5 - g.W / 2) * g.cellSizeM,
           my: (g.H / 2 - y - 0.5) * g.cellSizeM,
           dxm: -gxv / mag, dym: gyv / mag,
-          lenM: 0.72 + Math.min(1.85, mag * 100 / 4.0),
+          lenM: 1.6,                       // uniform length — clean flow field
           slopePct: mag * 100
         });
       }
@@ -1645,6 +1646,10 @@
         (!state.grid || !state.mesh || state.active !== 'hole')) {
       // Corridor still loading (or fell back) — glass loading card with a
       // spinner, never a broken or silent UI.
+      // v-fix: keep re-rendering so the spinner actually animates (it was
+      // painted once and frozen — looked like a hang).
+      setTimeout(() => { if (state.viewMode === 'hole' &&
+        (!state.grid || !state.mesh || state.active !== 'hole')) render(); }, 90);
       const failed = state.datasets.hole && state.datasets.hole.failed;
       const msg = failed ? state.datasets.hole.msg : 'Preparing hole flyover…';
       const cw = canvas.width, ch = canvas.height;
