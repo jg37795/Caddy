@@ -85,6 +85,67 @@ console.log('3. Elevation ramp endpoints');
     JSON.stringify(low) && JSON.stringify(GM.elevationColor(7)) === JSON.stringify(high));
 }
 
+console.log('3b. 18Birdies visuals — rainbow ramp, contours, skirt');
+{
+  // Rainbow ramp: endpoints + monotonic blue→red warmth.
+  const rl = GM.elevationColorRainbow(0), rm = GM.elevationColorRainbow(0.5),
+        rh = GM.elevationColorRainbow(1);
+  check('rainbow low is deep blue (B dominant)', rl[2] > rl[0] && rl[2] > rl[1], rl);
+  check('rainbow high is red (R > G,B)', rh[0] > rh[1] && rh[0] > rh[2], rh);
+  check('rainbow mid is yellow/green (G dominant)', rm[1] >= rm[0] || rm[1] >= rm[2], rm);
+  // Warmth (R−B) must rise monotonically through the green→yellow→red half.
+  let mono = true;
+  const warmth = (t) => { const c = GM.elevationColorRainbow(t); return c[0] - c[1]; };
+  for (let t = 0.45; t <= 1.0001; t += 0.05)
+    if (warmth(t) < warmth(t - 0.05)) mono = false;
+  check('rainbow warmth monotonic mid→high', mono);
+  check('rainbow clamps out-of-range',
+    JSON.stringify(GM.elevationColorRainbow(-2)) === JSON.stringify(rl) &&
+    JSON.stringify(GM.elevationColorRainbow(9)) === JSON.stringify(rh));
+}
+{
+  // Contour interval: derived from range/10 snapped to nice values.
+  check('interval 5.3m range → 0.5', GM.contourInterval(10, 15.3) === 0.5,
+    GM.contourInterval(10, 15.3));
+  check('interval 1.2m range → 0.1', GM.contourInterval(20, 21.2) === 0.1,
+    GM.contourInterval(20, 21.2));
+  check('interval 47m range → 5', GM.contourInterval(100, 147) === 5,
+    GM.contourInterval(100, 147));
+  check('degenerate range → small default', GM.contourInterval(5, 5) === 0.05);
+}
+{
+  // Marching squares on a synthetic tilt: z = 0.25·x·cs, cs=1 → one
+  // near-vertical contour line per integer level.
+  const W = 16, H = 8, cs = 1;
+  const grid = new Float32Array(W * H);
+  const mask = new Uint8Array(W * H).fill(1);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) grid[y * W + x] = 0.25 * x;
+  const segs = GM.contourSegments(grid, W, H, cs, mask, 1);
+  check('contours found on tilt', segs.length >= 8, segs.length);
+  check('segment z values are integers in range',
+    segs.every(s => Number.isInteger(s.z) && s.z >= 1 && s.z <= 13));
+  check('segments are near-vertical on x-tilt',
+    segs.every(s => Math.abs(s.a[0] - s.b[0]) < 1e-6 &&
+                   Math.abs(s.a[1] - s.b[1]) <= cs + 1e-6));
+  const flatSegs = GM.contourSegments(
+    new Float32Array(W * H), W, H, cs, mask, 1);
+  check('flat grid → no contours', flatSegs.length === 0);
+}
+{
+  // Skirt vertex generation: square ring extruded to a base plane.
+  const sq = [[-4, -4], [4, -4], [4, 4], [-4, 4]];
+  const quads = GM.buildSkirtQuads(sq, ([mx]) => mx + 6, 0);   // sloped top
+  check('skirt quad count == ring size', quads.length === 4, quads.length);
+  const q0 = quads[0];
+  check('skirt quad has 4 verts × xyz', q0.v.length === 4 &&
+    q0.v.every(p => p.length === 3));
+  check('skirt bottoms at base plane', q0.v.every(p => p[2] === 0 ||
+    p === q0.v[0] || p === q0.v[1]), JSON.stringify(q0.v.map(p => p[2])));
+  check('skirt top follows surface fn', q0.v[0][2] === 2 && q0.v[1][2] === 10);
+  check('empty poly → no quads', GM.buildSkirtQuads([], () => 0).length === 0);
+}
+
 console.log('4. Polygon clip mask');
 {
   // Square poly ±8m around centre, 32 cells @ 1m.

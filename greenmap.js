@@ -593,7 +593,8 @@
           if (!baseCol) continue;             // colorFn may cull the quad
         } else if (mode === 'elev') {
           const t = (zMid - lo) / Math.max(1e-6, hi - lo);
-          baseCol = GreenMapCore.elevationColor(t);
+          baseCol = O.elevColorFn
+            ? O.elevColorFn(t) : GreenMapCore.elevationColor(t);
         } else {
           const gxv = (c10[0] - c00[0] + c11[0] - c01[0]) / 2;
           const gyv = (c01[0] - c00[0] + c11[0] - c10[0]) / 2;
@@ -625,6 +626,126 @@
       nrm.set(q.n, k * 3);
     });
     return { count, pos, col, vcol, nrm, zmin };
+  };
+
+  // Classic topo rainbow ramp (18Birdies-style): deep blue → cyan → green →
+  // yellow → orange → red. Used as the default elevation ramp for the
+  // 3D/hole views; 2D keeps the softer legacy ramp.
+  GreenMapCore.elevationColorRainbow = function (t) {
+    const stops = [
+      [0.00, [38, 56, 152]],    // deep blue — low
+      [0.20, [40, 140, 205]],   // cyan-blue
+      [0.40, [64, 170, 92]],    // green
+      [0.60, [240, 222, 70]],   // yellow
+      [0.80, [242, 146, 48]],   // orange
+      [1.00, [204, 50, 42]]     // red — high
+    ];
+    const p = Math.max(0, Math.min(1, t));
+    for (let k = 1; k < stops.length; k++) {
+      if (p <= stops[k][0]) {
+        const [p0, c0] = stops[k - 1], [p1, c1] = stops[k];
+        const u = (p - p0) / (p1 - p0);
+        return [
+          Math.round(c0[0] + (c1[0] - c0[0]) * u),
+          Math.round(c0[1] + (c1[1] - c0[1]) * u),
+          Math.round(c0[2] + (c1[2] - c0[2]) * u)
+        ];
+      }
+    }
+    return stops[stops.length - 1][1];
+  };
+
+  // Nice contour interval from the actual elevation range: range/10 snapped
+  // to a human-friendly step (1/2/2.5/5 × 10^k). Returns metres.
+  GreenMapCore.contourInterval = function (lo, hi) {
+    const range = Math.max(0, hi - lo);
+    if (!(range > 0)) return 0.05;
+    const raw = range / 10;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    // Snap to the NEAREST nice value (1 / 2 / 2.5 / 5 / 10 × 10^k).
+    let nice = 1, best = Infinity;
+    for (const c of [1, 2, 2.5, 5, 10]) {
+      const d = Math.abs(norm - c);
+      if (d < best) { best = d; nice = c; }
+    }
+    return nice * mag;
+  };
+
+  // Marching-squares contour segments along a grid: for each cell and each
+  // contour level crossing it, emit the segment between the two crossed
+  // edges. Points are local metres [x E, y N]; z is the interpolated RAW
+  // elevation at the crossing. Only cells fully inside `mask` participate.
+  GreenMapCore.contourSegments = function (vals, W, H, cellSizeM, mask,
+                                           interval) {
+    const segs = [];
+    if (!(interval > 0) || !vals || W < 2 || H < 2) return segs;
+    let vmin = Infinity, vmax = -Infinity;
+    for (let i = 0; i < vals.length; i++)
+      if (mask[i] && Number.isFinite(vals[i])) {
+        if (vals[i] < vmin) vmin = vals[i];
+        if (vals[i] > vmax) vmax = vals[i];
+      }
+    if (!Number.isFinite(vmin) || !(vmax > vmin)) return segs;
+    const mx = (cx) => (cx + 0.5 - W / 2) * cellSizeM;
+    const my = (cy) => (H / 2 - cy - 0.5) * cellSizeM;
+    const val = (cx, cy) => {
+      const i = cy * W + cx;
+      return (cx >= 0 && cy >= 0 && cx < W && cy < H && mask[i] &&
+              Number.isFinite(vals[i])) ? vals[i] : null;
+    };
+    for (let y = 0; y < H - 1; y++) {
+      for (let x = 0; x < W - 1; x++) {
+        const v = [val(x, y), val(x + 1, y), val(x + 1, y + 1),
+                   val(x, y + 1)];
+        if (v.some(c => c === null)) continue;
+        // Cell corner positions (local metres).
+        const px = [mx(x), mx(x + 1), mx(x + 1), mx(x)];
+        const py = [my(y), my(y), my(y + 1), my(y + 1)];
+        // Edges: 0-1, 1-2, 2-3, 3-0.
+        const eA = [0, 1, 2, 3], eB = [1, 2, 3, 0];
+        const vHi = Math.max(v[0], v[1], v[2], v[3]);
+        const vLo = Math.min(v[0], v[1], v[2], v[3]);
+        let L = Math.ceil(vLo / interval) * interval;
+        for (; L <= vHi; L += interval) {
+          const hits = [];
+          for (let e = 0; e < 4; e++) {
+            const a = v[eA[e]], b = v[eB[e]];
+            if ((a < L && b >= L) || (b < L && a >= L)) {
+              const t = (L - a) / (b - a);
+              hits.push([px[eA[e]] + (px[eB[e]] - px[eA[e]]) * t,
+                         py[eA[e]] + (py[eB[e]] - py[eA[e]]) * t]);
+            }
+          }
+          if (hits.length >= 2)
+            segs.push({ z: L, a: hits[0], b: hits[1] });
+        }
+      }
+    }
+    return segs;
+  };
+
+  // Skirt wall quads: extrude a closed boundary polygon (local metres) down
+  // to a base plane. zAt([mx,my]) returns the top surface height; baseZ is
+  // the floor height. Returns [{ v: [topA, topB, botB, botA] }, …].
+  GreenMapCore.buildSkirtQuads = function (polyLocalM, zAt, baseZ = 0) {
+    if (!polyLocalM || polyLocalM.length < 3) return [];
+    const quads = [];
+    const n = polyLocalM.length;
+    for (let i = 0; i < n; i++) {
+      const p1 = polyLocalM[i], p2 = polyLocalM[(i + 1) % n];
+      const z1 = zAt(p1), z2 = zAt(p2);
+      if (!Number.isFinite(z1) || !Number.isFinite(z2)) continue;
+      quads.push({
+        v: [
+          [p1[0], p1[1], z1],
+          [p2[0], p2[1], z2],
+          [p2[0], p2[1], baseZ],
+          [p1[0], p1[1], baseZ]
+        ]
+      });
+    }
+    return quads;
   };
 
   window.GreenMapCore = GreenMapCore;
@@ -945,11 +1066,12 @@
       ds.eg.cellSizeM, ds.mask, ds.elevRange, state.v3.exag, state.mode,
       {
         smooth: true, ao: true, aoRadius: 4,
+        elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t),
         colorFn: (i, zMid) => {
           if (zone && zone[i]) {
-            // Active-ramp colour for green cells.
+            // Active-ramp colour for green cells (3D → rainbow topo).
             if (state.mode === 'elev')
-              return GreenMapCore.elevationColor(
+              return GreenMapCore.elevationColorRainbow(
                 (zMid - lo) / Math.max(1e-6, hi - lo));
             // Slope % from raw neighbours (cheap central difference).
             const W = ds.grid.W, cs = ds.eg.cellSizeM;
@@ -1254,7 +1376,9 @@
     }
     state.mesh = GreenMapCore.buildMesh3D(
       mg, mW, mH, cellM, mMask, state.elevRange,
-      state.v3.exag, state.mode, { smooth: true, ao: true, aoRadius: aoR });
+      state.v3.exag, state.mode, { smooth: true, ao: true, aoRadius: aoR,
+        // 18Birdies look: 3D views default to the classic topo rainbow.
+        elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t) });
     ds.mesh = state.mesh;
     // Downhill arrows on the surface, every 3rd cell (like 2D flow layer).
     const arr = [];
@@ -1295,6 +1419,202 @@
               z(g.grid[y1 * g.W + x0]) * (1 - tx) * ty +
               z(g.grid[y1 * g.W + x1]) * tx * ty;
     return (h - M.zmin) * state.v3.exag;
+  }
+
+  // ---- 18Birdies-grade scene dressing -----------------------------------
+  // Active-frame green boundary polygon (local metres), or null.
+  function greenBoundaryPts() {
+    if (state.active === 'green') {
+      if (state.polyLocal && state.polyLocal.length > 2)
+        return state.polyLocal;
+      const pts = [];                     // ellipse fallback
+      for (let a = 0; a < 48; a++) {
+        const th = a / 48 * Math.PI * 2;
+        pts.push([Math.cos(th) * SPAN_M * 0.36,
+                  Math.sin(th) * SPAN_M * 0.36]);
+      }
+      return pts;
+    }
+    if (state.active === 'hole' && state.datasets.hole &&
+        !state.datasets.hole.failed) {
+      const [gox, goy] = state.datasets.hole.gOff;
+      const gD = state.datasets.green;
+      if (gD && gD.polyLocal && gD.polyLocal.length > 2)
+        return gD.polyLocal.map(([mx, my]) => [mx + gox, my + goy]);
+      const rM = SPAN_M * 0.36, pts = [];
+      for (let a = 0; a < 48; a++) {
+        const th = a / 48 * Math.PI * 2;
+        pts.push([gox + Math.cos(th) * rM, goy + Math.sin(th) * rM]);
+      }
+      return pts;
+    }
+    return null;
+  }
+
+  // Thin semi-transparent iso-lines at fixed elevation intervals
+  // (marching-squares along the live grid), projected onto the surface.
+  function drawContours3D(cam) {
+    const g = state.grid, M = state.mesh;
+    if (!g || !M || !state.mask) return;
+    const [lo, hi] = state.elevRange || [0, 1];
+    // Interval derives from the green's ACTUAL elevation range (range/10,
+    // snapped to a nice value) — never hardcoded.
+    const iv = GreenMapCore.contourInterval(lo, hi);
+    const segs = GreenMapCore.contourSegments(
+      g.grid, g.W, g.H, g.cellSizeM, state.mask, iv);
+    if (!segs.length) return;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(0.7, (window.devicePixelRatio || 1) * 0.55);
+    ctx.strokeStyle = 'rgba(16,26,20,0.32)';
+    ctx.beginPath();
+    for (const s of segs) {
+      const p1 = GreenMapCore.projectPt(cam, s.a[0], s.a[1],
+        (s.z - M.zmin) * state.v3.exag);
+      const p2 = GreenMapCore.projectPt(cam, s.b[0], s.b[1],
+        (s.z - M.zmin) * state.v3.exag);
+      if (!p1 || !p2) continue;
+      ctx.moveTo(p1[0], p1[1]);
+      ctx.lineTo(p2[0], p2[1]);
+    }
+    ctx.stroke();
+  }
+
+  // Solid gray side walls extruding the green boundary down to the base
+  // plane (z=0 pre-exaggeration) — gives the model physical thickness.
+  function drawSkirt(cam, bpts) {
+    const exag = state.v3.exag, M = state.mesh;
+    const zAt = ([mx, my]) =>
+      Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
+      ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
+    const quads = GreenMapCore.buildSkirtQuads(bpts, zAt, 0);
+    const items = [];
+    for (const q of quads) {
+      let dsum = 0, ok = true;
+      const sp = [];
+      for (let c = 0; c < 4; c++) {
+        const p = GreenMapCore.projectPt(cam, q.v[c][0], q.v[c][1],
+          q.v[c][2]);
+        if (!p) { ok = false; break; }
+        sp.push(p); dsum += p[2];
+      }
+      if (ok) items.push({ sp, d: dsum / 4 });
+    }
+    items.sort((a, b) => b.d - a.d);      // far → near
+    for (const it of items) {
+      const [a, b, c, d] = it.sp;
+      const grad = ctx.createLinearGradient(a[0], a[1], d[0], d[1]);
+      grad.addColorStop(0, 'rgb(110,118,113)');
+      grad.addColorStop(1, 'rgb(72,80,76)');
+      ctx.beginPath();
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(52,60,56,0.85)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // Raw bilinear elevation (metres) — used only as a skirt fallback.
+  function sampleElevRaw(mx, my) {
+    const g = state.grid;
+    if (!g) return 0;
+    const fx = mx / g.cellSizeM + g.W / 2 - 0.5;
+    const fy = g.H / 2 - 0.5 - my / g.cellSizeM;
+    const x0 = Math.max(0, Math.min(g.W - 1, Math.floor(fx)));
+    const y0 = Math.max(0, Math.min(g.H - 1, Math.floor(fy)));
+    return Number.isFinite(g.grid[y0 * g.W + x0])
+      ? g.grid[y0 * g.W + x0] : 0;
+  }
+
+  // Receding perspective grid on the base plane beneath/around the green —
+  // subtle lines at ~5m spacing, fading with distance from the centre.
+  function drawGridFloor(cam, bpts) {
+    let minX = Infinity, maxX = -Infinity,
+        minY = Infinity, maxY = -Infinity;
+    for (const [mx, my] of bpts) {
+      if (mx < minX) minX = mx;
+      if (mx > maxX) maxX = mx;
+      if (my < minY) minY = my;
+      if (my > maxY) maxY = my;
+    }
+    if (!Number.isFinite(minX)) return;
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const R = Math.max(25,
+      Math.ceil((Math.max(maxX - minX, maxY - minY) / 2 + 18) / 5) * 5);
+    const STEP = 5;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.lineWidth = Math.max(0.6, dpr * 0.5);
+    ctx.lineCap = 'butt';
+    const seg = (am, bm) => {
+      const pa = GreenMapCore.projectPt(cam, am[0], am[1], 0);
+      const pb = GreenMapCore.projectPt(cam, bm[0], bm[1], 0);
+      if (!pa || !pb) return;
+      const dMid = Math.hypot((am[0] + bm[0]) / 2 - cx,
+                              (am[1] + bm[1]) / 2 - cy);
+      const aMid = Math.max(0.04, 0.17 - dMid / (R * 2.2));
+      const grad = ctx.createLinearGradient(pa[0], pa[1], pb[0], pb[1]);
+      grad.addColorStop(0, 'rgba(200,212,204,0.03)');
+      grad.addColorStop(0.5, `rgba(188,202,193,${aMid.toFixed(3)})`);
+      grad.addColorStop(1, 'rgba(200,212,204,0.03)');
+      ctx.strokeStyle = grad;
+      ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]);
+      ctx.stroke();
+    };
+    for (let gx = Math.floor((cx - R) / STEP) * STEP;
+         gx <= cx + R; gx += STEP)
+      seg([gx, cy - R], [gx, cy + R]);
+    for (let gy = Math.floor((cy - R) / STEP) * STEP;
+         gy <= cy + R; gy += STEP)
+      seg([cx - R, gy], [cx + R, gy]);
+  }
+
+  // Front/Back labels at the green's short-axis edges (green view), or
+  // Tee/Green labels (hole view).
+  function drawEdgeLabels(cam, bpts) {
+    const dpr = window.devicePixelRatio || 1;
+    const label = (txt, mx, my) => {
+      const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
+      if (!p) return;
+      ctx.font = `600 ${11 * dpr}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.lineWidth = 3 * dpr;
+      ctx.strokeStyle = 'rgba(8,12,10,0.78)';
+      ctx.lineJoin = 'round';
+      ctx.strokeText(txt, p[0], p[1] - 7 * dpr);
+      ctx.fillStyle = '#f2f6f3';
+      ctx.fillText(txt, p[0], p[1] - 7 * dpr);
+      ctx.textAlign = 'left';
+    };
+    if (state.viewMode === 'hole') {
+      const dsH = state.datasets.hole;
+      if (dsH && !dsH.failed && state.teeLL) {
+        const mLat = 110540;
+        const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
+        label('Tee', (state.teeLL.lng - dsH.centerLL[0]) * mLng,
+                      (state.teeLL.lat - dsH.centerLL[1]) * mLat);
+      }
+      if (bpts && bpts.length) {
+        let sx = 0, sy = 0;
+        for (const p of bpts) { sx += p[0]; sy += p[1]; }
+        label('Green', sx / bpts.length, sy / bpts.length);
+      }
+      return;
+    }
+    if (!bpts || bpts.length < 2) return;
+    let minY = Infinity, maxY = -Infinity;
+    for (const [, my] of bpts) {
+      if (my < minY) minY = my;
+      if (my > maxY) maxY = my;
+    }
+    let sx = 0;
+    for (const p of bpts) sx += p[0];
+    const midX = sx / bpts.length;
+    label('Front', midX, minY);
+    label('Back', midX, maxY);
   }
 
   function currentCam() {
@@ -1415,6 +1735,16 @@
     }
     void visible;
 
+    // 18Birdies dressing: contour iso-lines on the surface…
+    drawContours3D(cam);
+    // …then the base-plane grid floor and the gray skirt walls (floor first
+    // so the nearer skirt walls paint over it — painter's algorithm).
+    const bpts = greenBoundaryPts();
+    if (bpts) {
+      drawGridFloor(cam, bpts);
+      drawSkirt(cam, bpts);
+    }
+
     // Hole view: green-zone outline sits at the green-centre offset within
     // the corridor frame, plus a tee marker. Pin/putt stay green-view only.
     if (state.active === 'hole' && state.datasets.hole &&
@@ -1512,11 +1842,12 @@
       const ang = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
       const hs = Math.max(2.6, cam.f / p2[2] * 0.05);
       ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
-      ctx.strokeStyle = 'rgba(12,18,15,0.8)';
-      ctx.lineWidth = Math.max(3.0, dpr * 1.6);
+      // v3-visual: bolder uniform black arrow with a stronger white halo.
+      ctx.strokeStyle = 'rgba(12,18,15,0.9)';
+      ctx.lineWidth = Math.max(3.8, dpr * 2.2);
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-      ctx.lineWidth = Math.max(1.4, dpr * 0.7);
+      ctx.strokeStyle = 'rgba(255,255,255,0.98)';
+      ctx.lineWidth = Math.max(1.8, dpr * 1.05);
       ctx.stroke();
       const head = (size, color) => {
         ctx.fillStyle = color;
@@ -1528,8 +1859,8 @@
                    p2[1] - size * Math.sin(ang + 0.42));
         ctx.closePath(); ctx.fill();
       };
-      head(hs * 1.45, 'rgba(12,18,15,0.8)');
-      head(hs, 'rgba(255,255,255,0.95)');
+      head(hs * 1.55, 'rgba(12,18,15,0.9)');
+      head(hs * 1.02, 'rgba(255,255,255,0.98)');
     }
     }
 
@@ -1576,6 +1907,9 @@
         ctx.closePath(); ctx.fill();
       }
     }
+
+    // Front/Back (or Tee/Green) labels — drawn last, above everything.
+    if (bpts) drawEdgeLabels(cam, bpts);
   }
 
   // Nearest in-mask cell to a screen point in 3D (for tap/long-press/hover).
@@ -1660,7 +1994,8 @@
   });
   canvas.addEventListener('pointermove', (ev) => {
     const [px, py] = eventPos(ev);
-    if (dragging && lastPt) {
+    // v-fix: never feed the pan path while a two-finger pinch is live.
+    if (dragging && lastPt && ptrs.size < 2) {
       cancelLongPress();
       const dx = px - lastPt[0], dy = py - lastPt[1];
       if (state.viewMode === '3d' || state.viewMode === 'hole') {
@@ -1750,6 +2085,16 @@
   const ptrEnd = (ev) => {
     ptrs.delete(ev.pointerId);
     if (ptrs.size < 2) { pinchStartDist = 0; pinchStartDist3D = 0; }
+    // Pinch ended with one finger still DOWN: re-seed the pan/orbit anchor
+    // to that finger's current position so the continuing drag starts from
+    // where the finger is — no jump (same class of bug as the first-pinch
+    // teleport). Only on a clean lift, not pointercancel.
+    if (!ev.cancelled && ptrs.size === 1 && ev.type === 'pointerup') {
+      const [x, y] = [...ptrs.values()][0];
+      lastPt = [x, y];
+      dragging = true;
+      clearTimeout(longPressTimer);
+    }
   };
   canvas.addEventListener('pointerup', ptrEnd);
   canvas.addEventListener('pointercancel', ptrEnd);
@@ -1864,11 +2209,14 @@
     const spans = document.querySelectorAll('#gm-ramplabels span');
     spans.forEach((el, k) => { el.textContent = cfg.labels[k] || ''; });
     // Paint the ramp bar from the active color function so it never drifts.
+    // 3D/hole views use the classic topo rainbow; 2D keeps the legacy ramp.
     const el = document.getElementById('gm-rampbar');
     if (!el || !window.GreenMapCore) return;
+    const elevFn = state.viewMode === '2d'
+      ? GreenMapCore.elevationColor : GreenMapCore.elevationColorRainbow;
     const stops = [];
     for (let p = 0; p <= 1.0001; p += 0.04)
-      stops.push(`rgb(${GreenMapCore.elevationColor(p).join(',')}) ${(p * 100).toFixed(0)}%`);
+      stops.push(`rgb(${elevFn(p).join(',')}) ${(p * 100).toFixed(0)}%`);
     for (let p = 0; p <= 13; p += 0.25)
       stops.push(`rgb(${GreenMapCore.slopeColor(p).join(',')}) ${((p / 13) * 100).toFixed(1)}%`);
     el.style.background = state.mode === 'elev'
@@ -1938,6 +2286,7 @@
         }
         frameCameraForView(state.viewMode);
       }
+      updateLegend();            // ramp follows view mode (rainbow in 3D)
       render();
     }
     function setViewMode(v) {
