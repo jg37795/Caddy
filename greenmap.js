@@ -1679,8 +1679,20 @@
               (!state.grid || !state.mesh || state.active !== 'hole'))
             render3D();
         });
+      // v-fix: show elapsed seconds + a Cancel that returns to 3D, so a slow
+      // USGS fetch on mobile never looks like an infinite hang.
+      const elapsed = ((performance.now() - (state.holeLoadT0 ||
+        (state.holeLoadT0 = performance.now()))) / 1000) | 0;
+      if (elapsed > 3) {
+        ctx.fillStyle = 'rgba(232,239,233,0.55)';
+        ctx.font = `${11 * dpr}px sans-serif`;
+        ctx.fillText(elapsed + 's — slow map server', cw / 2,
+          ch / 2 + (failed ? 20 : 38) * dpr);
+      }
+      ctx.textAlign = 'left';
       return;
     }
+    state.holeLoadT0 = 0;
     if (!state.grid || !state.mesh) return;
     const cam = currentCam();
     const M = state.mesh;
