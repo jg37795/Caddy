@@ -1039,6 +1039,7 @@
       const k = d / pinchStartDist;
       if (state.viewMode === '3d') {
         state.v3.dist = Math.max(25, Math.min(180, pinchStartDist3D / k));
+        render();   // v2-fix: paint NOW — the rAF scheduler was dropping this
       } else {
         // 2D: zoom about the midpoint
         const cx = (pts[0][0] + pts[1][0]) / 2, cy = (pts[0][1] + pts[1][1]) / 2;
