@@ -137,6 +137,52 @@ console.log('5. Putt preview integrator');
     r.pts.length < 121, r.pts.length);
 }
 
+console.log('5b. Physics putt simulator (simPuttPath)');
+{
+  const GMS = GM.simPuttPath;
+  // (a) Flat grid: straight line, reaches pin, no break.
+  {
+    const W = 32, H = 32, cs = 0.5;
+    const f = GM.computeGradientField(new Float32Array(W * H), W, H, cs);
+    const mask = GM.polyMask([[-8, -8], [8, -8], [8, 8], [-8, 8]], W, H, cs);
+    const r = GMS([-6, 0], [6, 0], f, W, H, cs, mask);
+    check('sim: flat putt reaches pin', r.stopped === 'pin', r.stopped);
+    check('sim: flat break ≈ 0', Math.abs(r.breakIn) < 0.5, r.breakIn);
+  }
+  // (b) East-fall tilt, ball putting NORTH: downhill (east) is to the RIGHT
+  // of travel → must break right with a meaningful readout.
+  const mkTilt = (slope, W, H, cs) => {
+    const grid = new Float32Array(W * H);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) grid[y * W + x] = -slope * x * cs;
+    return { f: GM.computeGradientField(grid, W, H, cs), W, H, cs };
+  };
+  {
+    const t = mkTilt(0.02, 80, 80, 0.25);
+    const mask = GM.polyMask([[-10, -10], [10, -10], [10, 10], [-10, 10]],
+      t.W, t.H, t.cs);
+    const r = GMS([0, -7], [0, 7], t.f, t.W, t.H, t.cs, mask);
+    check('sim: tilted putt breaks RIGHT (positive breakIn)',
+      r.breakIn > 5, `${r.breakIn.toFixed(1)} in, ${r.stopped}`);
+    // (c) Steeper tilt ⇒ larger break.
+    const t2 = mkTilt(0.04, 80, 80, 0.25);
+    const r2 = GMS([0, -7], [0, 7], t2.f, t2.W, t2.H, t2.cs, mask);
+    check('sim: steeper tilt ⇒ larger break',
+      Math.abs(r2.breakIn) > Math.abs(r.breakIn),
+      `${Math.abs(r2.breakIn).toFixed(1)} vs ${Math.abs(r.breakIn).toFixed(1)}`);
+    // (d) Faster green (higher stimp) ⇒ more break for the same slope.
+    const rFast = GMS([0, -7], [0, 7], t.f, t.W, t.H, t.cs, mask,
+      { stimp: 13 });
+    const rSlow = GMS([0, -7], [0, 7], t.f, t.W, t.H, t.cs, mask,
+      { stimp: 8 });
+    check('sim: higher stimp ⇒ larger break',
+      Math.abs(rFast.breakIn) > Math.abs(rSlow.breakIn),
+      `${rFast.breakIn.toFixed(1)} vs ${rSlow.breakIn.toFixed(1)} ` +
+      `(stimp default: ${GMS([0, -7], [0, 7], t.f, t.W, t.H, t.cs, mask)
+        .breakIn.toFixed(1)})`);
+  }
+}
+
 console.log('6. 3D orbit math — camera, projection, mesh');
 {
   const cam = GM.makeCam(0, 35, 62);

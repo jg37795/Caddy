@@ -38,7 +38,12 @@
   <button class="gm-btn gm-layer-btn" data-layer="shading">Shading</button>
   <button class="gm-btn gm-layer-btn" data-layer="arrows">Arrows</button>
   <button class="gm-btn gm-layer-btn" data-layer="both">Both</button>
-  <button class="gm-btn" id="gm-ball" title="Then tap the green to drop a ball for the naive putt preview">Ball ⛳</button>
+  <select id="gm-stimp" class="gm-select" title="Green speed (Stimpmeter) for the putt preview" style="max-width:86px">
+    <option value="8">Stimp 8</option>
+    <option value="10" selected>Stimp 10</option>
+    <option value="12">Stimp 12</option>
+  </select>
+  <button class="gm-btn" id="gm-ball" title="Then tap the green to drop a ball for the putt preview">Ball ⛳</button>
   <button class="gm-btn" id="gm-clear-ball">Clear ball</button>
   <button class="gm-btn" id="gm-recenter">⤢ Fit</button>
   <span id="gm-status">Loading…</span>

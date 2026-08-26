@@ -201,6 +201,87 @@
     }
     return { pts, stopped: 'pin' };
   };
+  /* ---- Physics-based putt roll model (pure, headless-testable) ----------
+     Ball rolls with friction deceleration k ∝ Stimpmeter (stimp 10 →
+     ~0.4 m/s²) and steers under the lateral component of gravity from the
+     surface slope perpendicular to its velocity. v0 is chosen so the ball
+     would just reach the pin on flat ground: v0 = sqrt(2·k·d).
+     Stops at: pin (<0.30 m) | dead (speed <0.15 m/s) | edge (left mask).
+     Returns { pts, stopped, breakIn } — breakIn is the max perpendicular
+     deviation from the straight ball→pin line in INCHES, signed
+     (positive = breaks to the RIGHT of the ball→pin direction). */
+  GreenMapCore.simPuttPath = function (ballM, pinM, field, W, H, cellSizeM,
+                                       mask, opts) {
+    const o = opts || {};
+    const stimp = Number.isFinite(o.stimp) ? o.stimp : 10;
+    const dt = o.dt || 0.02;
+    const GRAV = 9.81;
+    const K_FLAT_AT_10 = 0.4;           // stimp 10 ⇒ k ≈ 0.4 m/s²
+    const V_DEAD = 0.15;                // ball "dies" below this speed
+    const PIN_R = 0.30;                 // holed within 30 cm
+    const MAX_S = 4000;                 // hard step cap (~80 s)
+
+    // Faster greens (higher Stimpmeter) roll with LESS friction.
+    const k = K_FLAT_AT_10 * 10 / Math.max(1, stimp);
+    let dx = pinM[0] - ballM[0], dy = pinM[1] - ballM[1];
+    const d = Math.hypot(dx, dy);
+    if (d < PIN_R)
+      return { pts: [ballM.slice(), pinM.slice()], stopped: 'pin', breakIn: 0 };
+    const v0 = Math.sqrt(2 * k * d);
+    let theta = Math.atan2(dy, dx);
+    let v = v0;
+    let mx = ballM[0], my = ballM[1];
+    const ux0 = dx / d, uy0 = dy / d;   // straight-line reference direction
+
+    const cellIdx = (x, y) => {
+      const ix = Math.round(x / cellSizeM + W / 2);
+      const iy = Math.round(H / 2 - y / cellSizeM);
+      if (ix < 0 || iy < 0 || ix >= W || iy >= H) return -1;
+      const i = iy * W + ix;
+      return (field.valid[i] && (!mask || mask[i])) ? i : -1;
+    };
+
+    const pts = [[mx, my]];
+    let maxDev = 0, devSign = 0;
+    let stopped = 'dead';
+    for (let s = 0; s < MAX_S; s++) {
+      const i = cellIdx(mx, my);
+      if (i < 0) { stopped = 'edge'; break; }
+      // Slope in local metres (x E, y N): field.gy was computed against the
+      // south-positive grid axis, so the north component is -gy.
+      const gradx = field.gx[i], grady = -field.gy[i];
+      const ux = Math.cos(theta), uy = Math.sin(theta);
+      // Perpendicular (left-positive) unit vector and the slope component
+      // along it → lateral acceleration g·grad_perp rotates the velocity.
+      const nx = -uy, ny = ux;
+      const gradPerp = gradx * nx + grady * ny;
+      // Gravity accelerates DOWN-slope: a = −g·∇h, perp component here.
+      const aLat = -GRAV * gradPerp;
+      theta += (aLat / Math.max(v, 1e-6)) * dt;
+      // Friction: constant deceleration along the direction of travel.
+      v = Math.max(0, v - k * dt);
+      mx += Math.cos(theta) * v * dt;
+      my += Math.sin(theta) * v * dt;
+      pts.push([mx, my]);
+      // Signed deviation from the straight line (positive = right of aim).
+      const devRight = -(ux0 * (my - ballM[1]) - uy0 * (mx - ballM[0]));
+      if (Math.abs(devRight) > Math.abs(maxDev)) { maxDev = devRight; }
+      // Proximity beats "died": v0 arrives at the pin with ≈0 residual
+      // speed on flat ground, so check reach BEFORE calling it dead.
+      if (Math.hypot(pinM[0] - mx, pinM[1] - my) <= PIN_R) {
+        stopped = 'pin';
+        pts.push([pinM[0], pinM[1]]);
+        break;
+      }
+      if (v < V_DEAD) { stopped = 'dead'; break; }
+    }
+    devSign = maxDev >= 0 ? 1 : -1;
+    return {
+      pts, stopped,
+      breakIn: devSign * Math.abs(maxDev) * 39.3701   // metres → inches
+    };
+  };
+
   /* ---- 3D orbit view math (pure, headless-testable) --------------------- */
 
   // Orbit camera basis. Eye sits at azimuth yawDeg (0 = from north/+Y),
@@ -583,6 +664,12 @@
     ball: null,              // local metre coords for putt preview
     showPutt: false,
     viewMode: '2d',          // 2d | 3d | hole
+    stimp: (() => {          // green speed for the putt preview (persisted)
+      try {
+        const v = parseInt(localStorage.getItem('gm-stimp'), 10);
+        return [8, 10, 12].includes(v) ? v : 10;
+      } catch (e) { return 10; }
+    })(),
     v3: { yaw: 0, pitch: 35, dist: 62, exag: 8 },
     mesh: null,              // built 3D mesh (per grid load / exag change)
     meshArrows: [],          // subsampled downhill arrows on the surface
@@ -823,9 +910,7 @@
       // If the user is already waiting in Hole view, land them on it now.
       if (state.viewMode === 'hole' && state.active !== 'hole') {
         activateDataset('hole');
-        const span = ds.spanM || HOLE_SPAN_CAP_M;
-        state.v3.yaw = 0; state.v3.pitch = 26;
-        state.v3.dist = Math.max(80, Math.min(600, span * 1.05));
+        applyHoleFraming(ds);
         setStatus('Whole-hole 3D — drag = orbit · pinch/scroll = zoom · ' +
           'green highlighted, blue flag = tee');
         render();
@@ -962,7 +1047,7 @@
     rafPending = true;
     requestAnimationFrame(() => {
       rafPending = false;
-      if (state.viewMode === '3d') render3D();
+      if (state.viewMode === '3d' || state.viewMode === 'hole') render3D();
       else render2D();
     });
   }
@@ -1084,12 +1169,13 @@
   }
 
   function drawPutt() {
-    // Naive preview: uses GreenMapCore.naivePuttPath (midpoint-sampled,
-    // stops at pin or green edge). Drawn dashed white with a ball dot.
+    // Physics preview: GreenMapCore.simPuttPath roll model (friction ∝
+    // stimp, lateral gravity from the slope field). Dashed white + ball dot.
     const g = state.grid;
     if (!state.field) return;
-    const { pts, stopped } = GreenMapCore.naivePuttPath(
-      state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM, state.mask);
+    const { pts, stopped, breakIn } = GreenMapCore.simPuttPath(
+      state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM, state.mask,
+      { stimp: state.stimp });
     ctx.strokeStyle = 'rgba(255,255,255,0.92)';
     ctx.lineWidth = Math.max(1.5, state.view.scale * 0.035);
     ctx.setLineDash([state.view.scale * 0.18, state.view.scale * 0.12]);
@@ -1108,7 +1194,13 @@
     ctx.strokeStyle = 'rgba(10,16,13,0.8)'; ctx.lineWidth = 1;
     ctx.stroke();
     if (stopped === 'edge')
-      setStatus('Naive preview: ball line leaves the green before the pin');
+      setStatus('Preview: ball leaves the green before reaching the pin');
+    else if (stopped === 'dead')
+      setStatus('Preview: ball dies short of the pin');
+    else if (stopped === 'pin' && Math.abs(breakIn) >= 0.5)
+      setStatus(`Break: ~${Math.abs(breakIn).toFixed(0)} in ` +
+        (breakIn > 0 ? 'right' : 'left'));
+    else if (stopped === 'pin') setStatus('Preview: dead-straight putt holds its line');
   }
 
   function drawScaleBar() {
@@ -1210,8 +1302,19 @@
       state.v3.yaw, state.v3.pitch, state.v3.dist);
     cam.f = Math.min(canvas.width, canvas.height) * 1.15;
     cam.ox = canvas.width / 2;
-    cam.oy = canvas.height * 0.56;
+    // Hole view: raise the principal point above centre so the green end of
+    // the corridor sits low-centre in frame.
+    cam.oy = canvas.height * (state.viewMode === 'hole' ? 0.62 : 0.56);
     return cam;
+  }
+
+  // Shared hole-view framing: corridor fills ~80% of viewport width given
+  // cam.f ⇒ dist ≈ span·0.9, clamped to a sensible range.
+  function applyHoleFraming(ds) {
+    const span = (ds && ds.spanM) || HOLE_SPAN_CAP_M;
+    state.v3.yaw = 0;
+    state.v3.pitch = 26;
+    state.v3.dist = Math.max(120, Math.min(400, span * 0.9));
   }
 
   function render3D() {
@@ -1220,16 +1323,37 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     if (state.viewMode === 'hole' &&
         (!state.grid || !state.mesh || state.active !== 'hole')) {
-      // Corridor still loading (or fell back) — clear inline message, never
-      // a broken UI.
+      // Corridor still loading (or fell back) — glass loading card with a
+      // spinner, never a broken or silent UI.
+      const failed = state.datasets.hole && state.datasets.hole.failed;
+      const msg = failed ? state.datasets.hole.msg : 'Preparing hole flyover…';
+      const cw = canvas.width, ch = canvas.height;
+      ctx.textAlign = 'center';
+      if (!failed) {
+        // Subtle spinner arc, rotating with wall-clock time.
+        const cxm = cw / 2, cym = ch / 2 - 34 * dpr;
+        const r = 15 * dpr;
+        const t = (performance.now() / 900) % (Math.PI * 2);
+        ctx.strokeStyle = 'rgba(157,179,166,0.25)';
+        ctx.lineWidth = 3.5 * dpr;
+        ctx.beginPath(); ctx.arc(cxm, cym, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#ffd166';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(cxm, cym, r, t, t + Math.PI * 1.15);
+        ctx.stroke();
+      }
       ctx.fillStyle = 'rgba(232,239,233,0.9)';
       ctx.font = `${14 * dpr}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(state.datasets.hole && state.datasets.hole.failed
-        ? state.datasets.hole.msg
-        : 'Fetching whole-hole elevation corridor…',
-        canvas.width / 2, canvas.height / 2);
+      ctx.fillText(msg, cw / 2, ch / 2 + (failed ? 0 : 18 * dpr));
       ctx.textAlign = 'left';
+      // Keep the spinner spinning until the corridor lands (or fails).
+      if (!failed)
+        requestAnimationFrame(() => {
+          if (state.viewMode === 'hole' &&
+              (!state.grid || !state.mesh || state.active !== 'hole'))
+            render3D();
+        });
       return;
     }
     if (!state.grid || !state.mesh) return;
@@ -1413,8 +1537,9 @@
     if (state.active === 'green' &&
         state.showPutt && state.ball && state.pin && state.field) {
       const g = state.grid;
-      const { pts } = GreenMapCore.naivePuttPath(
-        state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM, state.mask);
+      const { pts } = GreenMapCore.simPuttPath(
+        state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM,
+        state.mask, { stimp: state.stimp });
       ctx.setLineDash([6 * dpr, 4 * dpr]);
       ctx.beginPath();
       let started = false;
@@ -1500,15 +1625,36 @@
     clearTimeout(longPressTimer);
     longPressTimer = setTimeout(() => {
       if (!dragging || Math.hypot(lastPt[0] - px0, lastPt[1] - py0) > 8) return;
-      const s = state.viewMode === '3d'
+      const s = (state.viewMode === '3d' || state.viewMode === 'hole')
         ? pickCell3D(px0, py0)
         : sampleAtScreen(px0, py0);
-      if (s && state.mask && state.mask[s.i] &&
+      // In hole view the pin may only move within the highlighted green zone.
+      const zoneOK = state.viewMode !== 'hole' ||
+        (state.datasets.hole && state.datasets.hole.zoneMask &&
+         (() => {
+           const dsH = state.datasets.hole;
+           if (!dsH || !dsH.grid) return false;
+           const [gox, goy] = dsH.gOff;
+           const ix = Math.round((s.mx + gox) / dsH.eg.cellSizeM + dsH.grid.W / 2);
+           const iy = Math.round(dsH.grid.H / 2 -
+             (s.my + goy) / dsH.eg.cellSizeM);
+           return ix >= 0 && iy >= 0 && ix < dsH.grid.W && iy < dsH.grid.H &&
+             dsH.zoneMask[iy * dsH.grid.W + ix] === 1;
+         })());
+      if (s && zoneOK && state.mask && state.mask[s.i] &&
           state.field && state.field.valid[s.i]) {
-        state.pin = [s.mx, s.my];
+        if (state.viewMode === 'hole') {
+          // Convert corridor-local metres back to green-local for storage.
+          const [gox, goy] = state.datasets.hole.gOff;
+          state.pin = [s.mx - gox, s.my - goy];
+        } else {
+          state.pin = [s.mx, s.my];
+        }
         dragging = false; lastPt = null;
         setStatus('Pin moved — long-press again anywhere inside the green');
         render();
+      } else if (s && !zoneOK) {
+        setStatus('Pin stays inside the highlighted green zone');
       }
     }, 500);
   });
@@ -1676,7 +1822,7 @@
   // Tap: 1st tap sets ball (if putt mode armed), else shows tooltip anchor.
   // In 3D, a tap always shows the slope/fall tooltip at the picked quad.
   function handleTap([px, py], clientX = null, clientY = null) {
-    const s = state.viewMode === '3d'
+    const s = (state.viewMode === '3d' || state.viewMode === 'hole')
       ? pickCell3D(px, py)
       : sampleAtScreen(px, py);
     if (!s || !state.mask[s.i] || !state.field.valid[s.i]) return;
@@ -1755,9 +1901,7 @@
     // 2D | 3D | Hole view toggle — keeps pin/ball/mode state; just re-renders.
     function frameCameraForView(v) {
       if (v === 'hole' && state.datasets.hole && !state.datasets.hole.failed) {
-        const span = state.datasets.hole.spanM || HOLE_SPAN_CAP_M;
-        state.v3.yaw = 0; state.v3.pitch = 26;
-        state.v3.dist = Math.max(80, Math.min(600, span * 1.05));
+        applyHoleFraming(state.datasets.hole);
       } else if (v === '3d') {
         state.v3.yaw = 0; state.v3.pitch = 35; state.v3.dist = 62;
       }
@@ -1782,7 +1926,10 @@
             b.classList.toggle('active', b.dataset.view === '3d'));
           setStatus(h.msg);
         }
-        // else: corridor still fetching — render3D shows the loading message.
+        // Corridor still fetching — visible loading state + auto-land when
+        // loadCorridor completes (it re-renders into hole view).
+        setStatus('Preparing hole flyover…');
+        render();
       } else {
         if (state.active !== 'green') {
           activateDataset('green');
@@ -1810,7 +1957,7 @@
       document.getElementById('gm-exag-val').textContent =
         state.v3.exag + '×';
       buildScene();
-      if (state.viewMode === '3d') render();
+      if (state.viewMode === '3d' || state.viewMode === 'hole') render();
     });
 
     document.getElementById('gm-mode').addEventListener('change', (ev) => {
@@ -1823,6 +1970,19 @@
                                       : 'Slope mode — flat=sage → steep=red');
     });
     updateLegend();
+
+    // Stimpmeter selector for the physics putt preview (8 / 10 / 12,
+    // persisted in localStorage).
+    const stimpEl = document.getElementById('gm-stimp');
+    if (stimpEl) {
+      stimpEl.value = String(state.stimp);
+      stimpEl.addEventListener('change', () => {
+        state.stimp = parseInt(stimpEl.value, 10) || 10;
+        try { localStorage.setItem('gm-stimp', String(state.stimp)); } catch (e) {}
+        render();
+        setStatus(`Putt preview: Stimpmeter ${state.stimp}`);
+      });
+    }
 
     document.getElementById('gm-ball').addEventListener('click', () => {
       armBallNext = true;
