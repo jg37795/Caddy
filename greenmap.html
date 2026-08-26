@@ -29,6 +29,7 @@
   </select>
   <button class="gm-btn gm-view-btn active" data-view="2d" title="Top-down 2D map">2D</button>
   <button class="gm-btn gm-view-btn" data-view="3d" title="18Birdies-style 3D green view">3D</button>
+  <button class="gm-btn gm-view-btn" data-view="hole" title="Whole-hole tee→green 3D flyover">Hole</button>
   <span id="gm-exag-wrap" style="display:none" title="Vertical exaggeration">
     <label for="gm-exag">Exag</label>
     <input type="range" id="gm-exag" min="1" max="15" step="0.5" value="8">
@@ -51,6 +52,7 @@
   <div class="row"><span class="swatch" style="background:#d6603e"></span>steep — warm colours</div>
   <div class="row">↘ arrows point downhill; length ∝ steepness</div>
   <div class="row">long-press = move pin · tap = slope readout · drag = pan</div>
+  <div class="row" id="gm-quality" style="opacity:0.65;font-size:10px"></div>
 </div>
 
 <div id="gm-tip"></div>

@@ -206,6 +206,148 @@ console.log('6. 3D orbit math — camera, projection, mesh');
     dep[0][0] === 2 && dep[2][0] === 1, dep.map(d => d[0]).join(','));
 }
 
+/* ---- 6b. Precision pass — bilinear, vertex normals, AO, corridor bbox --- */
+{
+  console.log('7. Bilinear sampling vs analytic plane');
+  // z = 2 + 0.5*x_m + 0.3*y_m over a 32x32 grid @ 1m cells centred origin.
+  const W = 32, H = 32, cs = 1;
+  const grid = new Float32Array(W * H);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      // Raster convention: cell CENTRE at ((x+0.5)-W/2, H/2-(y+0.5)) metres.
+      const mx = (x + 0.5 - W / 2) * cs, my = (H / 2 - y - 0.5) * cs;
+      grid[y * W + x] = 2 + 0.5 * mx + 0.3 * my;
+    }
+  let maxErr = 0;
+  for (let k = 0; k < 200; k++) {
+    const mx = (Math.random() - 0.5) * (W - 2);
+    const my = (Math.random() - 0.5) * (H - 2);
+    const got = GM.sampleElevLocalM({ grid, W, H, cellSizeM: cs }, mx, my);
+    const want = 2 + 0.5 * mx + 0.3 * my;
+    if (got == null) { maxErr = Infinity; break; }
+    maxErr = Math.max(maxErr, Math.abs(got - want));
+  }
+  check('bilinear reproduces analytic plane (<1e-5 m)', maxErr < 1e-5,
+    maxErr.toExponential(2));
+  // Invalid corners: punch a hole and confirm graceful fallback.
+  const g2 = grid.slice();
+  const vm2 = new Uint8Array(W * H).fill(1);
+  vm2[15 * W + 15] = 0; g2[15 * W + 15] = NaN;
+  const zNear = GM.sampleElevLocalM({ grid: g2, W, H, cellSizeM: cs,
+    validMask: vm2 }, 0.1, 0.1);
+  check('invalid centre falls back to valid neighbours',
+    zNear != null && Number.isFinite(zNear), zNear);
+  const zOut = GM.sampleElevLocalM({ grid: g2, W, H, cellSizeM: cs },
+    500, 500);
+  check('sample far outside grid returns null', zOut === null, zOut);
+
+  console.log('8. Vertex-normal averaging on synthetic tilt');
+  // Uniform tilt → every quad normal identical → averaged vertex normals
+  // must equal the plane normal exactly (up to fp).
+  const Wt = 16, Ht = 16, cst = 0.5, exag = 8;
+  const tilt = new Float32Array(Wt * Ht);
+  for (let y = 0; y < Ht; y++)
+    for (let x = 0; x < Wt; x++) tilt[y * Wt + x] = -0.1 * x * cst;
+  const maskT = new Uint8Array(Wt * Ht).fill(1);
+  const vn = GM.vertexNormals3D(tilt, Wt, Ht, cst, maskT, exag, 0);
+  // Analytic: surface z' = exag*z, dz'/dx = 8*(-0.1) = -0.8 →
+  // n ∝ (0.8, 0, 1)/|..| (east-fall tilts +X).
+  const wantN = [0.8, 0, 1].map(v => v / Math.hypot(0.8, 0, 1));
+  let nMaxErr = 0, nCount = 0;
+  for (let i = 0; i < Wt * Ht; i++) {
+    if (!vn[i * 3] && !vn[i * 3 + 1] && !vn[i * 3 + 2]) continue; // untouched
+    nCount++;
+    nMaxErr = Math.max(nMaxErr,
+      Math.abs(vn[i * 3] - wantN[0]), Math.abs(vn[i * 3 + 2] - wantN[2]));
+  }
+  check('vertex normals ≈ plane normal across interior', 
+    nCount > 100 && nMaxErr < 1e-5, `${nCount} verts, err=${nMaxErr.toExponential(2)}`);
+  // Unit length everywhere set.
+  let unitOK = true;
+  for (let i = 0; i < Wt * Ht; i++) {
+    const l = Math.hypot(vn[i * 3], vn[i * 3 + 1], vn[i * 3 + 2]);
+    if (l > 0 && Math.abs(l - 1) > 1e-5) unitOK = false;
+  }
+  check('vertex normals unit-length', unitOK);
+
+  console.log('9. Ambient occlusion factors');
+  {
+    // Bowl in the middle should be darker than the rim ridge.
+    const Wa = 24, Ha = 24;
+    const bowl = new Float32Array(Wa * Ha);
+    for (let y = 0; y < Ha; y++)
+      for (let x = 0; x < Wa; x++) {
+        const dx = x - Wa / 2, dy = y - Ha / 2;
+        bowl[y * Wa + x] = (dx * dx + dy * dy) * 0.05;   // pit at centre
+      }
+    const mA = new Uint8Array(Wa * Ha).fill(1);
+    const ao = GM.cellAO(bowl, Wa, Ha, mA, 3);
+    const c = ao[(Ha / 2) * Wa + Wa / 2];       // deepest point
+    const r = ao[2 * Wa + 2];                   // high rim corner region
+    check('depression darkened (ao<1)', c < 0.99, c.toFixed(3));
+    check('ridge brightened (ao>1)', r > 1.0, r.toFixed(3));
+    check('AO stays subtle (0.85..1.12)', c > 0.84 && r < 1.13,
+      `${c.toFixed(3)},${r.toFixed(3)}`);
+    // Flat grid → everything exactly 1.
+    const flatAO = GM.cellAO(new Float32Array(Wa * Ha).fill(7), Wa, Ha, mA, 3);
+    let flatOK = true;
+    for (let i = 0; i < flatAO.length; i++)
+      if (Math.abs(flatAO[i] - 1) > 1e-9) flatOK = false;
+    check('flat grid AO ≡ 1', flatOK);
+    // Smooth mesh build includes per-corner colours.
+    const mm = GM.buildMesh3D(bowl, Wa, Ha, 1, mA, [0, 30], 8, 'elev');
+    check('mesh exposes per-corner colours (vcol)',
+      mm && mm.vcol && mm.vcol.length === mm.count * 12, mm && mm.count);
+  }
+
+  console.log('10. Grid upsampling (bilinear refinement)');
+  {
+    const Wu = 16, Hu = 16;
+    const planeU = new Float32Array(Wu * Hu);
+    for (let y = 0; y < Hu; y++)
+      for (let x = 0; x < Wu; x++)
+        planeU[y * Wu + x] = 5 + 0.2 * x + 0.1 * y;
+    const up = GM.upsampleGrid(planeU, Wu, Hu, null, 2);
+    check('upsample doubles dims', up.W === 32 && up.H === 32, `${up.W}x${up.H}`);
+    let err = 0;
+    for (let y = 1; y < up.H - 1; y += 7)
+      for (let x = 1; x < up.W - 1; x += 7) {
+        const fx = (x + 0.5) / 2 - 0.5, fy = (y + 0.5) / 2 - 0.5;
+        const want = 5 + 0.2 * fx + 0.1 * fy;
+        err = Math.max(err, Math.abs(up.grid[y * up.W + x] - want));
+      }
+    check('refined plane matches analytic (<1e-5)', err < 1e-5, err.toExponential(2));
+  }
+
+  console.log('11. Corridor bbox math');
+  {
+    const green = [41.95, -93.75];
+    // Tee ~200m due east of the green.
+    const tee = [41.95, -93.75 + 200 / (111320 * Math.cos(41.95 * Math.PI / 180))];
+    const bb = GM.corridorBbox(green[0], green[1], tee[0], tee[1], 30, 300);
+    const mLat = 110540, mLng = 111320 * Math.cos(41.95 * Math.PI / 180);
+    const sideM = (bb[2] - bb[0]) * mLng;
+    check('corridor covers both endpoints', 
+      bb[0] < green[1] && bb[2] > tee[1] && bb[1] < green[0] && bb[3] > green[0]);
+    check('span capped at 300m', sideM <= 301, sideM.toFixed(1));
+    const sideLatM = (bb[3] - bb[1]) * mLat;
+    check('square-ish bbox', Math.abs(sideM - sideLatM) / sideM < 0.02,
+      `${sideM.toFixed(1)} x ${sideLatM.toFixed(1)}`);
+    const bbNoTee = GM.corridorBbox(green[0], green[1], NaN, NaN, 30, 300);
+    const sideNT = (bbNoTee[2] - bbNoTee[0]) * mLng;
+    check('no-tee fallback ≈ green ±150m (300m span)',
+      Math.abs(sideNT - 300) < 2, sideNT.toFixed(1));
+    const cLng = (bbNoTee[0] + bbNoTee[2]) / 2;
+    check('no-tee corridor centred on green', Math.abs(cLng - green[1]) < 1e-9);
+    // Tee ~50m due north of the green.
+    const bbSmall = GM.corridorBbox(green[0], green[1],
+      green[0] + 50 / mLat, green[1], 30, 300);
+    const sideSm = (bbSmall[3] - bbSmall[1]) * mLat;
+    check('short hole padded by margin (≈110m)', sideSm > 105 && sideSm < 115,
+      sideSm.toFixed(1));
+  }
+}
+
 /* ---- 6. Live smoke — Ankeny 3DEP ---------------------------------------- */
 (async () => {
   console.log('4. Live smoke — Ankeny test green (41.95,-93.75)');
@@ -276,6 +418,50 @@ console.log('6. 3D orbit math — camera, projection, mesh');
     }
     console.log(`  info - ${elev.W}x${elev.H} cell=${elev.cellSizeM.toFixed(3)}m ` +
       `relief=${reliefM.toFixed(2)}m validCells=${nValid} arrows=${nArrows}`);
+
+    // Live precision pass: whole-hole corridor (green ±150m → 300m span) via
+    // the same CaddyElev path, then build BOTH meshes without error.
+    console.log('5. Live corridor — Ankeny 300m hole flyover grid');
+    const bbC = GM.corridorBbox(lat, lng, NaN, NaN, 0, 300);
+    const egC = await CaddyElev.fetchElevGrid(bbC, 96);
+    check('corridor fetchElevGrid returned data', !!(egC && egC.grid));
+    if (egC && egC.grid) {
+      let cv = 0, cmin = Infinity, cmax = -Infinity;
+      for (let i = 0; i < egC.grid.length; i++)
+        if (Number.isFinite(egC.grid[i]) &&
+            (!egC.validMask || egC.validMask[i])) {
+          cv++;
+          if (egC.grid[i] < cmin) cmin = egC.grid[i];
+          if (egC.grid[i] > cmax) cmax = egC.grid[i];
+        }
+      const pctV = 100 * cv / (egC.W * egC.H);
+      check('corridor majority valid (>50%)', pctV > 50, pctV.toFixed(1) + '%');
+      check('corridor sane relief (<60m)', cmax - cmin < 60,
+        (cmax - cmin).toFixed(2));
+      // Bilinear sample at exact centre must be finite.
+      const zc = GM.sampleElevLocalM(egC, 0, 0);
+      check('corridor bilinear centre sample finite',
+        zc != null && Number.isFinite(zc), zc);
+      // Green mesh (with smooth shading + AO) on the green grid.
+      const maskG = new Uint8Array(elev.W * elev.H).fill(1);
+      const mGreen = GM.buildMesh3D(elev.grid, elev.W, elev.H,
+        elev.cellSizeM, maskG, [cmin, cmax], 8, 'elev');
+      check('green mesh builds (smooth+AO)',
+        mGreen && mGreen.count > 1000 && !!mGreen.vcol, mGreen && mGreen.count);
+      // Corridor mesh with fairway/green-zone colourFn.
+      const maskC = new Uint8Array(egC.W * egC.H).fill(1);
+      const mHole = GM.buildMesh3D(egC.grid, egC.W, egC.H,
+        egC.cellSizeM, maskC, [cmin, cmax], 8, 'slope', {
+          colorFn: (i, zMid) => i % 97 === 0
+            ? GM.slopeColor(2)
+            : [110, 130, 106] });
+      check('corridor mesh builds with colorFn',
+        mHole && mHole.count > 1000, mHole && mHole.count);
+      console.log(`  info - corridor ${egC.W}x${egC.H} ` +
+        `cell=${egC.cellSizeM.toFixed(2)}m valid=${pctV.toFixed(0)}% ` +
+        `relief=${(cmax - cmin).toFixed(1)}m meshes=` +
+        `${mGreen ? mGreen.count : 'x'}/${mHole ? mHole.count : 'x'} quads`);
+    }
   } catch (e) {
     failures++;
     console.error('FAIL - live smoke:', e.message);

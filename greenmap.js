@@ -247,8 +247,14 @@
 
   // Flat-shade a base [r,g,b] with a fixed light direction (sky-ish).
   // k = ambient 0.55 + diffuse 0.45 · max(0, n·L).
+  // Fixed NW-high sun: 315° azimuth, 45° altitude. Light vector points FROM
+  // the surface TOWARD the sun, in local terrain coords (+x E, +y N, +z up).
+  // Constant between sessions by construction (never derived from time/GPS).
   GreenMapCore.LIGHT_DIR = (() => {
-    const L = [-0.42, 0.55, 0.72];
+    const az = 315 * Math.PI / 180, alt = 45 * Math.PI / 180;
+    const L = [Math.cos(alt) * Math.sin(az),
+               Math.cos(alt) * Math.cos(az),
+               Math.sin(alt)];
     const l = Math.hypot(L[0], L[1], L[2]);
     return [L[0] / l, L[1] / l, L[2] / l];
   })();
@@ -263,14 +269,201 @@
     ];
   };
 
+  /* ---- Precision sampling (bilinear, invalid-aware) --------------------- */
+
+  // Bilinear elevation at fractional grid coords where integer values land on
+  // cell CENTRES. Weights of invalid/non-finite corners are dropped and the
+  // rest renormalised; falls back to nearest valid cell; null if none.
+  GreenMapCore.bilinearCellZ = function (grid, W, H, fx, fy, validMask) {
+    const ok = (x, y) => x >= 0 && y >= 0 && x < W && y < H &&
+      Number.isFinite(grid[y * W + x]) && (!validMask || validMask[y * W + x]);
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    let sum = 0, wsum = 0;
+    for (let dy = 0; dy <= 1; dy++) {
+      for (let dx = 0; dx <= 1; dx++) {
+        const x = Math.max(0, Math.min(W - 1, x0 + dx));
+        const y = Math.max(0, Math.min(H - 1, y0 + dy));
+        if (!ok(x, y)) continue;
+        const wgt = (dx ? fx - x0 : 1 - (fx - x0)) *
+                    (dy ? fy - y0 : 1 - (fy - y0));
+        sum += grid[y * W + x] * wgt;
+        wsum += wgt;
+      }
+    }
+    if (wsum > 1e-9) return sum / wsum;
+    // nearest-valid fallback
+    const xn = Math.max(0, Math.min(W - 1, Math.round(fx)));
+    const yn = Math.max(0, Math.min(H - 1, Math.round(fy)));
+    return ok(xn, yn) ? grid[yn * W + xn] : null;
+  };
+
+  // Sample an eg-like {grid,W,H,cellSizeM[,validMask]} at local metres
+  // (x E, y N) relative to the grid centre — bilinear, not nearest-cell.
+  GreenMapCore.sampleElevLocalM = function (egLike, mx, my) {
+    if (!egLike || !egLike.grid) return null;
+    const fx = mx / egLike.cellSizeM + egLike.W / 2 - 0.5;
+    const fy = egLike.H / 2 - 0.5 - my / egLike.cellSizeM;
+    if (fx < -1 || fy < -1 || fx > egLike.W || fy > egLike.H) return null;
+    return GreenMapCore.bilinearCellZ(
+      egLike.grid, egLike.W, egLike.H,
+      Math.max(0, Math.min(egLike.W - 1 + 0.999, fx)),
+      Math.max(0, Math.min(egLike.H - 1 + 0.999, fy)),
+      egLike.validMask);
+  };
+
+  /* ---- Smooth shading: per-vertex normals + ambient occlusion ----------- */
+
+  // Per-vertex normals: each vertex normal = normalised mean of the up-to-4
+  // adjacent quad face normals (computed from real exaggerated positions).
+  // Returns Float32Array(W*H*3); zero vector where no quad touches.
+  GreenMapCore.vertexNormals3D = function (grid, W, H, cellSizeM, mask,
+                                           exag, zmin) {
+    const vn = new Float32Array(W * H * 3);
+    const hgt = (cx, cy) => {
+      if (cx < 0 || cy < 0 || cx >= W || cy >= H) return null;
+      const i = cy * W + cx;
+      if (!mask[i] || !Number.isFinite(grid[i])) return null;
+      return [(cx + 0.5 - W / 2) * cellSizeM,
+              (H / 2 - cy - 0.5) * cellSizeM,
+              (grid[i] - zmin) * exag];
+    };
+    // Face normals per quad (x,y): corner of quads grid.
+    const qn = new Float32Array((W - 1) * (H - 1) * 3);
+    const qok = new Uint8Array((W - 1) * (H - 1));
+    for (let y = 0; y < H - 1; y++) {
+      for (let x = 0; x < W - 1; x++) {
+        const A = hgt(x, y), B = hgt(x + 1, y),
+              C = hgt(x + 1, y + 1), D = hgt(x, y + 1);
+        if (!A || !B || !C || !D) continue;
+        const n = GreenMapCore.quadNormal(A, B, C, D);
+        if (n[2] < 0) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
+        qn.set(n, (y * (W - 1) + x) * 3);
+        qok[y * (W - 1) + x] = 1;
+      }
+    }
+    const addQ = (vx, vy, qx, qy, acc) => {
+      if (qx < 0 || qy < 0 || qx >= W - 1 || qy >= H - 1 ||
+          !qok[qy * (W - 1) + qx]) return;
+      const o = (qy * (W - 1) + qx) * 3;
+      acc[0] += qn[o]; acc[1] += qn[o + 1]; acc[2] += qn[o + 2];
+      void vx; void vy;
+    };
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (!hgt(x, y)) continue;
+        const acc = [0, 0, 0];
+        addQ(x, y, x - 1, y - 1, acc);
+        addQ(x, y, x,     y - 1, acc);
+        addQ(x, y, x - 1, y,     acc);
+        addQ(x, y, x,     y,     acc);
+        const len = Math.hypot(acc[0], acc[1], acc[2]);
+        if (len < 1e-9) continue;
+        const o = (y * W + x) * 3;
+        vn[o] = acc[0] / len; vn[o + 1] = acc[1] / len; vn[o + 2] = acc[2] / len;
+      }
+    }
+    return vn;
+  };
+
+  // Soft ambient-occlusion approximation per cell: compare z against its ring
+  // neighbourhood (Chebyshev radius `radius`). Depressions darken (down to
+  // ×0.86), ridges brighten (up to ×1.10). Returns Float32Array factors.
+  GreenMapCore.cellAO = function (grid, W, H, validMask, radius = 3) {
+    const ao = new Float32Array(W * H).fill(1);
+    const r = Math.max(1, radius | 0);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (!validMask[i] || !Number.isFinite(grid[i])) continue;
+        const z = grid[i];
+        let sum = 0, sumAbs = 0, n = 0;
+        for (let dy = -r; dy <= r; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= H) continue;
+          for (let dx = -r; dx <= r; dx++) {
+            if (!dx && !dy) continue;
+            const xx = x + dx;
+            if (xx < 0 || xx >= W) continue;
+            const j = yy * W + xx;
+            if (!validMask[j] || !Number.isFinite(grid[j])) continue;
+            sum += grid[j]; sumAbs += Math.abs(grid[j]); n++;
+          }
+        }
+        if (n < 4) continue;
+        const dev = z - sum / n;
+        const mad = Math.max(1e-4, (sumAbs / n) * 0.35);
+        const t = Math.max(-1, Math.min(1, dev / mad));
+        ao[i] = 1 + t * 0.12;   // ±12% max — subtle, never alarmist
+      }
+    }
+    return ao;
+  };
+
+  // Bilinear 2× (or factor×) refinement of a grid + mask, for smoother mesh
+  // shading without extra data fetches. Mask refined by nearest source cell.
+  GreenMapCore.upsampleGrid = function (grid, W, H, validMask, factor = 2) {
+    const f = Math.max(1, Math.round(factor));
+    if (f === 1) return { grid, W, H, validMask };
+    const W2 = W * f, H2 = H * f;
+    const out = new Float32Array(W2 * H2);
+    const m2 = validMask ? new Uint8Array(W2 * H2) : null;
+    for (let y = 0; y < H2; y++) {
+      const fy = (y + 0.5) / f - 0.5;
+      const sy = Math.max(0, Math.min(H - 1, Math.floor(fy)));
+      for (let x = 0; x < W2; x++) {
+        const fx = (x + 0.5) / f - 0.5;
+        const sx = Math.max(0, Math.min(W - 1, Math.floor(fx)));
+        if (m2) m2[y * W2 + x] = validMask[sy * W + sx];
+        const z = GreenMapCore.bilinearCellZ(grid, W, H,
+          Math.max(0, Math.min(W - 1 + 0.999, fx)),
+          Math.max(0, Math.min(H - 1 + 0.999, fy)), validMask);
+        out[y * W2 + x] = Number.isFinite(z) ? z : grid[sy * W + sx];
+      }
+    }
+    return { grid: out, W: W2, H: H2, validMask: m2 };
+  };
+
+  /* ---- Whole-hole flyover corridor --------------------------------------- */
+
+  // Square bbox covering tee→green (or green alone when tee is null) plus a
+  // margin, with the span capped (default 300 m) to stay inside API limits.
+  // Returns [w, s, e, n].
+  GreenMapCore.corridorBbox = function (latA, lngA, latB, lngB,
+                                        marginM = 30, capSpanM = 300) {
+    const pts = [[latA, lngA]];
+    const hasTee = Number.isFinite(latB) && Number.isFinite(lngB);
+    if (hasTee) pts.push([latB, lngB]);
+    let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+    pts.forEach(([la, lo]) => {
+      w = Math.min(w, lo); e = Math.max(e, lo);
+      s = Math.min(s, la); n = Math.max(n, la);
+    });
+    const mLat = 110540;
+    const mLng = 111320 * Math.cos(((s + n) / 2) * Math.PI / 180);
+    const spanM = Math.max((e - w) * mLng, (n - s) * mLat);
+    // No known tee → spec fallback: green centre ±150m (full-cap square).
+    const mg = marginM == null ? 30 : marginM;
+    const sideM = hasTee
+      ? Math.min(capSpanM, spanM + 2 * mg)
+      : capSpanM;
+    const hx = sideM / 2 / mLng, hy = sideM / 2 / mLat;
+    const cLat = (s + n) / 2, cLng = (w + e) / 2;
+    return [cLng - hx, cLat - hy, cLng + hx, cLat + hy];
+  };
+
   // Build the 3D mesh once per grid load / exaggeration change.
   // Quad (x,y) spans cells (x,y)..(x+1,y+1); kept only when all four cells
   // are inside the mask with finite heights. Vertex world coords:
   // mx=(cx-W/2)*cs, my=(H/2-cy)*cs, mz=(z-zmin)*exag.
-  // Returns { count, pos: Float32Array(count*12), col: Float32Array(count*3),
-  //           nrm: Float32Array(count*3), zmin } or null when empty.
+  // opts: { smooth=true, ao=true, aoRadius=3, colorFn(i, zMid) -> [r,g,b] }.
+  // smooth: per-corner lighting from averaged vertex normals (quad colour =
+  // mean of its 4 corner shades → continuous look across quads).
+  // ao: per-cell ambient-occlusion factor multiplies the lit colour.
+  // Returns { count, pos, col, nrm, zmin } or null when empty.
   GreenMapCore.buildMesh3D = function (grid, W, H, cellSizeM, mask,
-                                       elevRange, exag, mode) {
+                                       elevRange, exag, mode, opts) {
+    const O = Object.assign({ smooth: true, ao: true, aoRadius: 3,
+                              colorFn: null }, opts || {});
     let zmin = Infinity;
     for (let i = 0; i < grid.length; i++)
       if (mask[i] && Number.isFinite(grid[i]) && grid[i] < zmin) zmin = grid[i];
@@ -281,27 +474,43 @@
       if (!mask[i] || !Number.isFinite(grid[i])) return null;
       return [grid[i], i];
     };
+    const vn = O.smooth
+      ? GreenMapCore.vertexNormals3D(grid, W, H, cellSizeM, mask, exag, zmin)
+      : null;
+    const aoF = O.ao ? GreenMapCore.cellAO(grid, W, H, mask, O.aoRadius)
+                     : null;
     const quads = [];
     const [lo, hi] = elevRange;
+    const litCorner = (baseCol, ci, quadN) => {
+      const nrm = vn && (vn[ci * 3] || vn[ci * 3 + 1]) ? 
+        [vn[ci * 3], vn[ci * 3 + 1], vn[ci * 3 + 2]] : quadN;
+      const c = GreenMapCore.shadeColor(baseCol, nrm);
+      const k = aoF ? Math.max(0.5, Math.min(1.4, aoF[ci])) : 1;
+      return [Math.min(255, c[0] * k), Math.min(255, c[1] * k),
+              Math.min(255, c[2] * k)];
+    };
     for (let y = 0; y < H - 1; y++) {
       for (let x = 0; x < W - 1; x++) {
         const c00 = hgt(x, y), c10 = hgt(x + 1, y),
               c01 = hgt(x, y + 1), c11 = hgt(x + 1, y + 1);
         if (!c00 || !c10 || !c01 || !c11) continue;
-        const v00 =[(x - W / 2) * cellSizeM, (H / 2 - y) * cellSizeM,
-                     (c00[0] - zmin) * exag];
-        const v10 = [(x + 1 - W / 2) * cellSizeM, (H / 2 - y) * cellSizeM,
-                     (c10[0] - zmin) * exag];
-        const v01 = [(x - W / 2) * cellSizeM, (H / 2 - y - 1) * cellSizeM,
-                     (c01[0] - zmin) * exag];
-        const v11 = [(x + 1 - W / 2) * cellSizeM, (H / 2 - y - 1) * cellSizeM,
-                     (c11[0] - zmin) * exag];
+        // Vertex positions use the raster cell-CENTRE convention (matches
+        // masks, arrows and picking exactly).
+        const cxm = (cx) => (cx + 0.5 - W / 2) * cellSizeM;
+        const cym = (cy) => (H / 2 - cy - 0.5) * cellSizeM;
+        const v00 =[cxm(x), cym(y), (c00[0] - zmin) * exag];
+        const v10 = [cxm(x + 1), cym(y), (c10[0] - zmin) * exag];
+        const v01 = [cxm(x), cym(y + 1), (c01[0] - zmin) * exag];
+        const v11 = [cxm(x + 1), cym(y + 1), (c11[0] - zmin) * exag];
         const zMid = (c00[0] + c10[0] + c01[0] + c11[0]) / 4;
         const n = GreenMapCore.quadNormal(v00, v10, v11, v01);
         if (n[2] < 0) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
-        // v-fix: color by active data mode — slope % or normalized elevation.
+        // Base colour: custom override (hole corridor), else mode ramp.
         let baseCol;
-        if (mode === 'elev') {
+        if (O.colorFn) {
+          baseCol = O.colorFn(c00[1], zMid);
+          if (!baseCol) continue;             // colorFn may cull the quad
+        } else if (mode === 'elev') {
           const t = (zMid - lo) / Math.max(1e-6, hi - lo);
           baseCol = GreenMapCore.elevationColor(t);
         } else {
@@ -310,23 +519,31 @@
           const slopePct = Math.hypot(gxv, gyv) / cellSizeM * 100;
           baseCol = GreenMapCore.slopeColor(slopePct);
         }
-        const col = GreenMapCore.shadeColor(baseCol, n);
-        quads.push({ v: [v00, v10, v11, v01], col, n });
+        const corners = [
+          litCorner(baseCol, c00[1], n), litCorner(baseCol, c10[1], n),
+          litCorner(baseCol, c11[1], n), litCorner(baseCol, c01[1], n)];
+        const col = [
+          (corners[0][0] + corners[1][0] + corners[2][0] + corners[3][0]) / 4,
+          (corners[0][1] + corners[1][1] + corners[2][1] + corners[3][1]) / 4,
+          (corners[0][2] + corners[1][2] + corners[2][2] + corners[3][2]) / 4];
+        quads.push({ v: [v00, v10, v11, v01],
+                     col: col.map(Math.round),
+                     vc: corners, n });
       }
     }
     const count = quads.length;
     if (!count) return null;
     const pos = new Float32Array(count * 12);
     const col = new Float32Array(count * 3);
+    const vcol = new Float32Array(count * 12);
     const nrm = new Float32Array(count * 3);
     quads.forEach((q, k) => {
-      q.v.forEach((p, c) => {
-        pos.set(p, k * 12 + c * 3);
-      });
+      q.v.forEach((p, c) => { pos.set(p, k * 12 + c * 3); });
+      q.vc.forEach((p, c) => { vcol.set(p, k * 12 + c * 3); });
       col.set(q.col, k * 3);
       nrm.set(q.n, k * 3);
     });
-    return { count, pos, col, nrm, zmin };
+    return { count, pos, col, vcol, nrm, zmin };
   };
 
   window.GreenMapCore = GreenMapCore;
@@ -352,6 +569,10 @@
   const state = {
     lat: parseFloat(qs.get('lat')) || PRESETS[0].lat,
     lng: parseFloat(qs.get('lng')) || PRESETS[0].lng,
+    teeLL: (Number.isFinite(parseFloat(qs.get('teelat'))) &&
+            Number.isFinite(parseFloat(qs.get('teelng'))))
+      ? { lat: parseFloat(qs.get('teelat')), lng: parseFloat(qs.get('teelng')) }
+      : null,
     layer: 'both',           // shading | arrows | both
     mode: 'slope',           // slope | elev — color ramp mode
     view: { scale: null, ox: 0, oy: 0 },   // set after first render
@@ -361,11 +582,46 @@
     pin: null,               // local metre coords of pin marker
     ball: null,              // local metre coords for putt preview
     showPutt: false,
-    viewMode: '2d',          // 2d | 3d
+    viewMode: '2d',          // 2d | 3d | hole
     v3: { yaw: 0, pitch: 35, dist: 62, exag: 8 },
     mesh: null,              // built 3D mesh (per grid load / exag change)
-    meshArrows: []           // subsampled downhill arrows on the surface
+    meshArrows: [],          // subsampled downhill arrows on the surface
+    // Precision bookkeeping
+    greenZ: null,            // bilinear elevation (m) at the green centre
+    quality: null,           // { cellM, pctValid } — shown in the legend
+    // Dataset registry: green vs whole-hole corridor. The active one is
+    // mirrored into state.grid/field/mask/elevRange so all existing
+    // interaction/pick code keeps working unchanged.
+    active: 'green',
+    datasets: {
+      green: null,
+      hole: null             // { eg, field, maskAll, zoneMask, mesh, arrows,
+    }                        //  spanM, centerLL, failed, msg }
   };
+
+  // Mirror live state fields into the registry entry for the active dataset.
+  function saveActive() {
+    const ds = state.datasets[state.active];
+    if (!ds) return;
+    ds.grid = state.grid; ds.field = state.field; ds.mask = state.mask;
+    ds.bbox = state.bbox; ds.elevRange = state.elevRange;
+    ds.polyLocal = state.polyLocal; ds.mesh = state.mesh;
+    ds.arrows = state.meshArrows;
+  }
+
+  // Switch the live state fields (grid/field/mask/…) between registered
+  // datasets so all existing interaction/pick/render code keeps working.
+  function activateDataset(name) {
+    if (name === state.active || !state.datasets[name]) return false;
+    saveActive();
+    state.active = name;
+    const ds = state.datasets[name];
+    state.grid = ds.grid; state.field = ds.field; state.mask = ds.mask;
+    state.bbox = ds.bbox; state.elevRange = ds.elevRange;
+    state.polyLocal = ds.polyLocal;
+    state.mesh = ds.mesh; state.meshArrows = ds.arrows || [];
+    return true;
+  }
 
   async function fetchGreenPolygon(lat, lng, signal) {
     try {
@@ -437,9 +693,16 @@
     state.field = field;
     state.pin = [0, 0]; // pin at green centre
 
+    // Precision: exact bilinear elevation at the green centre (reference
+    // for the tooltip's ft-relative readout), plus data-quality numbers.
+    state.greenZ = GreenMapCore.sampleElevLocalM(elev, 0, 0);
+
     let nValid = 0, nMasked = 0, maxS = 0, sumS = 0;
     let minZ = Infinity, maxZ = -Infinity;
+    let nCellValid = 0;
     for (let i = 0; i < mask.length; i++) {
+      if (Number.isFinite(elev.grid[i]) &&
+          (!elev.validMask || elev.validMask[i])) nCellValid++;
       if (mask[i]) {
         nMasked++;
         const z = elev.grid[i];
@@ -456,11 +719,20 @@
     }
     if (Number.isFinite(minZ) && Number.isFinite(maxZ) && maxZ > minZ)
       state.elevRange = [minZ, maxZ];
+    // Data-quality note for the legend (subtle, not alarmist).
+    state.quality = { cellM: elev.cellSizeM,
+                      pctValid: 100 * nCellValid / (elev.W * elev.H) };
+    updateQualityNote();
+    // Register the green dataset, then start the corridor fetch in parallel.
+    state.datasets.green = { grid: state.grid, field: state.field,
+      mask: state.mask, bbox: state.bbox, elevRange: state.elevRange,
+      polyLocal: state.polyLocal, mesh: null, arrows: [] };
     const t0 = performance.now();
     buildScene();
     fitView();
     buildHeatImage(); // v-fix: was never invoked — heat canvas stayed transparent
     render();
+    loadCorridor();   // fire-and-forget; Hole view activates when ready
     console.log('[greenmap] load', `mode=${state.mode}`,
       `polyVerts=${state.polyLocal ? state.polyLocal.length : 0}`,
       state.polyLocal ? '' : 'ellipse fallback',
@@ -475,8 +747,164 @@
   }
 
   /* ======================================================================
-     3. VIEW TRANSFORM + RENDERING
+     2b. WHOLE-HOLE FLYOVER CORRIDOR
      ====================================================================== */
+  const HOLE_SPAN_CAP_M = 300;
+  const HOLE_GRID_N = 96;
+
+  function updateQualityNote() {
+    const el = document.getElementById('gm-quality');
+    if (!el) return;
+    if (!state.quality) { el.textContent = ''; return; }
+    el.textContent = `± ${state.quality.cellM.toFixed(1)} m/cell · ` +
+      `${state.quality.pctValid.toFixed(0)}% valid · ` +
+      'USGS 3DEP LiDAR (vintage varies)';
+  }
+
+  // Fetch the tee→green corridor grid (or green ±150 m when no tee is known)
+  // and pre-build its mesh + arrows. Never throws into broken UI: on failure
+  // the Hole view degrades to green-only 3D with an inline message.
+  async function loadCorridor() {
+    try {
+      const bb = GreenMapCore.corridorBbox(state.lat, state.lng,
+        state.teeLL ? state.teeLL.lat : NaN,
+        state.teeLL ? state.teeLL.lng : NaN,
+        30, HOLE_SPAN_CAP_M);
+      const eg = await window.CaddyElev.fetchElevGrid(bb, HOLE_GRID_N);
+      if (!eg || !eg.grid) throw new Error('no corridor coverage');
+      const [w, s, e, n] = bb;
+      const midLat = ((s + n) / 2) * Math.PI / 180;
+      const mLng = 111320 * Math.cos(midLat), mLat = 110540;
+      const spanM = Math.max((e - w) * mLng, (n - s) * mLat);
+
+      // Interaction mask = every valid cell (whole corridor is explorable).
+      const maskAll = new Uint8Array(eg.W * eg.H);
+      for (let i = 0; i < maskAll.length; i++)
+        if (Number.isFinite(eg.grid[i]) &&
+            (!eg.validMask || eg.validMask[i])) maskAll[i] = 1;
+
+      const field = GreenMapCore.computeGradientField(
+        eg.grid, eg.W, eg.H, eg.cellSizeM,
+        (i) => !eg.validMask || !!eg.validMask[i]);
+
+      // Green-zone highlight mask in corridor-local metres.
+      const gOffX = (state.lng - (w + e) / 2) * mLng;   // green centre offset
+      const gOffY = (state.lat - (s + n) / 2) * mLat;
+      const zoneMask = new Uint8Array(eg.W * eg.H);
+      for (let y = 0; y < eg.H; y++)
+        for (let x = 0; x < eg.W; x++) {
+          const mx = (x + 0.5 - eg.W / 2) * eg.cellSizeM - gOffX;
+          const my = (eg.H / 2 - y - 0.5) * eg.cellSizeM - gOffY;
+          let inside;
+          if (state.polyLocal && state.polyLocal.length > 2)
+            inside = GreenMapCore.pointInPoly(mx, my, state.polyLocal);
+          else {
+            const rM = SPAN_M * 0.36;
+            inside = (mx * mx + my * my) / (rM * rM) <= 1;
+          }
+          if (inside) zoneMask[y * eg.W + x] = 1;
+        }
+
+      // Dataset record (mesh + arrows built by buildHoleScene below).
+      const ds = {
+        grid: eg.grid, field, mask: maskAll, bbox: bb,
+        elevRange: state.elevRange, polyLocal: null,
+        mesh: null, arrows: [],
+        eg, zoneMask, spanM, centerLL: [(w + e) / 2, (s + n) / 2],
+        gOff: [gOffX, gOffY],
+        failed: false, msg: ''
+      };
+      state.datasets.hole = ds;
+
+      buildHoleScene();
+      console.log('[greenmap] corridor ready', `${eg.W}x${eg.H}`,
+        `span=${spanM.toFixed(0)}m`,
+        'zone cells', zoneMask.reduce((a, b) => a + b, 0));
+      // If the user is already waiting in Hole view, land them on it now.
+      if (state.viewMode === 'hole' && state.active !== 'hole') {
+        activateDataset('hole');
+        const span = ds.spanM || HOLE_SPAN_CAP_M;
+        state.v3.yaw = 0; state.v3.pitch = 26;
+        state.v3.dist = Math.max(80, Math.min(600, span * 1.05));
+        setStatus('Whole-hole 3D — drag = orbit · pinch/scroll = zoom · ' +
+          'green highlighted, blue flag = tee');
+        render();
+      }
+      return ds;
+    } catch (err) {
+      console.warn('[greenmap] corridor fetch failed:', err.message);
+      state.datasets.hole = { failed: true,
+        msg: 'Hole flyover unavailable here — showing green-only 3D.' };
+      if (state.viewMode === 'hole') {
+        // Graceful fallback without touching wireChrome scope: drop back to
+        // green-only 3D and say why.
+        state.viewMode = '3d';
+        document.querySelectorAll('.gm-view-btn').forEach(b =>
+          b.classList.toggle('active', b.dataset.view === '3d'));
+        if (state.active !== 'green') activateDataset('green');
+        setStatus(state.datasets.hole.msg);
+        render();
+      }
+      return null;
+    }
+  }
+
+  // Build/refresh the corridor mesh: muted fairway tones outside the green
+  // zone, active-mode ramp (slope % / elevation) inside it.
+  function buildHoleScene() {
+    const ds = state.datasets.hole;
+    if (!ds || !ds.grid) return;
+    const [lo, hi] = ds.elevRange || [0, 1];
+    const zone = ds.zoneMask, g = ds.grid;
+    ds.mesh = GreenMapCore.buildMesh3D(g, ds.grid.W, ds.grid.H,
+      ds.eg.cellSizeM, ds.mask, ds.elevRange, state.v3.exag, state.mode,
+      {
+        smooth: true, ao: true, aoRadius: 4,
+        colorFn: (i, zMid) => {
+          if (zone && zone[i]) {
+            // Active-ramp colour for green cells.
+            if (state.mode === 'elev')
+              return GreenMapCore.elevationColor(
+                (zMid - lo) / Math.max(1e-6, hi - lo));
+            // Slope % from raw neighbours (cheap central difference).
+            const W = ds.grid.W, cs = ds.eg.cellSizeM;
+            const ix = i % W, iy = (i / W) | 0;
+            const zx1 = ix < W - 1 ? g[i + 1] : g[i];
+            const zx0 = ix > 0 ? g[i - 1] : g[i];
+            const zy1 = iy < ds.grid.H - 1 ? g[i + W] : g[i];
+            const zy0 = iy > 0 ? g[i - W] : g[i];
+            const slp = Math.hypot(zx1 - zx0, zy1 - zy0) / (2 * cs) * 100;
+            return GreenMapCore.slopeColor(slp);
+          }
+          // Muted fairway, gently varied by relative elevation.
+          const t = Math.max(-1, Math.min(1,
+            (zMid - (lo + hi) / 2) / Math.max(0.5, hi - lo)));
+          const k = 1 + t * 0.10;
+          return [110 * k, 130 * k, 106 * k].map(Math.round);
+        }
+      });
+    // Downhill arrows over the corridor (sparse — bigger step than 2D).
+    const arr = [];
+    const step = 5;
+    for (let y = 1; y < ds.grid.H - 1; y += step)
+      for (let x = 1; x < ds.grid.W - 1; x += step) {
+        const i = y * ds.grid.W + x;
+        if (!ds.mask[i] || !ds.field.valid[i]) continue;
+        const gxv = ds.field.gx[i], gyv = ds.field.gy[i];
+        const mag = Math.hypot(gxv, gyv);
+        if (mag < 1e-5) continue;
+        arr.push({
+          mx: (x + 0.5 - ds.grid.W / 2) * ds.eg.cellSizeM,
+          my: (ds.grid.H / 2 - y - 0.5) * ds.eg.cellSizeM,
+          dxm: -gxv / mag, dym: gyv / mag,
+          lenM: 0.9 + Math.min(2.4, mag * 100 / 4.0),
+          slopePct: mag * 100
+        });
+      }
+    ds.arrows = arr;
+  }
+
+
   const canvas = document.getElementById('gm-canvas');
   const ctx = canvas.getContext('2d');
   const heatCanvas = document.createElement('canvas');
@@ -709,9 +1137,33 @@
   function buildScene() {
     const g = state.grid;
     if (!g) return;
+    saveActive();
+    const ds = state.datasets[state.active];
+    const isHole = state.active === 'hole';
+    if (isHole) { buildHoleScene(); state.mesh = ds.mesh;
+      state.meshArrows = ds.arrows || []; return; }
+    // Green mesh: 2× bilinear refinement (128-class internal grid when the
+    // 64-cell fetch allows) → visibly smoother shading at no data cost.
+    let mg = g.grid, mW = g.W, mH = g.H, mMask = state.mask, aoR = 3,
+        cellM = g.cellSizeM;
+    if (!isHole && g.W >= 32 && g.W < 100) {
+      const up = GreenMapCore.upsampleGrid(g.grid, g.W, g.H,
+        g.validMask || null, 2);
+      mg = up.grid; mW = up.W; mH = up.H; aoR = 5;
+      cellM = g.cellSizeM / 2;
+      mMask = new Uint8Array(mW * mH);
+      for (let y = 0; y < mH; y++)
+        for (let x = 0; x < mW; x++) {
+          const sx = Math.min(g.W - 1, (x / 2) | 0);
+          const sy = Math.min(g.H - 1, (y / 2) | 0);
+          mMask[y * mW + x] = state.mask[sy * g.W + sx];
+        }
+      void cellM;
+    }
     state.mesh = GreenMapCore.buildMesh3D(
-      g.grid, g.W, g.H, g.cellSizeM, state.mask, state.elevRange,
-      state.v3.exag, state.mode);
+      mg, mW, mH, cellM, mMask, state.elevRange,
+      state.v3.exag, state.mode, { smooth: true, ao: true, aoRadius: aoR });
+    ds.mesh = state.mesh;
     // Downhill arrows on the surface, every 3rd cell (like 2D flow layer).
     const arr = [];
     const step = 3;
@@ -734,11 +1186,13 @@
   }
 
   // Bilinear surface height (exaggerated world z) at local metres.
+  // Uses the raster cell-CENTRE convention (cell x centre at
+  // ((x+0.5)-W/2)*cs metres) — matches mesh vertices and picking exactly.
   function surfZ3(mx, my) {
     const g = state.grid, M = state.mesh;
     if (!g || !M) return 0;
-    const fx = mx / g.cellSizeM + g.W / 2;
-    const fy = g.H / 2 - my / g.cellSizeM;
+    const fx = mx / g.cellSizeM + g.W / 2 - 0.5;
+    const fy = g.H / 2 - 0.5 - my / g.cellSizeM;
     const x0 = Math.max(0, Math.min(g.W - 1, Math.floor(fx)));
     const y0 = Math.max(0, Math.min(g.H - 1, Math.floor(fy)));
     const x1 = Math.min(g.W - 1, x0 + 1), y1 = Math.min(g.H - 1, y0 + 1);
@@ -761,8 +1215,23 @@
   }
 
   function render3D() {
+    const dpr = window.devicePixelRatio || 1;
     ctx.fillStyle = '#0e1411';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (state.viewMode === 'hole' &&
+        (!state.grid || !state.mesh || state.active !== 'hole')) {
+      // Corridor still loading (or fell back) — clear inline message, never
+      // a broken UI.
+      ctx.fillStyle = 'rgba(232,239,233,0.9)';
+      ctx.font = `${14 * dpr}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(state.datasets.hole && state.datasets.hole.failed
+        ? state.datasets.hole.msg
+        : 'Fetching whole-hole elevation corridor…',
+        canvas.width / 2, canvas.height / 2);
+      ctx.textAlign = 'left';
+      return;
+    }
     if (!state.grid || !state.mesh) return;
     const cam = currentCam();
     const M = state.mesh;
@@ -795,22 +1264,89 @@
       ctx.lineTo(sx[q * 4 + 2], sy[q * 4 + 2]);
       ctx.lineTo(sx[q * 4 + 3], sy[q * 4 + 3]);
       ctx.closePath();
-      // v2: arrows-only mode renders a neutral dark surface (no color shading)
-      let r, gg, b;
+      // v-fix(precision): smooth shading — linear gradient between opposite
+      // corner shades (from averaged vertex normals + AO) when they differ
+      // enough to matter; flat mean-colour otherwise (cheap + seam-free).
+      let fill = null;
+      const midCol = `rgb(${M.col[q * 3] | 0},${M.col[q * 3 + 1] | 0},${M.col[q * 3 + 2] | 0})`;
       if (state.layer === 'arrows') {
-        r = 24; gg = 32; b = 27;   // near-background green-black
-      } else {
-        r = M.col[q * 3] | 0; gg = M.col[q * 3 + 1] | 0; b = M.col[q * 3 + 2] | 0;
+        fill = 'rgb(24,32,27)';   // near-background green-black
+      } else if (M.vcol) {
+        const c0 = q * 12, c2 = q * 12 + 6;
+        const dr = Math.abs(M.vcol[c2] - M.vcol[c0]);
+        const dg = Math.abs(M.vcol[c2 + 1] - M.vcol[c0 + 1]);
+        const db = Math.abs(M.vcol[c2 + 2] - M.vcol[c0 + 2]);
+        if (Math.max(dr, dg, db) > 5) {
+          const grad = ctx.createLinearGradient(
+            sx[q * 4], sy[q * 4], sx[q * 4 + 2], sy[q * 4 + 2]);
+          grad.addColorStop(0, `rgb(${M.vcol[c0] | 0},${M.vcol[c0 + 1] | 0},${M.vcol[c0 + 2] | 0})`);
+          grad.addColorStop(1, `rgb(${M.vcol[c2] | 0},${M.vcol[c2 + 1] | 0},${M.vcol[c2 + 2] | 0})`);
+          fill = grad;
+        }
       }
-      ctx.fillStyle = `rgb(${r},${gg},${b})`;
-      ctx.strokeStyle = ctx.fillStyle;   // same-colour stroke hides seams
+      ctx.fillStyle = fill || midCol;
+      ctx.strokeStyle = midCol;   // same-colour stroke hides seams
       ctx.lineWidth = 1;
       ctx.fill(); ctx.stroke();
     }
     void visible;
 
+    // Hole view: green-zone outline sits at the green-centre offset within
+    // the corridor frame, plus a tee marker. Pin/putt stay green-view only.
+    if (state.active === 'hole' && state.datasets.hole &&
+        !state.datasets.hole.failed && state.datasets.hole.zoneMask) {
+      const [gox, goy] = state.datasets.hole.gOff;
+      ctx.beginPath();
+      if (state.datasets.green && state.datasets.green.polyLocal &&
+          state.datasets.green.polyLocal.length > 2) {
+        state.datasets.green.polyLocal.forEach(([mx, my], k) => {
+          const p = GreenMapCore.projectPt(cam, mx + gox, my + goy,
+            surfZ3(mx + gox, my + goy));
+          if (!p) return;
+          if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+        });
+        ctx.closePath();
+      } else {
+        const rM = SPAN_M * 0.36;
+        for (let a = 0; a <= 64; a++) {
+          const th = a / 64 * Math.PI * 2;
+          const mx = gox + Math.cos(th) * rM, my = goy + Math.sin(th) * rM;
+          const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
+          if (!p) continue;
+          if (a === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+        }
+      }
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(248,252,249,0.85)';
+      ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
+      ctx.stroke();
+      // Tee marker: blue flag where a tee position is known.
+      if (state.teeLL) {
+        const dsH = state.datasets.hole;
+        const mLat = 110540;
+        const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
+        const tmx = (state.teeLL.lng - dsH.centerLL[0]) * mLng;
+        const tmy = (state.teeLL.lat - dsH.centerLL[1]) * mLat;
+        const base = GreenMapCore.projectPt(cam, tmx, tmy, surfZ3(tmx, tmy));
+        const top = GreenMapCore.projectPt(cam, tmx, tmy, surfZ3(tmx, tmy) + 3);
+        if (base && top) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = Math.max(1.5, dpr * 1.0);
+          ctx.beginPath(); ctx.moveTo(base[0], base[1]);
+          ctx.lineTo(top[0], top[1]); ctx.stroke();
+          const fs = Math.max(4, cam.f / top[2] * 0.09);
+          ctx.fillStyle = '#4488e0';
+          ctx.beginPath();
+          ctx.moveTo(top[0], top[1]);
+          ctx.lineTo(top[0] + fs, top[1] + fs * 0.28);
+          ctx.lineTo(top[0], top[1] + fs * 0.56);
+          ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+
     // Green polygon edge stroked in 3D along the surface.
-    if (state.polyLocal && state.polyLocal.length > 2) {
+    if (state.active === 'green' && state.polyLocal && state.polyLocal.length > 2) {
       ctx.beginPath();
       state.polyLocal.forEach(([mx, my], k) => {
         const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
@@ -822,7 +1358,7 @@
       ctx.strokeStyle = 'rgba(248,252,249,0.85)';
       ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
       ctx.stroke();
-    } else {
+    } else if (state.active === 'green') {
       // ellipse fallback outline
       ctx.beginPath();
       for (let a = 0; a <= 64; a++) {
@@ -873,8 +1409,9 @@
     }
     }
 
-    // Putt line projected onto the surface.
-    if (state.showPutt && state.ball && state.pin && state.field) {
+    // Putt line projected onto the surface (green view only).
+    if (state.active === 'green' &&
+        state.showPutt && state.ball && state.pin && state.field) {
       const g = state.grid;
       const { pts } = GreenMapCore.naivePuttPath(
         state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM, state.mask);
@@ -893,8 +1430,9 @@
       ctx.setLineDash([]);
     }
 
-    // Pin: small flag standing upright at its grid position.
-    if (state.pin) {
+    // Pin: small flag standing upright at its grid position (green view only;
+    // the corridor frame uses a tee marker instead).
+    if (state.active === 'green' && state.pin) {
       const [pmx, pmy] = state.pin;
       const base = GreenMapCore.projectPt(cam, pmx, pmy, surfZ3(pmx, pmy));
       const top = GreenMapCore.projectPt(cam, pmx, pmy,
@@ -979,7 +1517,7 @@
     if (dragging && lastPt) {
       cancelLongPress();
       const dx = px - lastPt[0], dy = py - lastPt[1];
-      if (state.viewMode === '3d') {
+      if (state.viewMode === '3d' || state.viewMode === 'hole') {
         // orbit: yaw free, pitch clamped 10..70°
         // v-fix: natural feel — drag DOWN tilts camera DOWN (pitch decreases);
         // drag RIGHT rotates view left-to-right naturally.
@@ -994,7 +1532,9 @@
       tip.style.display = 'none';
       return;
     }
-    if (state.viewMode === '3d') { tip.style.display = 'none'; return; }
+    if (state.viewMode === '3d' || state.viewMode === 'hole') {
+      tip.style.display = 'none'; return;
+    }
     updateTooltip(px, py, ev.clientX, ev.clientY);
   });
   canvas.addEventListener('pointerup', (ev) => {
@@ -1026,7 +1566,9 @@
       dragging = false; lastPt = null; clearTimeout(longPressTimer);
       const pts = [...ptrs.values()];
       pinchStartDist = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
-      pinchStartDist3D = state.viewMode === '3d' ? state.v3.dist : 0;
+      pinchStartDist3D =
+        (state.viewMode === '3d' || state.viewMode === 'hole')
+          ? state.v3.dist : 0;
     }
   });
   canvas.addEventListener('pointermove', (ev) => {
@@ -1037,8 +1579,10 @@
       const pts = [...ptrs.values()];
       const d = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
       const k = d / pinchStartDist;
-      if (state.viewMode === '3d') {
-        state.v3.dist = Math.max(25, Math.min(180, pinchStartDist3D / k));
+      if (state.viewMode === '3d' || state.viewMode === 'hole') {
+        state.v3.dist = Math.max(25,
+          Math.min(state.viewMode === 'hole' ? 600 : 180,
+            pinchStartDist3D / k));
         render();   // v2-fix: paint NOW — the rAF scheduler was dropping this
       } else {
         // 2D: zoom about the midpoint
@@ -1058,9 +1602,10 @@
 
   canvas.addEventListener('wheel', (ev) => {
     ev.preventDefault();
-    if (state.viewMode === '3d') {
-      state.v3.dist = Math.max(25, Math.min(180,
-        state.v3.dist * (ev.deltaY < 0 ? 0.9 : 1 / 0.9)));
+    if (state.viewMode === '3d' || state.viewMode === 'hole') {
+      state.v3.dist = Math.max(25,
+        Math.min(state.viewMode === 'hole' ? 600 : 180,
+          state.v3.dist * (ev.deltaY < 0 ? 0.9 : 1 / 0.9)));
       render();
       return;
     }
@@ -1090,15 +1635,31 @@
     return { ix, iy, i: iy * g.W + ix, mx, my };
   }
 
+  // Shared tooltip content: slope/fall + precise bilinear elevation in ft
+  // relative to the green centre.
+  function tipReadout(s) {
+    const pct = GreenMapCore.slopePctAt(state.field, s.i);
+    const brg = GreenMapCore.fallBearingDeg(state.field.gx[s.i],
+      state.field.gy[s.i]);
+    let elevTxt = '';
+    const egLike = state.active === 'hole'
+      ? (state.datasets.hole && state.datasets.hole.eg) : state.grid;
+    const z = egLike ? GreenMapCore.sampleElevLocalM(egLike, s.mx, s.my) : null;
+    if (z != null && state.greenZ != null) {
+      const ft = (z - state.greenZ) * 3.28084;
+      elevTxt = ` · ${ft >= 0 ? '+' : '−'}${Math.abs(ft).toFixed(1)} ft`;
+    }
+    return `<b>Slope ${pct.toFixed(1)}%</b> · falls ` +
+      `${GreenMapCore.bearingLabel(brg)} (${brg.toFixed(0)}°)${elevTxt}`;
+  }
+
   function updateTooltip(px, py, clientX, clientY) {
     if (!state.field) return;
     const s = sampleAtScreen(px, py);
     if (!s || !state.mask[s.i] || !state.field.valid[s.i]) {
       tip.style.display = 'none'; return;
     }
-    const pct = GreenMapCore.slopePctAt(state.field, s.i);
-    const brg = GreenMapCore.fallBearingDeg(state.field.gx[s.i], state.field.gy[s.i]);
-    tip.innerHTML = `<b>Slope ${pct.toFixed(1)}%</b> · falls ${GreenMapCore.bearingLabel(brg)} (${brg.toFixed(0)}°)`;
+    tip.innerHTML = tipReadout(s);
     tip.style.display = 'block';
     tip.style.left = (clientX + 14) + 'px';
     tip.style.top = (clientY + 14) + 'px';
@@ -1111,11 +1672,8 @@
       ? pickCell3D(px, py)
       : sampleAtScreen(px, py);
     if (!s || !state.mask[s.i] || !state.field.valid[s.i]) return;
-    if (state.viewMode === '3d') {
-      const pct = GreenMapCore.slopePctAt(state.field, s.i);
-      const brg = GreenMapCore.fallBearingDeg(state.field.gx[s.i],
-        state.field.gy[s.i]);
-      tip.innerHTML = `<b>Slope ${pct.toFixed(1)}%</b> · falls ${GreenMapCore.bearingLabel(brg)} (${brg.toFixed(0)}°)`;
+    if (state.viewMode === '3d' || state.viewMode === 'hole') {
+      tip.innerHTML = tipReadout(s);
       tip.style.display = 'block';
       tip.style.left = ((clientX ?? px) + 14) + 'px';
       tip.style.top = ((clientY ?? py) + 14) + 'px';
@@ -1124,7 +1682,7 @@
     const [mx, my] = state.viewMode === '3d'
       ? [s.mx, s.my]
       : fromScreen(px, py);
-    if (armBallNext) {
+    if (armBallNext && state.active === 'green') {
       state.ball = [mx, my];
       state.showPutt = true;
       armBallNext = false;
@@ -1186,17 +1744,52 @@
     });
     document.querySelector(`.gm-layer-btn[data-layer="both"]`).classList.add('active');
 
-    // 2D | 3D view toggle — keeps pin/ball/mode state; just re-renders.
-    function setViewMode(v) {
-      state.viewMode = v === '3d' ? '3d' : '2d';
+    // 2D | 3D | Hole view toggle — keeps pin/ball/mode state; just re-renders.
+    function frameCameraForView(v) {
+      if (v === 'hole' && state.datasets.hole && !state.datasets.hole.failed) {
+        const span = state.datasets.hole.spanM || HOLE_SPAN_CAP_M;
+        state.v3.yaw = 0; state.v3.pitch = 26;
+        state.v3.dist = Math.max(80, Math.min(600, span * 1.05));
+      } else if (v === '3d') {
+        state.v3.yaw = 0; state.v3.pitch = 35; state.v3.dist = 62;
+      }
+    }
+    function setViewModeInternal(v) {
+      state.viewMode = v === 'hole' ? 'hole' : (v === '3d' ? '3d' : '2d');
       document.querySelectorAll('.gm-view-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.view === state.viewMode));
       document.getElementById('gm-exag-wrap').style.display =
-        state.viewMode === '3d' ? 'inline-flex' : 'none';
-      setStatus(state.viewMode === '3d'
-        ? '3D green view — drag = orbit · pinch/scroll = zoom · tap = readout'
-        : '2D map');
+        state.viewMode === '2d' ? 'none' : 'inline-flex';
+      if (state.viewMode === 'hole') {
+        const h = state.datasets.hole;
+        if (h && !h.failed && h.mesh) {
+          activateDataset('hole');
+          frameCameraForView('hole');
+          setStatus('Whole-hole 3D — drag = orbit · pinch/scroll = zoom · ' +
+            'green highlighted, blue flag = tee');
+        } else if (h && h.failed) {
+          // Graceful fallback: green-only 3D with an inline explanation.
+          state.viewMode = '3d';
+          document.querySelectorAll('.gm-view-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.view === '3d'));
+          setStatus(h.msg);
+        }
+        // else: corridor still fetching — render3D shows the loading message.
+      } else {
+        if (state.active !== 'green') {
+          activateDataset('green');
+          buildHeatImage();
+          fitView();               // back to green frame
+        }
+        frameCameraForView(state.viewMode);
+      }
       render();
+    }
+    function setViewMode(v) {
+      setViewModeInternal(v);
+      if (state.viewMode === '3d')
+        setStatus('3D green view — drag = orbit · pinch/scroll = zoom · tap = readout');
+      else if (state.viewMode === '2d') setStatus('2D map');
     }
     document.querySelectorAll('.gm-view-btn').forEach(btn => {
       btn.addEventListener('click', () => setViewMode(btn.dataset.view));
@@ -1215,7 +1808,7 @@
     document.getElementById('gm-mode').addEventListener('change', (ev) => {
       state.mode = ev.target.value === 'elev' ? 'elev' : 'slope';
       buildHeatImage();
-      if (state.viewMode === '3d') buildScene();   // v-fix: recolor 3D mesh too
+      if (state.viewMode !== '2d') buildScene();   // v-fix: recolor 3D/hole mesh too
       updateLegend();
       render();
       setStatus(state.mode === 'elev' ? 'Elevation ramp — low=blue → high=red'
@@ -1233,7 +1826,9 @@
       render();
     });
     document.getElementById('gm-recenter').addEventListener('click', () => {
-      if (state.viewMode === '3d') {
+      if (state.viewMode === 'hole') {
+        frameCameraForView('hole');
+      } else if (state.viewMode === '3d') {
         state.v3.yaw = 0; state.v3.pitch = 35; state.v3.dist = 62;
       } else fitView();
       render(); setStatus('View reset');
