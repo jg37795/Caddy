@@ -1698,12 +1698,27 @@
     const M = state.mesh;
 
     // Project all quad corners once; painter sort by mean depth (far first).
+    // v-fix(precision): backface culling — quads whose surface normal points
+    // AWAY from the camera are skipped. At low orbit angles the far rim's
+    // underside was previously drawn as a pale ghost 'second surface'.
     const n = M.count;
     const sx = new Float32Array(n * 4), sy = new Float32Array(n * 4);
     const dep = new Float32Array(n), order = new Int32Array(n);
     let visible = new Uint8Array(n);
     let nVis = 0;
+    // Camera position in local terrain coords: target + dist back along -fwd.
+    const camPos = [
+      -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist];
     for (let q = 0; q < n; q++) {
+      // Backface test: vector from quad centre to camera vs quad normal.
+      const o0 = q * 12;
+      const cxq = (M.pos[o0] + M.pos[o0 + 3] + M.pos[o0 + 6] + M.pos[o0 + 9]) / 4;
+      const cyq = (M.pos[o0 + 1] + M.pos[o0 + 4] + M.pos[o0 + 7] + M.pos[o0 + 10]) / 4;
+      const czq = (M.pos[o0 + 2] + M.pos[o0 + 5] + M.pos[o0 + 8] + M.pos[o0 + 11]) / 4;
+      const toCamX = camPos[0] - cxq, toCamY = camPos[1] - cyq,
+            toCamZ = camPos[2] - czq;
+      if (M.nrm[q * 3] * toCamX + M.nrm[q * 3 + 1] * toCamY +
+          M.nrm[q * 3 + 2] * toCamZ <= 0) continue;   // facing away
       let dsum = 0, ok = true;
       for (let c = 0; c < 4; c++) {
         const o = q * 12 + c * 3;
