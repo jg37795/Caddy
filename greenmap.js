@@ -823,7 +823,9 @@
     }
 
     // Surface break arrows (downhill), drawn on top of the mesh.
-    const dpr = window.devicePixelRatio || 1;
+    // v-fix: respect the layer toggle (shading hides arrows in 3D too).
+    if (state.layer !== 'arrows') {
+      const dpr = window.devicePixelRatio || 1;
     ctx.lineCap = 'round';
     for (const a of state.meshArrows) {
       const z = surfZ3(a.mx, a.my);
@@ -853,6 +855,7 @@
       };
       head(hs * 1.45, 'rgba(12,18,15,0.8)');
       head(hs, 'rgba(255,255,255,0.95)');
+    }
     }
 
     // Putt line projected onto the surface.
@@ -963,8 +966,9 @@
       const dx = px - lastPt[0], dy = py - lastPt[1];
       if (state.viewMode === '3d') {
         // orbit: yaw free, pitch clamped 10..70°
-        // v-fix: natural feel — drag DOWN tilts camera DOWN (pitch decreases)
-        state.v3.yaw = (state.v3.yaw - dx * 0.35) % 360;
+        // v-fix: natural feel — drag DOWN tilts camera DOWN (pitch decreases);
+        // drag RIGHT rotates view left-to-right naturally.
+        state.v3.yaw = (state.v3.yaw + dx * 0.35) % 360;
         state.v3.pitch = Math.max(10, Math.min(70, state.v3.pitch + dy * 0.25));
       } else {
         state.view.ox += dx;
@@ -1001,6 +1005,12 @@
     zoomAt(px, py, k);
   }, { passive: false });
 
+  canvas.addEventListener('touchstart', (ev) => {
+    if (ev.touches.length === 2 && state.viewMode === '3d') {
+      // v-fix: capture gesture reference at pinch START (not first move).
+      state.v3.gestureDist = state.v3.dist;
+    }
+  }, { passive: false });
   canvas.addEventListener('touchmove', (ev) => {
     if (ev.touches.length === 2) {
       ev.preventDefault();
@@ -1009,8 +1019,7 @@
                            ev.touches[0].clientY - ev.touches[1].clientY);
       if (pinchDist) {
         if (state.viewMode === '3d') {
-          // v-fix: smooth pinch — apply the ratio against a gesture-start
-          // reference distance, not per-event compounding jitter.
+          // v-fix: smooth pinch — ratio against gesture-start reference.
           if (state.v3.gestureDist == null) state.v3.gestureDist = state.v3.dist;
           state.v3.dist = Math.max(25, Math.min(180,
             state.v3.gestureDist * (pinchDist / d)));
