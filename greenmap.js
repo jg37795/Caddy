@@ -270,7 +270,7 @@
   // Returns { count, pos: Float32Array(count*12), col: Float32Array(count*3),
   //           nrm: Float32Array(count*3), zmin } or null when empty.
   GreenMapCore.buildMesh3D = function (grid, W, H, cellSizeM, mask,
-                                       elevRange, exag) {
+                                       elevRange, exag, mode) {
     let zmin = Infinity;
     for (let i = 0; i < grid.length; i++)
       if (mask[i] && Number.isFinite(grid[i]) && grid[i] < zmin) zmin = grid[i];
@@ -297,10 +297,20 @@
         const v11 = [(x + 1 - W / 2) * cellSizeM, (H / 2 - y - 1) * cellSizeM,
                      (c11[0] - zmin) * exag];
         const zMid = (c00[0] + c10[0] + c01[0] + c11[0]) / 4;
-        const t = (zMid - lo) / Math.max(1e-6, hi - lo);
         const n = GreenMapCore.quadNormal(v00, v10, v11, v01);
         if (n[2] < 0) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
-        const col = GreenMapCore.shadeColor(GreenMapCore.elevationColor(t), n);
+        // v-fix: color by active data mode — slope % or normalized elevation.
+        let baseCol;
+        if (mode === 'elev') {
+          const t = (zMid - lo) / Math.max(1e-6, hi - lo);
+          baseCol = GreenMapCore.elevationColor(t);
+        } else {
+          const gxv = (c10[0] - c00[0] + c11[0] - c01[0]) / 2;
+          const gyv = (c01[0] - c00[0] + c11[0] - c10[0]) / 2;
+          const slopePct = Math.hypot(gxv, gyv) / cellSizeM * 100;
+          baseCol = GreenMapCore.slopeColor(slopePct);
+        }
+        const col = GreenMapCore.shadeColor(baseCol, n);
         quads.push({ v: [v00, v10, v11, v01], col, n });
       }
     }
@@ -701,7 +711,7 @@
     if (!g) return;
     state.mesh = GreenMapCore.buildMesh3D(
       g.grid, g.W, g.H, g.cellSizeM, state.mask, state.elevRange,
-      state.v3.exag);
+      state.v3.exag, state.mode);
     // Downhill arrows on the surface, every 3rd cell (like 2D flow layer).
     const arr = [];
     const step = 3;
@@ -1183,6 +1193,7 @@
     document.getElementById('gm-mode').addEventListener('change', (ev) => {
       state.mode = ev.target.value === 'elev' ? 'elev' : 'slope';
       buildHeatImage();
+      if (state.viewMode === '3d') buildScene();   // v-fix: recolor 3D mesh too
       updateLegend();
       render();
       setStatus(state.mode === 'elev' ? 'Elevation ramp — low=blue → high=red'
