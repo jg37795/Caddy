@@ -795,8 +795,13 @@
       ctx.lineTo(sx[q * 4 + 2], sy[q * 4 + 2]);
       ctx.lineTo(sx[q * 4 + 3], sy[q * 4 + 3]);
       ctx.closePath();
-      const r = M.col[q * 3] | 0, gg = M.col[q * 3 + 1] | 0,
-            b = M.col[q * 3 + 2] | 0;
+      // v2: arrows-only mode renders a neutral dark surface (no color shading)
+      let r, gg, b;
+      if (state.layer === 'arrows') {
+        r = 24; gg = 32; b = 27;   // near-background green-black
+      } else {
+        r = M.col[q * 3] | 0; gg = M.col[q * 3 + 1] | 0; b = M.col[q * 3 + 2] | 0;
+      }
       ctx.fillStyle = `rgb(${r},${gg},${b})`;
       ctx.strokeStyle = ctx.fillStyle;   // same-colour stroke hides seams
       ctx.lineWidth = 1;
@@ -1001,6 +1006,52 @@
     cancelLongPress();
     if (!wasDrag && activePtrs === 0) handleTap(eventPos(ev), ev.clientX, ev.clientY);
   });
+  canvas.addEventListener('pointercancel', (ev) => {
+    activePtrs = Math.max(0, activePtrs - 1);
+    dragging = false; lastPt = null;
+    cancelLongPress();
+  });
+
+  /* v3 UNIFIED PINCH — pointer-events only (touch events were unreliable on
+     iOS Safari: setPointerCapture routes moves away from touch handlers).
+     Tracks both active pointers by id; zoom = ratio against gesture start. */
+  const ptrs = new Map();          // pointerId -> [x, y]
+  let pinchStartDist = 0;
+  let pinchStartDist3D = 0;
+
+  canvas.addEventListener('pointerdown', (ev) => {
+    ptrs.set(ev.pointerId, eventPos(ev));
+    if (ptrs.size === 2) {
+      // pinch begins: cancel pan/long-press, capture references
+      dragging = false; lastPt = null; clearTimeout(longPressTimer);
+      const pts = [...ptrs.values()];
+      pinchStartDist = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
+      pinchStartDist3D = state.viewMode === '3d' ? state.v3.dist : 0;
+    }
+  });
+  canvas.addEventListener('pointermove', (ev) => {
+    if (!ptrs.has(ev.pointerId)) return;
+    ptrs.set(ev.pointerId, eventPos(ev));
+    if (ptrs.size === 2 && pinchStartDist > 0) {
+      ev.preventDefault();
+      const pts = [...ptrs.values()];
+      const d = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
+      const k = d / pinchStartDist;
+      if (state.viewMode === '3d') {
+        state.v3.dist = Math.max(25, Math.min(180, pinchStartDist3D / k));
+      } else {
+        // 2D: zoom about the midpoint
+        const cx = (pts[0][0] + pts[1][0]) / 2, cy = (pts[0][1] + pts[1][1]) / 2;
+        zoomAt(cx, cy, k);
+      }
+    }
+  });
+  const ptrEnd = (ev) => {
+    ptrs.delete(ev.pointerId);
+    if (ptrs.size < 2) { pinchStartDist = 0; pinchStartDist3D = 0; }
+  };
+  canvas.addEventListener('pointerup', ptrEnd);
+  canvas.addEventListener('pointercancel', ptrEnd);
 
   canvas.addEventListener('wheel', (ev) => {
     ev.preventDefault();
@@ -1014,41 +1065,6 @@
     const k = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
     zoomAt(px, py, k);
   }, { passive: false });
-
-  canvas.addEventListener('touchstart', (ev) => {
-    if (ev.touches.length === 2 && state.viewMode === '3d') {
-      // v2: capture reference at pinch start; only reset if no pinch active
-      // (iOS can fire spurious touchstart/touchend pairs mid-gesture).
-      if (!pinchDist) state.v3.gestureDist = state.v3.dist;
-      pinchDist = Math.hypot(ev.touches[0].clientX - ev.touches[1].clientX,
-                             ev.touches[0].clientY - ev.touches[1].clientY);
-    }
-  }, { passive: false });
-  canvas.addEventListener('touchmove', (ev) => {
-    if (ev.touches.length === 2) {
-      ev.preventDefault();
-      dragging = false; lastPt = null;   // pinch supersedes drag
-      const d = Math.hypot(ev.touches[0].clientX - ev.touches[1].clientX,
-                           ev.touches[0].clientY - ev.touches[1].clientY);
-      if (pinchDist) {
-        if (state.viewMode === '3d') {
-          // v2: smooth anchored zoom — ratio against gesture-start distance.
-          if (state.v3.gestureDist == null) state.v3.gestureDist = state.v3.dist;
-          state.v3.dist = Math.max(25, Math.min(180,
-            state.v3.gestureDist * (pinchDist / d)));
-        } else {
-          const [cx, cy] = eventPos({ clientX: (ev.touches[0].clientX + ev.touches[1].clientX) / 2,
-                                      clientY: (ev.touches[0].clientY + ev.touches[1].clientY) / 2 });
-          zoomAt(cx, cy, d / pinchDist);
-        }
-      }
-      pinchDist = d;
-    }
-  }, { passive: false });
-  canvas.addEventListener('touchend', () => {
-    pinchDist = 0;
-    state.v3.gestureDist = null;   // reset gesture reference
-  });
 
   function zoomAt(px, py, k) {
     const base = state.baseScale || (state.baseScale = state.view.scale);
