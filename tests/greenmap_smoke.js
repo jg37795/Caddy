@@ -137,6 +137,75 @@ console.log('5. Putt preview integrator');
     r.pts.length < 121, r.pts.length);
 }
 
+console.log('6. 3D orbit math — camera, projection, mesh');
+{
+  const cam = GM.makeCam(0, 35, 62);
+  cam.f = 800; cam.ox = 400; cam.oy = 300;
+  // Origin projects near screen centre; depth at target equals dist.
+  const p0 = GM.projectPt(cam, 0, 0, 0);
+  check('target depth == dist', Math.abs(GM.depthOf(cam, 0, 0, 0) - 62) < 1e-9);
+  check('origin projects near centre',
+    Math.abs(p0[0] - 400) < 2 && Math.abs(p0[1] - 300) < 40, p0);
+  // A point farther from the eye (south, since yaw=0 eye is north of target)
+  // has larger depth and appears higher on screen (near the horizon).
+  const pS = GM.projectPt(cam, 0, -10, 0);
+  check('farther point larger depth', GM.depthOf(cam, 0, -10, 0) >
+    GM.depthOf(cam, 0, 10, 0));
+  check('far point draws above centre', pS[1] < p0[1], pS);
+  check('behind-camera point rejected',
+    GM.projectPt(cam, 0, 200, 0) === null);   // beyond target → behind eye
+  // Flat grid mesh: all normals ≈ +Z; exaggeration scales vertex z.
+  const W = 16, H = 16, cs = 0.5;
+  const flat = new Float32Array(W * H).fill(10);
+  const mask16 = new Uint8Array(W * H).fill(1);
+  const m1 = GM.buildMesh3D(flat, W, H, cs, mask16, [9.5, 10.5], 8);
+  check('mesh built for full square', m1 && m1.count === (W - 1) * (H - 1),
+    m1 && m1.count);
+  let nOK = true;
+  for (let q = 0; q < m1.count; q++) {
+    if (Math.abs(m1.nrm[q * 3]) > 1e-5 || Math.abs(m1.nrm[q * 3 + 1]) > 1e-5 ||
+        m1.nrm[q * 3 + 2] < 0.999) nOK = false;
+  }
+  check('flat-grid normals all ≈ +Z', nOK);
+  const m4 = GM.buildMesh3D(flat, W, H, cs, mask16, [9.5, 10.5], 4);
+  // Sloped grid for the exaggeration ratio (flat grid has all z == 0).
+  const rampG = new Float32Array(W * H);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) rampG[y * W + x] = 10 + 0.1 * x * cs;
+  const mr1 = GM.buildMesh3D(rampG, W, H, cs, mask16, [10, 11], 8);
+  const mr4 = GM.buildMesh3D(rampG, W, H, cs, mask16, [10, 11], 4);
+  const meanZ = (m) => {
+    let s = 0;
+    for (let q = 0; q < m.count * 4; q++) s += m.pos[q * 3 + 2];
+    return s / (m.count * 4);
+  };
+  check('exaggeration halves vertex z',
+    Math.abs(meanZ(mr4) / meanZ(mr1) - 0.5) < 1e-6,
+    `${meanZ(mr4)} vs ${meanZ(mr1)}`);
+  check('zmin offset baked in', Math.abs(m1.pos[2]) < 1e-6, m1.pos[2]);
+  // Tilted grid: normal tilts opposite the rise (east-fall → nx > 0).
+  const tilt = new Float32Array(W * H);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) tilt[y * W + x] = -0.1 * x * cs; // falls east
+  const mt = GM.buildMesh3D(tilt, W, H, cs, mask16, [-0.8, 0], 8);
+  check('east-fall normal tilts +X', mt.nrm[0] > 0.3 &&
+    mt.nrm[2] > 0.6 && mt.nrm[2] < 0.95,
+    [mt.nrm[0], mt.nrm[1], mt.nrm[2]]);
+  // Mask clip: quads outside the mask are skipped.
+  const halfMask = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W / 2; x++) halfMask[y * W + x] = 1;
+  const mm = GM.buildMesh3D(flat, W, H, cs, halfMask, [9.5, 10.5], 8);
+  check('mask clips quads (~half remain)',
+    mm.count < (W - 1) * (H - 1) * 0.7 && mm.count > (W - 1) * (H - 1) * 0.3,
+    mm.count);
+  // Painter order: far quads sort before near ones.
+  const dep = [[0, 10], [1, 5], [2, 20]];
+  dep.sort((a, b) => b[1] - a[1]);
+  check('painter comparator far→near',
+    dep[0][0] === 2 && dep[2][0] === 1, dep.map(d => d[0]).join(','));
+}
+
 /* ---- 6. Live smoke — Ankeny 3DEP ---------------------------------------- */
 (async () => {
   console.log('4. Live smoke — Ankeny test green (41.95,-93.75)');

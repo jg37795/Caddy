@@ -120,3 +120,17 @@ html, body {
   #gm-legend .swatch { width: 11px; height: 11px; }
   .gm-select { max-width: 130px; }
 }
+
+/* --- 3D view chrome --------------------------------------------------- */
+#gm-exag-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #dce7de;
+  font-size: 12px;
+}
+#gm-exag { width: 90px; accent-color: #9db3a6; }
+.gm-view-btn.active {
+  background: #2f4638;
+  border-color: #9db3a6;
+}

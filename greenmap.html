@@ -27,6 +27,13 @@
     <option value="slope">Slope</option>
     <option value="elev">Elev</option>
   </select>
+  <button class="gm-btn gm-view-btn active" data-view="2d" title="Top-down 2D map">2D</button>
+  <button class="gm-btn gm-view-btn" data-view="3d" title="18Birdies-style 3D green view">3D</button>
+  <span id="gm-exag-wrap" style="display:none" title="Vertical exaggeration">
+    <label for="gm-exag">Exag</label>
+    <input type="range" id="gm-exag" min="1" max="15" step="0.5" value="8">
+    <span id="gm-exag-val">8×</span>
+  </span>
   <button class="gm-btn gm-layer-btn" data-layer="shading">Shading</button>
   <button class="gm-btn gm-layer-btn" data-layer="arrows">Arrows</button>
   <button class="gm-btn gm-layer-btn" data-layer="both">Both</button>

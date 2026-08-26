@@ -201,6 +201,124 @@
     }
     return { pts, stopped: 'pin' };
   };
+  /* ---- 3D orbit view math (pure, headless-testable) --------------------- */
+
+  // Orbit camera basis. Eye sits at azimuth yawDeg (0 = from north/+Y),
+  // elevation pitchDeg above the horizon, distance `dist` from the target
+  // (target = green centre at origin; z handled by caller via relative pts).
+  GreenMapCore.makeCam = function (yawDeg, pitchDeg, dist) {
+    const yaw = yawDeg * Math.PI / 180;
+    const pit = Math.max(1e-3, Math.min(Math.PI / 2 - 1e-3,
+      pitchDeg * Math.PI / 180));
+    const sa = Math.sin(yaw), ca = Math.cos(yaw);
+    const sp = Math.sin(pit), cp = Math.cos(pit);
+    // eye offset dir (unit): e = (sa*cp, ca*cp, sp); fwd = -e
+    const fwd = [-sa * cp, -ca * cp, -sp];
+    const right = [-ca, sa, 0];
+    const up2 = [-sa * sp, -ca * sp, cp];
+    return { fwd, right, up2, dist };
+  };
+
+  // Depth of a target-relative point along the camera forward axis.
+  GreenMapCore.depthOf = function (cam, x, y, z) {
+    return cam.dist + x * cam.fwd[0] + y * cam.fwd[1] + z * cam.fwd[2];
+  };
+
+  // Perspective projection of a target-relative point to screen px.
+  // cam needs .f (focal px), .ox, .oy set by the renderer.
+  GreenMapCore.projectPt = function (cam, x, y, z) {
+    const d = GreenMapCore.depthOf(cam, x, y, z);
+    if (d < 0.5) return null;                 // behind camera
+    const cx = x * cam.right[0] + y * cam.right[1] + z * cam.right[2];
+    const cy = x * cam.up2[0] + y * cam.up2[1] + z * cam.up2[2];
+    const s = cam.f / d;
+    return [cam.ox + cx * s, cam.oy - cy * s, d];
+  };
+
+  // Surface normal of a quad given 4 corners A,B,C,D (in winding order).
+  // Uses diagonals for robustness: n = normalize(C-A × D-B).
+  GreenMapCore.quadNormal = function (A, B, C, D) {
+    const ux = C[0] - A[0], uy = C[1] - A[1], uz = C[2] - A[2];
+    const vx = D[0] - B[0], vy = D[1] - B[1], vz = D[2] - B[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    return [nx / len, ny / len, nz / len];
+  };
+
+  // Flat-shade a base [r,g,b] with a fixed light direction (sky-ish).
+  // k = ambient 0.55 + diffuse 0.45 · max(0, n·L).
+  GreenMapCore.LIGHT_DIR = (() => {
+    const L = [-0.42, 0.55, 0.72];
+    const l = Math.hypot(L[0], L[1], L[2]);
+    return [L[0] / l, L[1] / l, L[2] / l];
+  })();
+  GreenMapCore.shadeColor = function (rgb, n) {
+    const lam = Math.max(0, n[0] * GreenMapCore.LIGHT_DIR[0] +
+      n[1] * GreenMapCore.LIGHT_DIR[1] + n[2] * GreenMapCore.LIGHT_DIR[2]);
+    const k = 0.55 + 0.45 * lam;
+    return [
+      Math.min(255, Math.round(rgb[0] * k)),
+      Math.min(255, Math.round(rgb[1] * k)),
+      Math.min(255, Math.round(rgb[2] * k))
+    ];
+  };
+
+  // Build the 3D mesh once per grid load / exaggeration change.
+  // Quad (x,y) spans cells (x,y)..(x+1,y+1); kept only when all four cells
+  // are inside the mask with finite heights. Vertex world coords:
+  // mx=(cx-W/2)*cs, my=(H/2-cy)*cs, mz=(z-zmin)*exag.
+  // Returns { count, pos: Float32Array(count*12), col: Float32Array(count*3),
+  //           nrm: Float32Array(count*3), zmin } or null when empty.
+  GreenMapCore.buildMesh3D = function (grid, W, H, cellSizeM, mask,
+                                       elevRange, exag) {
+    let zmin = Infinity;
+    for (let i = 0; i < grid.length; i++)
+      if (mask[i] && Number.isFinite(grid[i]) && grid[i] < zmin) zmin = grid[i];
+    if (!Number.isFinite(zmin)) return null;
+    const hgt = (cx, cy) => {
+      if (cx < 0 || cy < 0 || cx >= W || cy >= H) return null;
+      const i = cy * W + cx;
+      if (!mask[i] || !Number.isFinite(grid[i])) return null;
+      return [grid[i], i];
+    };
+    const quads = [];
+    const [lo, hi] = elevRange;
+    for (let y = 0; y < H - 1; y++) {
+      for (let x = 0; x < W - 1; x++) {
+        const c00 = hgt(x, y), c10 = hgt(x + 1, y),
+              c01 = hgt(x, y + 1), c11 = hgt(x + 1, y + 1);
+        if (!c00 || !c10 || !c01 || !c11) continue;
+        const v00 =[(x - W / 2) * cellSizeM, (H / 2 - y) * cellSizeM,
+                     (c00[0] - zmin) * exag];
+        const v10 = [(x + 1 - W / 2) * cellSizeM, (H / 2 - y) * cellSizeM,
+                     (c10[0] - zmin) * exag];
+        const v01 = [(x - W / 2) * cellSizeM, (H / 2 - y - 1) * cellSizeM,
+                     (c01[0] - zmin) * exag];
+        const v11 = [(x + 1 - W / 2) * cellSizeM, (H / 2 - y - 1) * cellSizeM,
+                     (c11[0] - zmin) * exag];
+        const zMid = (c00[0] + c10[0] + c01[0] + c11[0]) / 4;
+        const t = (zMid - lo) / Math.max(1e-6, hi - lo);
+        const n = GreenMapCore.quadNormal(v00, v10, v11, v01);
+        if (n[2] < 0) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
+        const col = GreenMapCore.shadeColor(GreenMapCore.elevationColor(t), n);
+        quads.push({ v: [v00, v10, v11, v01], col, n });
+      }
+    }
+    const count = quads.length;
+    if (!count) return null;
+    const pos = new Float32Array(count * 12);
+    const col = new Float32Array(count * 3);
+    const nrm = new Float32Array(count * 3);
+    quads.forEach((q, k) => {
+      q.v.forEach((p, c) => {
+        pos.set(p, k * 12 + c * 3);
+      });
+      col.set(q.col, k * 3);
+      nrm.set(q.n, k * 3);
+    });
+    return { count, pos, col, nrm, zmin };
+  };
+
   window.GreenMapCore = GreenMapCore;
 
   // Headless (node) runs stop here — pure core is all tests need.
@@ -232,7 +350,11 @@
     elevRange: [0, 1],       // min/max elevation inside mask (elev mode)
     pin: null,               // local metre coords of pin marker
     ball: null,              // local metre coords for putt preview
-    showPutt: false
+    showPutt: false,
+    viewMode: '2d',          // 2d | 3d
+    v3: { yaw: 0, pitch: 35, dist: 62, exag: 8 },
+    mesh: null,              // built 3D mesh (per grid load / exag change)
+    meshArrows: []           // subsampled downhill arrows on the surface
   };
 
   async function fetchGreenPolygon(lat, lng, signal) {
@@ -325,6 +447,7 @@
     if (Number.isFinite(minZ) && Number.isFinite(maxZ) && maxZ > minZ)
       state.elevRange = [minZ, maxZ];
     const t0 = performance.now();
+    buildScene();
     fitView();
     buildHeatImage(); // v-fix: was never invoked — heat canvas stayed transparent
     render();
@@ -394,6 +517,7 @@
   }
 
   function render() {
+    if (state.viewMode === '3d') { render3D(); return; }
     const g = state.grid;
     ctx.fillStyle = '#0e1411';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -556,6 +680,234 @@
   }
 
   /* ======================================================================
+     3b. 3D ORBIT VIEW (18Birdies-style shaded elevation mesh)
+     ====================================================================== */
+
+  // Precompute mesh + surface arrows once per grid load / exaggeration change.
+  function buildScene() {
+    const g = state.grid;
+    if (!g) return;
+    state.mesh = GreenMapCore.buildMesh3D(
+      g.grid, g.W, g.H, g.cellSizeM, state.mask, state.elevRange,
+      state.v3.exag);
+    // Downhill arrows on the surface, every 3rd cell (like 2D flow layer).
+    const arr = [];
+    const step = 3;
+    for (let y = 1; y < g.H - 1; y += step)
+      for (let x = 1; x < g.W - 1; x += step) {
+        const i = y * g.W + x;
+        if (!state.mask[i] || !state.field.valid[i]) continue;
+        const gxv = state.field.gx[i], gyv = state.field.gy[i];
+        const mag = Math.hypot(gxv, gyv);
+        if (mag < 1e-5) continue;
+        arr.push({
+          mx: (x + 0.5 - g.W / 2) * g.cellSizeM,
+          my: (g.H / 2 - y - 0.5) * g.cellSizeM,
+          dxm: -gxv / mag, dym: gyv / mag,
+          lenM: 0.72 + Math.min(1.85, mag * 100 / 4.0),
+          slopePct: mag * 100
+        });
+      }
+    state.meshArrows = arr;
+  }
+
+  // Bilinear surface height (exaggerated world z) at local metres.
+  function surfZ3(mx, my) {
+    const g = state.grid, M = state.mesh;
+    if (!g || !M) return 0;
+    const fx = mx / g.cellSizeM + g.W / 2;
+    const fy = g.H / 2 - my / g.cellSizeM;
+    const x0 = Math.max(0, Math.min(g.W - 1, Math.floor(fx)));
+    const y0 = Math.max(0, Math.min(g.H - 1, Math.floor(fy)));
+    const x1 = Math.min(g.W - 1, x0 + 1), y1 = Math.min(g.H - 1, y0 + 1);
+    const tx = fx - x0, ty = fy - y0;
+    const z = (a) => Number.isFinite(a) ? a : 0;
+    const h = z(g.grid[y0 * g.W + x0]) * (1 - tx) * (1 - ty) +
+              z(g.grid[y0 * g.W + x1]) * tx * (1 - ty) +
+              z(g.grid[y1 * g.W + x0]) * (1 - tx) * ty +
+              z(g.grid[y1 * g.W + x1]) * tx * ty;
+    return (h - M.zmin) * state.v3.exag;
+  }
+
+  function currentCam() {
+    const cam = GreenMapCore.makeCam(
+      state.v3.yaw, state.v3.pitch, state.v3.dist);
+    cam.f = Math.min(canvas.width, canvas.height) * 1.15;
+    cam.ox = canvas.width / 2;
+    cam.oy = canvas.height * 0.56;
+    return cam;
+  }
+
+  function render3D() {
+    ctx.fillStyle = '#0e1411';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!state.grid || !state.mesh) return;
+    const cam = currentCam();
+    const M = state.mesh;
+
+    // Project all quad corners once; painter sort by mean depth (far first).
+    const n = M.count;
+    const sx = new Float32Array(n * 4), sy = new Float32Array(n * 4);
+    const dep = new Float32Array(n), order = new Int32Array(n);
+    let visible = new Uint8Array(n);
+    let nVis = 0;
+    for (let q = 0; q < n; q++) {
+      let dsum = 0, ok = true;
+      for (let c = 0; c < 4; c++) {
+        const o = q * 12 + c * 3;
+        const p = GreenMapCore.projectPt(cam, M.pos[o], M.pos[o + 1],
+          M.pos[o + 2]);
+        if (!p) { ok = false; break; }
+        sx[q * 4 + c] = p[0]; sy[q * 4 + c] = p[1]; dsum += p[2];
+      }
+      if (!ok) continue;
+      dep[q] = dsum / 4; order[nVis++] = q; visible[q] = 1;
+    }
+    const vis = Array.prototype.slice.call(order, 0, nVis)
+      .sort((a, b) => dep[b] - dep[a]);       // far → near (painter's algo)
+
+    for (const q of vis) {
+      ctx.beginPath();
+      ctx.moveTo(sx[q * 4], sy[q * 4]);
+      ctx.lineTo(sx[q * 4 + 1], sy[q * 4 + 1]);
+      ctx.lineTo(sx[q * 4 + 2], sy[q * 4 + 2]);
+      ctx.lineTo(sx[q * 4 + 3], sy[q * 4 + 3]);
+      ctx.closePath();
+      const r = M.col[q * 3] | 0, gg = M.col[q * 3 + 1] | 0,
+            b = M.col[q * 3 + 2] | 0;
+      ctx.fillStyle = `rgb(${r},${gg},${b})`;
+      ctx.strokeStyle = ctx.fillStyle;   // same-colour stroke hides seams
+      ctx.lineWidth = 1;
+      ctx.fill(); ctx.stroke();
+    }
+    void visible;
+
+    // Green polygon edge stroked in 3D along the surface.
+    if (state.polyLocal && state.polyLocal.length > 2) {
+      ctx.beginPath();
+      state.polyLocal.forEach(([mx, my], k) => {
+        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
+        if (!p) return;
+        if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+      });
+      ctx.closePath();
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(248,252,249,0.85)';
+      ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
+      ctx.stroke();
+    } else {
+      // ellipse fallback outline
+      ctx.beginPath();
+      for (let a = 0; a <= 64; a++) {
+        const th = a / 64 * Math.PI * 2;
+        const mx = Math.cos(th) * SPAN_M * 0.36, my = Math.sin(th) * SPAN_M * 0.36;
+        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
+        if (!p) continue;
+        if (a === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+      }
+      ctx.strokeStyle = 'rgba(248,252,249,0.85)';
+      ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
+      ctx.stroke();
+    }
+
+    // Surface break arrows (downhill), drawn on top of the mesh.
+    const dpr = window.devicePixelRatio || 1;
+    ctx.lineCap = 'round';
+    for (const a of state.meshArrows) {
+      const z = surfZ3(a.mx, a.my);
+      const x1m = a.mx - a.dxm * a.lenM / 2, y1m = a.my - a.dym * a.lenM / 2;
+      const x2m = a.mx + a.dxm * a.lenM / 2, y2m = a.my + a.dym * a.lenM / 2;
+      const p1 = GreenMapCore.projectPt(cam, x1m, y1m, surfZ3(x1m, y1m));
+      const p2 = GreenMapCore.projectPt(cam, x2m, y2m, surfZ3(x2m, y2m));
+      if (!p1 || !p2) continue;
+      const ang = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
+      const hs = Math.max(2.6, cam.f / p2[2] * 0.05);
+      ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
+      ctx.strokeStyle = 'rgba(12,18,15,0.8)';
+      ctx.lineWidth = Math.max(3.0, dpr * 1.6);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.lineWidth = Math.max(1.4, dpr * 0.7);
+      ctx.stroke();
+      const head = (size, color) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(p2[0], p2[1]);
+        ctx.lineTo(p2[0] - size * Math.cos(ang - 0.42),
+                   p2[1] - size * Math.sin(ang - 0.42));
+        ctx.lineTo(p2[0] - size * Math.cos(ang + 0.42),
+                   p2[1] - size * Math.sin(ang + 0.42));
+        ctx.closePath(); ctx.fill();
+      };
+      head(hs * 1.45, 'rgba(12,18,15,0.8)');
+      head(hs, 'rgba(255,255,255,0.95)');
+    }
+
+    // Putt line projected onto the surface.
+    if (state.showPutt && state.ball && state.pin && state.field) {
+      const g = state.grid;
+      const { pts } = GreenMapCore.naivePuttPath(
+        state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM, state.mask);
+      ctx.setLineDash([6 * dpr, 4 * dpr]);
+      ctx.beginPath();
+      let started = false;
+      pts.forEach(([mx, my]) => {
+        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
+        if (!p) return;
+        if (!started) { ctx.moveTo(p[0], p[1]); started = true; }
+        else ctx.lineTo(p[0], p[1]);
+      });
+      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+      ctx.lineWidth = Math.max(1.5, dpr * 1.1);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Pin: small flag standing upright at its grid position.
+    if (state.pin) {
+      const [pmx, pmy] = state.pin;
+      const base = GreenMapCore.projectPt(cam, pmx, pmy, surfZ3(pmx, pmy));
+      const top = GreenMapCore.projectPt(cam, pmx, pmy,
+        surfZ3(pmx, pmy) + 2.2);            // ~2.2 m flagpole (un-exaggerated feel)
+      if (base && top) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = Math.max(1.5, dpr * 1.0);
+        ctx.beginPath(); ctx.moveTo(base[0], base[1]);
+        ctx.lineTo(top[0], top[1]); ctx.stroke();
+        const fs = Math.max(4, cam.f / top[2] * 0.09);
+        ctx.fillStyle = '#e04444';
+        ctx.beginPath();
+        ctx.moveTo(top[0], top[1]);
+        ctx.lineTo(top[0] + fs, top[1] + fs * 0.28);
+        ctx.lineTo(top[0], top[1] + fs * 0.56);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
+  // Nearest in-mask cell to a screen point in 3D (for tap/long-press/hover).
+  function pickCell3D(px, py) {
+    const g = state.grid;
+    if (!g || !state.mesh) return null;
+    const cam = currentCam();
+    const dpr = window.devicePixelRatio || 1;
+    const r2max = (26 * dpr) * (26 * dpr);
+    let best = null, bd = r2max;
+    for (let y = 1; y < g.H - 1; y++)
+      for (let x = 1; x < g.W - 1; x++) {
+        const i = y * g.W + x;
+        if (!state.mask[i] || !state.field.valid[i]) continue;
+        const mx = (x + 0.5 - g.W / 2) * g.cellSizeM;
+        const my = (g.H / 2 - y - 0.5) * g.cellSizeM;
+        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
+        if (!p) continue;
+        const d2 = (p[0] - px) * (p[0] - px) + (p[1] - py) * (p[1] - py);
+        if (d2 < bd) { bd = d2; best = { i, mx, my }; }
+      }
+    return best;
+  }
+
+  /* ======================================================================
      4. INTERACTION
      ====================================================================== */
   let dragging = false, lastPt = null, pinchDist = 0;
@@ -580,7 +932,9 @@
     clearTimeout(longPressTimer);
     longPressTimer = setTimeout(() => {
       if (!dragging || Math.hypot(lastPt[0] - px0, lastPt[1] - py0) > 8) return;
-      const s = sampleAtScreen(px0, py0);
+      const s = state.viewMode === '3d'
+        ? pickCell3D(px0, py0)
+        : sampleAtScreen(px0, py0);
       if (s && state.mask && state.mask[s.i] &&
           state.field && state.field.valid[s.i]) {
         state.pin = [s.mx, s.my];
@@ -594,13 +948,21 @@
     const [px, py] = eventPos(ev);
     if (dragging && lastPt) {
       cancelLongPress();
-      state.view.ox += px - lastPt[0];
-      state.view.oy += py - lastPt[1];
+      const dx = px - lastPt[0], dy = py - lastPt[1];
+      if (state.viewMode === '3d') {
+        // orbit: yaw free, pitch clamped 10..70°
+        state.v3.yaw = (state.v3.yaw + dx * 0.35) % 360;
+        state.v3.pitch = Math.max(10, Math.min(70, state.v3.pitch - dy * 0.25));
+      } else {
+        state.view.ox += dx;
+        state.view.oy += dy;
+      }
       lastPt = [px, py];
       render();
       tip.style.display = 'none';
       return;
     }
+    if (state.viewMode === '3d') { tip.style.display = 'none'; return; }
     updateTooltip(px, py, ev.clientX, ev.clientY);
   });
   canvas.addEventListener('pointerup', (ev) => {
@@ -610,11 +972,17 @@
        Math.abs(eventPos(ev)[1] - lastPt[1]) > 4);
     dragging = false; lastPt = null;
     cancelLongPress();
-    if (!wasDrag && activePtrs === 0) handleTap(eventPos(ev));
+    if (!wasDrag && activePtrs === 0) handleTap(eventPos(ev), ev.clientX, ev.clientY);
   });
 
   canvas.addEventListener('wheel', (ev) => {
     ev.preventDefault();
+    if (state.viewMode === '3d') {
+      state.v3.dist = Math.max(25, Math.min(180,
+        state.v3.dist * (ev.deltaY < 0 ? 0.9 : 1 / 0.9)));
+      render();
+      return;
+    }
     const [px, py] = eventPos(ev);
     const k = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
     zoomAt(px, py, k);
@@ -627,9 +995,14 @@
       const d = Math.hypot(ev.touches[0].clientX - ev.touches[1].clientX,
                            ev.touches[0].clientY - ev.touches[1].clientY);
       if (pinchDist) {
-        const [cx, cy] = eventPos({ clientX: (ev.touches[0].clientX + ev.touches[1].clientX) / 2,
-                                    clientY: (ev.touches[0].clientY + ev.touches[1].clientY) / 2 });
-        zoomAt(cx, cy, d / pinchDist);
+        if (state.viewMode === '3d') {
+          state.v3.dist = Math.max(25, Math.min(180,
+            state.v3.dist * pinchDist / d));
+        } else {
+          const [cx, cy] = eventPos({ clientX: (ev.touches[0].clientX + ev.touches[1].clientX) / 2,
+                                      clientY: (ev.touches[0].clientY + ev.touches[1].clientY) / 2 });
+          zoomAt(cx, cy, d / pinchDist);
+        }
       }
       pinchDist = d;
     }
@@ -672,10 +1045,25 @@
   }
 
   // Tap: 1st tap sets ball (if putt mode armed), else shows tooltip anchor.
-  function handleTap([px, py]) {
-    const s = sampleAtScreen(px, py);
+  // In 3D, a tap always shows the slope/fall tooltip at the picked quad.
+  function handleTap([px, py], clientX = null, clientY = null) {
+    const s = state.viewMode === '3d'
+      ? pickCell3D(px, py)
+      : sampleAtScreen(px, py);
     if (!s || !state.mask[s.i] || !state.field.valid[s.i]) return;
-    const [mx, my] = fromScreen(px, py);
+    if (state.viewMode === '3d') {
+      const pct = GreenMapCore.slopePctAt(state.field, s.i);
+      const brg = GreenMapCore.fallBearingDeg(state.field.gx[s.i],
+        state.field.gy[s.i]);
+      tip.innerHTML = `<b>Slope ${pct.toFixed(1)}%</b> · falls ${GreenMapCore.bearingLabel(brg)} (${brg.toFixed(0)}°)`;
+      tip.style.display = 'block';
+      tip.style.left = ((clientX ?? px) + 14) + 'px';
+      tip.style.top = ((clientY ?? py) + 14) + 'px';
+      setTimeout(() => { tip.style.display = 'none'; }, 2600);
+    }
+    const [mx, my] = state.viewMode === '3d'
+      ? [s.mx, s.my]
+      : fromScreen(px, py);
     if (armBallNext) {
       state.ball = [mx, my];
       state.showPutt = true;
@@ -738,6 +1126,32 @@
     });
     document.querySelector(`.gm-layer-btn[data-layer="both"]`).classList.add('active');
 
+    // 2D | 3D view toggle — keeps pin/ball/mode state; just re-renders.
+    function setViewMode(v) {
+      state.viewMode = v === '3d' ? '3d' : '2d';
+      document.querySelectorAll('.gm-view-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.view === state.viewMode));
+      document.getElementById('gm-exag-wrap').style.display =
+        state.viewMode === '3d' ? 'inline-flex' : 'none';
+      setStatus(state.viewMode === '3d'
+        ? '3D green view — drag = orbit · pinch/scroll = zoom · tap = readout'
+        : '2D map');
+      render();
+    }
+    document.querySelectorAll('.gm-view-btn').forEach(btn => {
+      btn.addEventListener('click', () => setViewMode(btn.dataset.view));
+    });
+
+    // Vertical exaggeration slider (3D only) — rebuild mesh, not per frame.
+    const exagEl = document.getElementById('gm-exag');
+    exagEl.addEventListener('input', () => {
+      state.v3.exag = parseFloat(exagEl.value);
+      document.getElementById('gm-exag-val').textContent =
+        state.v3.exag + '×';
+      buildScene();
+      if (state.viewMode === '3d') render();
+    });
+
     document.getElementById('gm-mode').addEventListener('change', (ev) => {
       state.mode = ev.target.value === 'elev' ? 'elev' : 'slope';
       buildHeatImage();
@@ -758,7 +1172,10 @@
       render();
     });
     document.getElementById('gm-recenter').addEventListener('click', () => {
-      fitView(); render(); setStatus('View reset');
+      if (state.viewMode === '3d') {
+        state.v3.yaw = 0; state.v3.pitch = 35; state.v3.dist = 62;
+      } else fitView();
+      render(); setStatus('View reset');
     });
   }
 
