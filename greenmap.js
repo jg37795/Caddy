@@ -1558,6 +1558,7 @@
   const ptrs = new Map();          // pointerId -> [x, y]
   let pinchStartDist = 0;
   let pinchStartDist3D = 0;
+  let pinchStartScale2D = 0;       // v-fix: 2D anchor — no compounding
 
   canvas.addEventListener('pointerdown', (ev) => {
     ptrs.set(ev.pointerId, eventPos(ev));
@@ -1569,6 +1570,7 @@
       pinchStartDist3D =
         (state.viewMode === '3d' || state.viewMode === 'hole')
           ? state.v3.dist : 0;
+      pinchStartScale2D = state.viewMode === '2d' ? state.view.scale : 0;
     }
   });
   canvas.addEventListener('pointermove', (ev) => {
@@ -1585,12 +1587,18 @@
             pinchStartDist3D / k));
         render();   // v2-fix: paint NOW — the rAF scheduler was dropping this
       } else {
-        // 2D: zoom about the midpoint
+        // 2D: absolute zoom from gesture start about the midpoint
+        // (v-fix: was compounding k against current scale each event)
         const cx = (pts[0][0] + pts[1][0]) / 2, cy = (pts[0][1] + pts[1][1]) / 2;
-        zoomAt(cx, cy, k);
-        return;   // zoomAt already renders
+        const base = state.baseScale || (state.baseScale = state.view.scale);
+        const ns = Math.max(base * 0.3, Math.min(base * 8,
+                       pinchStartScale2D * k));
+        const applied = ns / state.view.scale;
+        state.view.ox = cx + (state.view.ox - cx) * applied;
+        state.view.oy = cy + (state.view.oy - cy) * applied;
+        state.view.scale = ns;
+        render();
       }
-      render();   // v-fix: actually paint the new camera distance
     }
   });
   const ptrEnd = (ev) => {
