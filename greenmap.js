@@ -516,8 +516,20 @@
     heatCanvas.getContext('2d').putImageData(img, 0, 0);
   }
 
+  // v-fix: coalesced render scheduling — during drags/pinches multiple input
+  // events land per frame; this guarantees at most one full redraw per frame.
+  let rafPending = false;
   function render() {
-    if (state.viewMode === '3d') { render3D(); return; }
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      if (state.viewMode === '3d') render3D();
+      else render2D();
+    });
+  }
+
+  function render2D() {
     const g = state.grid;
     ctx.fillStyle = '#0e1411';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -951,8 +963,9 @@
       const dx = px - lastPt[0], dy = py - lastPt[1];
       if (state.viewMode === '3d') {
         // orbit: yaw free, pitch clamped 10..70°
-        state.v3.yaw = (state.v3.yaw + dx * 0.35) % 360;
-        state.v3.pitch = Math.max(10, Math.min(70, state.v3.pitch - dy * 0.25));
+        // v-fix: natural feel — drag DOWN tilts camera DOWN (pitch decreases)
+        state.v3.yaw = (state.v3.yaw - dx * 0.35) % 360;
+        state.v3.pitch = Math.max(10, Math.min(70, state.v3.pitch + dy * 0.25));
       } else {
         state.view.ox += dx;
         state.view.oy += dy;
@@ -996,8 +1009,11 @@
                            ev.touches[0].clientY - ev.touches[1].clientY);
       if (pinchDist) {
         if (state.viewMode === '3d') {
+          // v-fix: smooth pinch — apply the ratio against a gesture-start
+          // reference distance, not per-event compounding jitter.
+          if (state.v3.gestureDist == null) state.v3.gestureDist = state.v3.dist;
           state.v3.dist = Math.max(25, Math.min(180,
-            state.v3.dist * pinchDist / d));
+            state.v3.gestureDist * (pinchDist / d)));
         } else {
           const [cx, cy] = eventPos({ clientX: (ev.touches[0].clientX + ev.touches[1].clientX) / 2,
                                       clientY: (ev.touches[0].clientY + ev.touches[1].clientY) / 2 });
@@ -1007,7 +1023,10 @@
       pinchDist = d;
     }
   }, { passive: false });
-  canvas.addEventListener('touchend', () => { pinchDist = 0; });
+  canvas.addEventListener('touchend', () => {
+    pinchDist = 0;
+    state.v3.gestureDist = null;   // reset gesture reference
+  });
 
   function zoomAt(px, py, k) {
     const base = state.baseScale || (state.baseScale = state.view.scale);
