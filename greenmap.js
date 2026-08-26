@@ -2031,11 +2031,12 @@
       cancelLongPress();
       const dx = px - lastPt[0], dy = py - lastPt[1];
       if (state.viewMode === '3d' || state.viewMode === 'hole') {
-        // orbit: yaw free, pitch clamped 10..70°
-        // v-fix: natural feel — drag DOWN tilts camera DOWN (pitch decreases);
-        // drag RIGHT rotates view left-to-right naturally.
+        // orbit: yaw free, pitch clamped 22..70° (v-fix: min raised from 10 —
+        // below ~20° the camera looks edge-on through the bowl and the far
+        // skirt interior shows through as a hollow shell).
+        // Drag DOWN tilts camera DOWN; drag RIGHT rotates view naturally.
         state.v3.yaw = (state.v3.yaw + dx * 0.35) % 360;
-        state.v3.pitch = Math.max(10, Math.min(70, state.v3.pitch + dy * 0.25));
+        state.v3.pitch = Math.max(22, Math.min(70, state.v3.pitch + dy * 0.25));
       } else {
         state.view.ox += dx;
         state.view.oy += dy;
