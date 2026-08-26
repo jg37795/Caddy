@@ -833,8 +833,8 @@
     }
 
     // Surface break arrows (downhill), drawn on top of the mesh.
-    // v-fix: respect the layer toggle (shading hides arrows in 3D too).
-    if (state.layer !== 'arrows') {
+    // v2 fix: arrows show in 'both' and 'arrows' modes; 'shading' hides them.
+    if (state.layer !== 'shading') {
       const dpr = window.devicePixelRatio || 1;
     ctx.lineCap = 'round';
     for (const a of state.meshArrows) {
@@ -1017,8 +1017,11 @@
 
   canvas.addEventListener('touchstart', (ev) => {
     if (ev.touches.length === 2 && state.viewMode === '3d') {
-      // v-fix: capture gesture reference at pinch START (not first move).
-      state.v3.gestureDist = state.v3.dist;
+      // v2: capture reference at pinch start; only reset if no pinch active
+      // (iOS can fire spurious touchstart/touchend pairs mid-gesture).
+      if (!pinchDist) state.v3.gestureDist = state.v3.dist;
+      pinchDist = Math.hypot(ev.touches[0].clientX - ev.touches[1].clientX,
+                             ev.touches[0].clientY - ev.touches[1].clientY);
     }
   }, { passive: false });
   canvas.addEventListener('touchmove', (ev) => {
@@ -1029,7 +1032,7 @@
                            ev.touches[0].clientY - ev.touches[1].clientY);
       if (pinchDist) {
         if (state.viewMode === '3d') {
-          // v-fix: smooth pinch — ratio against gesture-start reference.
+          // v2: smooth anchored zoom — ratio against gesture-start distance.
           if (state.v3.gestureDist == null) state.v3.gestureDist = state.v3.dist;
           state.v3.dist = Math.max(25, Math.min(180,
             state.v3.gestureDist * (pinchDist / d)));
