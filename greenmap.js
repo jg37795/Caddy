@@ -558,8 +558,9 @@
   /* ======================================================================
      4. INTERACTION
      ====================================================================== */
-  const tip = document.getElementById('gm-tip');
   let dragging = false, lastPt = null, pinchDist = 0;
+  let activePtrs = 0;   // v-fix: suppress pan-anchor updates during pinch setup
+  const tip = document.getElementById('gm-tip');
 
   function eventPos(ev) {
     const r = canvas.getBoundingClientRect();
@@ -568,6 +569,10 @@
   }
 
   canvas.addEventListener('pointerdown', (ev) => {
+    activePtrs++;
+    // A second finger landing means a pinch is starting — drop the pan
+    // anchor NOW so finger 2's pointermove can't teleport the view.
+    if (activePtrs > 1) { dragging = false; lastPt = null; cancelLongPress(); return; }
     dragging = true; lastPt = eventPos(ev);
     canvas.setPointerCapture(ev.pointerId);
     // Long-press (500ms, no drag) moves the pin to the pressed spot.
@@ -599,12 +604,13 @@
     updateTooltip(px, py, ev.clientX, ev.clientY);
   });
   canvas.addEventListener('pointerup', (ev) => {
+    activePtrs = Math.max(0, activePtrs - 1);
     const wasDrag = dragging && lastPt &&
       (Math.abs(eventPos(ev)[0] - lastPt[0]) > 4 ||
        Math.abs(eventPos(ev)[1] - lastPt[1]) > 4);
     dragging = false; lastPt = null;
     cancelLongPress();
-    if (!wasDrag) handleTap(eventPos(ev));
+    if (!wasDrag && activePtrs === 0) handleTap(eventPos(ev));
   });
 
   canvas.addEventListener('wheel', (ev) => {
