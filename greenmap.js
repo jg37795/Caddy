@@ -1043,7 +1043,9 @@
         // 2D: zoom about the midpoint
         const cx = (pts[0][0] + pts[1][0]) / 2, cy = (pts[0][1] + pts[1][1]) / 2;
         zoomAt(cx, cy, k);
+        return;   // zoomAt already renders
       }
+      render();   // v-fix: actually paint the new camera distance
     }
   });
   const ptrEnd = (ev) => {
