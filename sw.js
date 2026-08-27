@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.77'; // + green maps: USGS 3DEP slope arrows & tee-to-green delta
+const CACHE_VERSION = 'v1.0.78'; // + 3D: grid floor drawn before green surface (no see-through)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

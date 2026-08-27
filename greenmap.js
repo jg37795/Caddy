@@ -1697,6 +1697,14 @@
     const cam = currentCam();
     const M = state.mesh;
 
+    // v-fix(seethrough): the base-plane grid floor extends UNDER the green,
+    // so it must be painted BEFORE the surface quads. It was previously drawn
+    // after them, so its translucent grid lines showed through the green as
+    // if the surface were clear glass. (Skirt walls still paint after — they
+    // are nearer than the surface rim at normal orbit pitches.)
+    const bpts = greenBoundaryPts();
+    if (bpts) drawGridFloor(cam, bpts);
+
     // Project all quad corners once; painter sort by mean depth (far first).
     // v-fix(precision): backface culling — quads whose surface normal points
     // AWAY from the camera are skipped. At low orbit angles the far rim's
@@ -1769,13 +1777,11 @@
 
     // 18Birdies dressing: contour iso-lines on the surface…
     drawContours3D(cam);
-    // …then the base-plane grid floor and the gray skirt walls (floor first
-    // so the nearer skirt walls paint over it — painter's algorithm).
-    const bpts = greenBoundaryPts();
-    if (bpts) {
-      drawGridFloor(cam, bpts);
+    // Grid floor was moved BEFORE the surface quads (v-fix above) so its
+    // translucent lines can't show through the green. The skirt walls still
+    // draw after — at normal pitches they sit nearer than the surface rim.
+    if (bpts)
       drawSkirt(cam, bpts);
-    }
 
     // Hole view: green-zone outline sits at the green-centre offset within
     // the corridor frame, plus a tee marker. Pin/putt stay green-view only.
