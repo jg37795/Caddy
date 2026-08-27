@@ -623,8 +623,15 @@
         // surface silhouette follows the real outline to ~cellSize/12 instead
         // of the jagged grid-cell staircase seen from the side. Interior
         // cells (all 4 corners masked) keep the fast single-quad path.
+        // v-fix(nan-corner): a corner is null when its cell is masked OR its
+        // elevation is non-finite (LiDAR void). Test the corner objects for
+        // existence BEFORE indexing mask[c[1]] — v1.0.87 dereferenced a null
+        // corner here and crashed the whole mesh build whenever a void sat
+        // beside valid cells inside the polygon.
         if (O.polyLocalM && O.polyLocalM.length > 2 &&
-            (!mask[c00[1]] || !mask[c10[1]] || !mask[c01[1]] || !mask[c11[1]])) {
+            (!c00 || !c10 || !c01 || !c11 ||
+             !mask[c00[1]] || !mask[c10[1]] ||
+             !mask[c01[1]] || !mask[c11[1]])) {
           const SUB = 6;
           const subs = [];
           for (let sy = 0; sy < SUB; sy++)
@@ -819,7 +826,9 @@
     mode: 'slope',           // slope | elev — color ramp mode
     view: { scale: null, ox: 0, oy: 0 },   // set after first render
     grid: null, field: null, mask: null, bbox: null,
-    polyLocal: null,         // polygon in local metres (null = ellipse fallback)
+    polyLocal: null,         // boundary polygon in local metres (always set
+                             // after load: OSM outline or synthetic ellipse)
+    polySource: null,        // 'osm' | 'ellipse' — where polyLocal came from
     elevRange: [0, 1],       // min/max elevation inside mask (elev mode)
     pin: null,               // local metre coords of pin marker
     ball: null,              // local metre coords for putt preview
@@ -867,6 +876,7 @@
     state.grid = ds.grid; state.field = ds.field; state.mask = ds.mask;
     state.bbox = ds.bbox; state.elevRange = ds.elevRange;
     state.polyLocal = ds.polyLocal;
+    state.polySource = ds.polySource || state.polySource;
     state.mesh = ds.mesh; state.meshArrows = ds.arrows || [];
     return true;
   }
@@ -918,7 +928,22 @@
     const field = GreenMapCore.computeGradientField(
       elev.grid, elev.W, elev.H, elev.cellSizeM, (i) => !elev.validMask || elev.validMask[i]);
 
-    // Clip mask: real polygon if we got one (in local metres), else ellipse.
+    // Clip mask: real polygon if we got one (in local metres), else a
+    // synthetic 48-point ellipse POLYGON. v-fix(fallback-poly): the fallback
+    // previously fed only a cell-centre mask to the renderer, so the surface
+    // rim was a grid staircase — sawtooth jaggies at glancing orbit angles.
+    // Feeding the same smooth polygon the OSM path uses lets the v1.0.87 rim
+    // subdivision run here too: one boundary pipeline for both paths.
+    if (!polyLL) {
+      const rM = SPAN_M * 0.36;
+      const poly = [];
+      for (let a = 0; a < 48; a++) {
+        const th = a / 48 * Math.PI * 2;
+        poly.push([Math.cos(th) * rM, Math.sin(th) * rM]);
+      }
+      state.polyLocal = poly;
+      state.polySource = 'ellipse';
+    }
     let mask = null;
     if (polyLL) {
       const polyLocal = polyLL.map(([lon, la]) => [
@@ -926,16 +951,11 @@
         (la - state.lat) * 111320
       ]);
       state.polyLocal = polyLocal;
+      state.polySource = 'osm';
       mask = GreenMapCore.polyMask(polyLocal, elev.W, elev.H, elev.cellSizeM);
     } else {
-      mask = new Uint8Array(elev.W * elev.H);
-      const rM = SPAN_M * 0.36;
-      for (let y = 0; y < elev.H; y++)
-        for (let x = 0; x < elev.W; x++) {
-          const mx = (x + 0.5 - elev.W / 2) * elev.cellSizeM;
-          const my = (elev.H / 2 - (y + 0.5)) * elev.cellSizeM;
-          if ((mx * mx + my * my) / (rM * rM) <= 1) mask[y * elev.W + x] = 1;
-        }
+      mask = GreenMapCore.polyMask(state.polyLocal,
+        elev.W, elev.H, elev.cellSizeM);
     }
     state.mask = mask;
     state.field = field;
@@ -974,7 +994,8 @@
     // Register the green dataset, then start the corridor fetch in parallel.
     state.datasets.green = { grid: state.grid, field: state.field,
       mask: state.mask, bbox: state.bbox, elevRange: state.elevRange,
-      polyLocal: state.polyLocal, mesh: null, arrows: [] };
+      polyLocal: state.polyLocal, polySource: state.polySource,
+      mesh: null, arrows: [] };
     const t0 = performance.now();
     buildScene();
     fitView();
@@ -983,14 +1004,15 @@
     loadCorridor();   // fire-and-forget; Hole view activates when ready
     console.log('[greenmap] load', `mode=${state.mode}`,
       `polyVerts=${state.polyLocal ? state.polyLocal.length : 0}`,
-      state.polyLocal ? '' : 'ellipse fallback',
+      state.polySource === 'ellipse' ? 'ellipse fallback' : 'osm polygon',
       `renderMs=${(performance.now() - t0).toFixed(1)}`);
     console.log('[greenmap] grid', `${elev.W}x${elev.H}`,
       'cellSize(m)', elev.cellSizeM.toFixed(3),
       `valid ${(100 * nValid / mask.length).toFixed(0)}%`,
       `in-mask ${nMasked}`, `mean slope ${(sumS / Math.max(1, nValid)).toFixed(2)}%`,
       `max slope ${maxS.toFixed(1)}%`);
-    status.textContent = `${state.polyLocal ? 'OSM green shape' : 'ellipse fallback'} · ` +
+    status.textContent = `${state.polySource === 'ellipse'
+      ? 'ellipse fallback' : 'OSM green shape'} · ` +
       `${(sumS / Math.max(1, nValid)).toFixed(1)}% mean slope`;
   }
 
@@ -1055,7 +1077,7 @@
 
       // Dataset record (mesh + arrows built by buildHoleScene below).
       const ds = {
-        grid: eg.grid, field, mask: maskAll, bbox: bb,
+        grid: eg, field, mask: maskAll, bbox: bb,
         elevRange: state.elevRange, polyLocal: null,
         mesh: null, arrows: [],
         eg, zoneMask, spanM, centerLL: [(w + e) / 2, (s + n) / 2],
@@ -1101,8 +1123,12 @@
     const ds = state.datasets.hole;
     if (!ds || !ds.grid) return;
     const [lo, hi] = ds.elevRange || [0, 1];
-    const zone = ds.zoneMask, g = ds.grid;
-    ds.mesh = GreenMapCore.buildMesh3D(g, ds.grid.W, ds.grid.H,
+    const zone = ds.zoneMask, g = ds.eg.grid;
+    // v-fix(corridor-grid): ds.grid is the ElevGrid OBJECT (like green view's
+    // state.grid) so surfZ3/picking work in hole view; mesh + colour reads use
+    // ds.eg.grid (the raw Float32Array). Previously ds.grid was the bare array
+    // — buildMesh3D got undefined dims and Hole view spun on "Preparing…".
+    ds.mesh = GreenMapCore.buildMesh3D(g, ds.eg.W, ds.eg.H,
       ds.eg.cellSizeM, ds.mask, ds.elevRange, state.v3.exag, state.mode,
       {
         smooth: true, ao: true, aoRadius: 4,
@@ -1117,11 +1143,11 @@
               return GreenMapCore.elevationColorRainbow(
                 (zMid - lo) / Math.max(1e-6, hi - lo));
             // Slope % from raw neighbours (cheap central difference).
-            const W = ds.grid.W, cs = ds.eg.cellSizeM;
+            const W = ds.eg.W, cs = ds.eg.cellSizeM;
             const ix = i % W, iy = (i / W) | 0;
             const zx1 = ix < W - 1 ? g[i + 1] : g[i];
             const zx0 = ix > 0 ? g[i - 1] : g[i];
-            const zy1 = iy < ds.grid.H - 1 ? g[i + W] : g[i];
+            const zy1 = iy < ds.eg.H - 1 ? g[i + W] : g[i];
             const zy0 = iy > 0 ? g[i - W] : g[i];
             const slp = Math.hypot(zx1 - zx0, zy1 - zy0) / (2 * cs) * 100;
             return GreenMapCore.slopeColor(slp);
@@ -1136,16 +1162,16 @@
     // Downhill arrows over the corridor (sparse — bigger step than 2D).
     const arr = [];
     const step = 5;
-    for (let y = 1; y < ds.grid.H - 1; y += step)
-      for (let x = 1; x < ds.grid.W - 1; x += step) {
-        const i = y * ds.grid.W + x;
+    for (let y = 1; y < ds.eg.H - 1; y += step)
+      for (let x = 1; x < ds.eg.W - 1; x += step) {
+        const i = y * ds.eg.W + x;
         if (!ds.mask[i] || !ds.field.valid[i]) continue;
         const gxv = ds.field.gx[i], gyv = ds.field.gy[i];
         const mag = Math.hypot(gxv, gyv);
         if (mag < 1e-5) continue;
         arr.push({
-          mx: (x + 0.5 - ds.grid.W / 2) * ds.eg.cellSizeM,
-          my: (ds.grid.H / 2 - y - 0.5) * ds.eg.cellSizeM,
+          mx: (x + 0.5 - ds.eg.W / 2) * ds.eg.cellSizeM,
+          my: (ds.eg.H / 2 - y - 0.5) * ds.eg.cellSizeM,
           dxm: -gxv / mag, dym: gyv / mag,
           lenM: 0.9 + Math.min(2.4, mag * 100 / 4.0),
           slopePct: mag * 100
@@ -1415,6 +1441,25 @@
           const sy = Math.min(g.H - 1, (y / 2) | 0);
           mMask[y * mW + x] = state.mask[sy * g.W + sx];
         }
+      // v-fix(fine-mask-poly): derive the FINE mask from the true boundary
+      // polygon directly. Nearest-upsampling the coarse (cell-centre) mask
+      // under-covers the polygon by up to one COARSE cell wherever the
+      // outline bulges past masked coarse centres — the mesh had no cells
+      // there at all, so no amount of boundary-cell subdivision could fill
+      // them and the rim kept macro teeth (dark background showing through
+      // at glancing orbit angles). Polygon-first mask + finite-elevation
+      // check gives the subdividing rim full coverage to the true outline.
+      if (state.polyLocal && state.polyLocal.length > 2) {
+        const P = state.polyLocal;
+        for (let y = 0; y < mH; y++)
+          for (let x = 0; x < mW; x++) {
+            const i = y * mW + x;
+            const mx = (x + 0.5 - mW / 2) * cellM;
+            const my = (mH / 2 - y - 0.5) * cellM;
+            mMask[i] = (GreenMapCore.pointInPoly(mx, my, P) &&
+                        Number.isFinite(mg[i])) ? 1 : 0;
+          }
+      }
       void cellM;
     }
     state.mesh = GreenMapCore.buildMesh3D(
@@ -2168,11 +2213,14 @@
            const dsH = state.datasets.hole;
            if (!dsH || !dsH.grid) return false;
            const [gox, goy] = dsH.gOff;
-           const ix = Math.round((s.mx + gox) / dsH.eg.cellSizeM + dsH.grid.W / 2);
-           const iy = Math.round(dsH.grid.H / 2 -
-             (s.my + goy) / dsH.eg.cellSizeM);
-           return ix >= 0 && iy >= 0 && ix < dsH.grid.W && iy < dsH.grid.H &&
-             dsH.zoneMask[iy * dsH.grid.W + ix] === 1;
+           void gox; void goy;
+           // s.mx/s.my are corridor-local already (pin storage below does
+           // s.mx - gox to convert to green-local) — do NOT re-add gOff here.
+           const ix = Math.round(s.mx / dsH.eg.cellSizeM + dsH.eg.W / 2);
+           const iy = Math.round(dsH.eg.H / 2 -
+             s.my / dsH.eg.cellSizeM);
+           return ix >= 0 && iy >= 0 && ix < dsH.eg.W && iy < dsH.eg.H &&
+             dsH.zoneMask[iy * dsH.eg.W + ix] === 1;
          })());
       if (s && zoneOK && state.mask && state.mask[s.i] &&
           state.field && state.field.valid[s.i]) {
@@ -2473,10 +2521,13 @@
           document.querySelectorAll('.gm-view-btn').forEach(b =>
             b.classList.toggle('active', b.dataset.view === '3d'));
           setStatus(h.msg);
+        } else {
+          // Corridor still fetching — visible loading state + auto-land when
+          // loadCorridor completes (it re-renders into hole view).
+          // v-fix: was unconditional below, overwriting the ready-status set
+          // by the success branch above every time Hole was tapped.
+          setStatus('Preparing hole flyover…');
         }
-        // Corridor still fetching — visible loading state + auto-land when
-        // loadCorridor completes (it re-renders into hole view).
-        setStatus('Preparing hole flyover…');
         render();
       } else {
         if (state.active !== 'green') {

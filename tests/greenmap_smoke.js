@@ -574,6 +574,56 @@ console.log('6. 3D orbit math — camera, projection, mesh');
     console.error('FAIL - live smoke:', e.message);
   }
 
+  /* ---- 6. v1.0.88 rim regression: NaN corner + ellipse polygon fallback -- */
+  {
+    console.log('6. v1.0.88 rim — NaN corner crash + ellipse polygon fallback');
+    // 6a. A masked NaN cell beside valid cells must not throw when a boundary
+    //     polygon is set (v1.0.87 regression: null corner deref in the new
+    //     rim-subdivision branch crashed the whole mesh build).
+    {
+      const W = 8, H = 8, cs = 0.625;
+      const grid = new Float32Array(W * H).fill(10);
+      const mask = new Uint8Array(W * H).fill(1);
+      grid[3 * W + 3] = NaN;                    // masked void, valid ring
+      let threw = null, mesh = null;
+      try {
+        mesh = GM.buildMesh3D(grid, W, H, cs, mask, [9, 11], 8, 'slope', {
+          smooth: true, ao: false,
+          polyLocalM: [[-2, -2], [2, -2], [2, 2], [-2, 2]] });
+      } catch (e) { threw = e; }
+      check('NaN masked cell + polygon does not throw', !threw,
+        threw && threw.message);
+      check('NaN-corner mesh still produced quads',
+        !!mesh && mesh.count > 0, mesh && mesh.count);
+    }
+    // 6b. Ellipse fallback: a 48-pt polygon must survive the mesh build and
+    //     trigger rim subdivision (denser than the plain cell grid), so the
+    //     fallback path gets the same smooth rim as the OSM-polygon path.
+    {
+      const R = 40 * 0.36;
+      const poly = [];
+      for (let a = 0; a < 48; a++) {
+        const th = a / 48 * Math.PI * 2;
+        poly.push([Math.cos(th) * R, Math.sin(th) * R]);
+      }
+      check('fallback polygon has 48 points', poly.length === 48, poly.length);
+      const W = 64, H = 64, cs = 0.625;
+      const grid = new Float32Array(W * H).fill(10);
+      const mask = GM.polyMask(poly, W, H, cs);
+      let threw = null, mesh = null;
+      try {
+        mesh = GM.buildMesh3D(grid, W, H, cs, mask, [9, 11], 8, 'slope', {
+          smooth: true, ao: false, polyLocalM: poly });
+      } catch (e) { threw = e; }
+      check('ellipse-polygon mesh builds without error',
+        !threw && !!mesh && mesh.count > 0, threw && threw.message);
+      const plain = GM.buildMesh3D(grid, W, H, cs, mask, [9, 11], 8, 'slope',
+        { smooth: true, ao: false });
+      check('rim subdivision fires on fallback path', mesh.count > plain.count,
+        (mesh && mesh.count) + ' vs ' + (plain && plain.count));
+    }
+  }
+
   console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL CHECKS PASSED');
   process.exit(failures ? 1 : 0);
 })();

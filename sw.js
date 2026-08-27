@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.87'; // + 3D: white outline removed; rim subdivided to true polygon — smooth silhouette
+const CACHE_VERSION = 'v1.0.88'; // + 3D rim: polygon-first fine mask + NaN-corner crash fix + hole-view corridor mesh repair
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

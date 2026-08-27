@@ -17,7 +17,7 @@ function el(id) {
       createLinearGradient: () => ({ addColorStop() {} }),
       createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
       putImageData() {}, setLineDash() {}, drawImage() {},
-      fillText() {}, fillStyle: "", strokeStyle: "", lineWidth: 1, font: "", textAlign: "",
+      fillText() {}, strokeText() {}, fillStyle: "", strokeStyle: "", lineWidth: 1, font: "", textAlign: "",
       imageSmoothingEnabled: true, imageSmoothingQuality: 'high',
       lineJoin: '', lineCap: ''
     }),
