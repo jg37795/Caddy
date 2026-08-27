@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.86'; // + 3D: skirt inset under surface (no rim gaps); wider occlusion tolerance (stable outline)
+const CACHE_VERSION = 'v1.0.87'; // + 3D: white outline removed; rim subdivided to true polygon — smooth silhouette
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

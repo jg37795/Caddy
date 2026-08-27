@@ -544,7 +544,10 @@
   GreenMapCore.buildMesh3D = function (grid, W, H, cellSizeM, mask,
                                        elevRange, exag, mode, opts) {
     const O = Object.assign({ smooth: true, ao: true, aoRadius: 3,
-                              colorFn: null }, opts || {});
+                              colorFn: null,
+                              // v-fix(rim-precision): true boundary polygon
+                              // (local metres) for edge-cell subdivision.
+                              polyLocalM: null }, opts || {});
     let zmin = Infinity;
     for (let i = 0; i < grid.length; i++)
       if (mask[i] && Number.isFinite(grid[i]) && grid[i] < zmin) zmin = grid[i];
@@ -615,6 +618,36 @@
           (corners[0][0] + corners[1][0] + corners[2][0] + corners[3][0]) / 4,
           (corners[0][1] + corners[1][1] + corners[2][1] + corners[3][1]) / 4,
           (corners[0][2] + corners[1][2] + corners[2][2] + corners[3][2]) / 4];
+        // v-fix(rim-precision): subdivide boundary cells 6×6 and keep only
+        // sub-quads whose centre lies inside the true boundary polygon — the
+        // surface silhouette follows the real outline to ~cellSize/12 instead
+        // of the jagged grid-cell staircase seen from the side. Interior
+        // cells (all 4 corners masked) keep the fast single-quad path.
+        if (O.polyLocalM && O.polyLocalM.length > 2 &&
+            (!mask[c00[1]] || !mask[c10[1]] || !mask[c01[1]] || !mask[c11[1]])) {
+          const SUB = 6;
+          const subs = [];
+          for (let sy = 0; sy < SUB; sy++)
+            for (let sx = 0; sx < SUB; sx++) {
+              const sxa = cxm(x + sx / SUB), sxb = cxm(x + (sx + 1) / SUB);
+              const sya = cym(y + sy / SUB), syb = cym(y + (sy + 1) / SUB);
+              const scx = (sxa + sxb) / 2, scy = (sya + syb) / 2;
+              if (!GreenMapCore.pointInPoly(scx, scy, O.polyLocalM)) continue;
+              // Bilinear elevation from the 4 (edge-filled) cell corners.
+              const fx = (sx + 0.5) / SUB, fy = (sy + 0.5) / SUB;
+              const topZ = f(c00)[0] + (f(c10)[0] - f(c00)[0]) * fx;
+              const botZ = f(c01)[0] + (f(c11)[0] - f(c01)[0]) * fx;
+              const zz = topZ + (botZ - topZ) * fy;
+              const sz = (zz - zmin) * exag;
+              subs.push({
+                v: [[sxa, sya, sz], [sxb, sya, sz],
+                    [sxb, syb, sz], [sxa, syb, sz]],
+                col: col.map(Math.round), vc: corners, n });
+            }
+          if (subs.length) { quads.push(...subs); continue; }
+          // Thin sliver: no sub-centre inside — keep the whole cell so the
+          // rim never opens a hole.
+        }
         quads.push({ v: [v00, v10, v11, v01],
                      col: col.map(Math.round),
                      vc: corners, n });
@@ -1074,6 +1107,9 @@
       {
         smooth: true, ao: true, aoRadius: 4,
         elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t),
+        // v-fix(rim-precision): true polygon for edge-cell subdivision.
+        polyLocalM: (state.datasets.green && state.datasets.green.polyLocal) ||
+                    state.polyLocal || null,
         colorFn: (i, zMid) => {
           if (zone && zone[i]) {
             // Active-ramp colour for green cells (3D → rainbow topo).
@@ -1385,7 +1421,9 @@
       mg, mW, mH, cellM, mMask, state.elevRange,
       state.v3.exag, state.mode, { smooth: true, ao: true, aoRadius: aoR,
         // 18Birdies look: 3D views default to the classic topo rainbow.
-        elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t) });
+        elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t),
+        // v-fix(rim-precision): true boundary polygon for edge subdivision.
+        polyLocalM: state.polyLocal || null });
     ds.mesh = state.mesh;
     // Downhill arrows on the surface. v2: sparse & bold like 18Birdies —
     // ~every 8th refined cell (≈40 arrows), uniform bold styling, not fuzz.
@@ -1943,49 +1981,11 @@
       drawGridFloor(cam, bpts);   // re-cover floor lines smeared by underlay
     }
 
-    // Hole view: green-zone outline sits at the green-centre offset within
-    // the corridor frame, plus a tee marker. Pin/putt stay green-view only.
+    // Hole view: tee marker only. The white green-zone outline was removed
+    // (v1.0.87) — it was buggy at the rim and the mesh rim now follows the
+    // true polygon edge precisely, so the outline added nothing.
     if (state.active === 'hole' && state.datasets.hole &&
         !state.datasets.hole.failed && state.datasets.hole.zoneMask) {
-      const [gox, goy] = state.datasets.hole.gOff;
-      ctx.beginPath();
-      let pen = false, anyHidden = false;
-      if (state.datasets.green && state.datasets.green.polyLocal &&
-          state.datasets.green.polyLocal.length > 2) {
-        state.datasets.green.polyLocal.forEach(([mx, my], k) => {
-          const p = GreenMapCore.projectPt(cam, mx + gox, my + goy,
-            surfZ3(mx + gox, my + goy));
-          if (!p) { pen = false; anyHidden = true; return; }
-          // v-fix(outline-break): break (don't bridge) at hidden points.
-          if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
-            pen = false; anyHidden = true; return;
-          }
-          if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
-          else ctx.lineTo(p[0], p[1]);
-        });
-      } else {
-        const rM = SPAN_M * 0.36;
-        for (let a = 0; a <= 64; a++) {
-          const th = a / 64 * Math.PI * 2;
-          const mx = gox + Math.cos(th) * rM, my = goy + Math.sin(th) * rM;
-          const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
-          if (!p) { pen = false; anyHidden = true; continue; }
-          if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
-            pen = false; anyHidden = true; continue;
-          }
-          if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
-          else ctx.lineTo(p[0], p[1]);
-        }
-      }
-      // v-fix(chord): stroke only; a broken ring is never closed (closing
-      // drew a straight chord across the green).
-      if (pen) {
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = 'rgba(248,252,249,0.85)';
-        ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
-        if (!anyHidden) ctx.closePath();
-        ctx.stroke();
-      }
       // Tee marker: blue flag where a tee position is known.
       if (state.teeLL) {
         const dsH = state.datasets.hole;
@@ -2011,46 +2011,8 @@
       }
     }
 
-    // Green polygon edge stroked in 3D along the surface.
-    if (state.active === 'green' && state.polyLocal && state.polyLocal.length > 2) {
-      ctx.beginPath();
-      let pen = false, anyHidden = false;
-      state.polyLocal.forEach(([mx, my], k) => {
-        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
-        if (!p) { pen = false; anyHidden = true; return; }
-        // v-fix(outline-break): BREAK the path at hidden points instead of
-        // bridging — a straight jump line across a hidden dip read as a
-        // phantom outline drawn over the near face.
-        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
-          pen = false; anyHidden = true; return;
-        }
-        if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
-        else ctx.lineTo(p[0], p[1]);
-      });
-      // v-fix(chord): close the ring ONLY if every point was visible. Closing
-      // a broken ring stroked a straight chord from the last visible point
-      // back to the first — the "random line" across the green.
-      if (pen && !anyHidden) {
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = 'rgba(248,252,249,0.85)';
-        ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
-        ctx.closePath();
-        ctx.stroke();
-      }
-    } else if (state.active === 'green') {
-      // ellipse fallback outline
-      ctx.beginPath();
-      for (let a = 0; a <= 64; a++) {
-        const th = a / 64 * Math.PI * 2;
-        const mx = Math.cos(th) * SPAN_M * 0.36, my = Math.sin(th) * SPAN_M * 0.36;
-        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
-        if (!p) continue;
-        if (a === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
-      }
-      ctx.strokeStyle = 'rgba(248,252,249,0.85)';
-      ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
-      ctx.stroke();
-    }
+    // White green outline removed entirely (v1.0.87) — persistently buggy at
+    // the rim, and the mesh rim now follows the true polygon edge precisely.
 
     // Surface break arrows (downhill), drawn on top of the mesh.
     // v2 fix: arrows show in 'both' and 'arrows' modes; 'shading' hides them.
