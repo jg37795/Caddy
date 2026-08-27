@@ -1495,8 +1495,28 @@
       Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
       ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
     const quads = GreenMapCore.buildSkirtQuads(bpts, zAt, 0);
+    // v-fix(skirtcull): cull wall quads whose OUTWARD face points away from
+    // the camera. These are the far-side walls — previously they were drawn
+    // unconditionally in a pass after the surface, so their interior (back)
+    // faces showed above/behind the green rim as visible "inner walls".
+    // A solid skirt is only ever seen from its outside.
+    let cx0 = 0, cy0 = 0;
+    for (const p of bpts) { cx0 += p[0]; cy0 += p[1]; }
+    cx0 /= bpts.length; cy0 /= bpts.length;
+    // Camera position in local terrain coords (target + dist back along -fwd).
+    const camPos = [
+      -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist];
     const items = [];
     for (const q of quads) {
+      // Outward horizontal normal: perpendicular to the top edge, flipped to
+      // point away from the boundary centroid.
+      const ex = q.v[1][0] - q.v[0][0], ey = q.v[1][1] - q.v[0][1];
+      let nx = -ey, ny = ex;
+      const mx = (q.v[0][0] + q.v[1][0]) / 2,
+            my = (q.v[0][1] + q.v[1][1]) / 2;
+      if (nx * (mx - cx0) + ny * (my - cy0) < 0) { nx = -nx; ny = -ny; }
+      if (nx * (camPos[0] - mx) + ny * (camPos[1] - my) <= 0)
+        continue;                                    // back face — skip
       let dsum = 0, ok = true;
       const sp = [];
       for (let c = 0; c < 4; c++) {

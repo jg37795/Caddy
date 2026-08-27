@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.80'; // + 3D: edge-fill masked corners — surface meets skirt, no gap ring
+const CACHE_VERSION = 'v1.0.81'; // + 3D: backface-cull far skirt walls — interior walls no longer visible
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
