@@ -574,36 +574,43 @@
       for (let x = 0; x < W - 1; x++) {
         const c00 = hgt(x, y), c10 = hgt(x + 1, y),
               c01 = hgt(x, y + 1), c11 = hgt(x + 1, y + 1);
-        if (!c00 || !c10 || !c01 || !c11) continue;
+        if (!c00 && !c10 && !c01 && !c11) continue;
+        // v-fix(edgefill): if ANY corner is valid but an outer neighbour is
+        // masked (edge-of-polygon cells), clone the nearest valid elevation
+        // into the missing corner. Previously the whole quad was dropped,
+        // leaving a one-cell gap ring between the surface and the skirt —
+        // the skirt's interior walls showed through it.
+        const anyC = c00 || c10 || c01 || c11;
+        const f = (c) => c || anyC;
         // Vertex positions use the raster cell-CENTRE convention (matches
         // masks, arrows and picking exactly).
         const cxm = (cx) => (cx + 0.5 - W / 2) * cellSizeM;
         const cym = (cy) => (H / 2 - cy - 0.5) * cellSizeM;
-        const v00 =[cxm(x), cym(y), (c00[0] - zmin) * exag];
-        const v10 = [cxm(x + 1), cym(y), (c10[0] - zmin) * exag];
-        const v01 = [cxm(x), cym(y + 1), (c01[0] - zmin) * exag];
-        const v11 = [cxm(x + 1), cym(y + 1), (c11[0] - zmin) * exag];
-        const zMid = (c00[0] + c10[0] + c01[0] + c11[0]) / 4;
+        const v00 =[cxm(x), cym(y), (f(c00)[0] - zmin) * exag];
+        const v10 = [cxm(x + 1), cym(y), (f(c10)[0] - zmin) * exag];
+        const v01 = [cxm(x), cym(y + 1), (f(c01)[0] - zmin) * exag];
+        const v11 = [cxm(x + 1), cym(y + 1), (f(c11)[0] - zmin) * exag];
+        const zMid = (f(c00)[0] + f(c10)[0] + f(c01)[0] + f(c11)[0]) / 4;
         const n = GreenMapCore.quadNormal(v00, v10, v11, v01);
         if (n[2] < 0) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
         // Base colour: custom override (hole corridor), else mode ramp.
         let baseCol;
         if (O.colorFn) {
-          baseCol = O.colorFn(c00[1], zMid);
+          baseCol = O.colorFn(f(c00)[1], zMid);
           if (!baseCol) continue;             // colorFn may cull the quad
         } else if (mode === 'elev') {
           const t = (zMid - lo) / Math.max(1e-6, hi - lo);
           baseCol = O.elevColorFn
             ? O.elevColorFn(t) : GreenMapCore.elevationColor(t);
         } else {
-          const gxv = (c10[0] - c00[0] + c11[0] - c01[0]) / 2;
-          const gyv = (c01[0] - c00[0] + c11[0] - c10[0]) / 2;
+          const gxv = (f(c10)[0] - f(c00)[0] + f(c11)[0] - f(c01)[0]) / 2;
+          const gyv = (f(c01)[0] - f(c00)[0] + f(c11)[0] - f(c10)[0]) / 2;
           const slopePct = Math.hypot(gxv, gyv) / cellSizeM * 100;
           baseCol = GreenMapCore.slopeColor(slopePct);
         }
         const corners = [
-          litCorner(baseCol, c00[1], n), litCorner(baseCol, c10[1], n),
-          litCorner(baseCol, c11[1], n), litCorner(baseCol, c01[1], n)];
+          litCorner(baseCol, f(c00)[1], n), litCorner(baseCol, f(c10)[1], n),
+          litCorner(baseCol, f(c11)[1], n), litCorner(baseCol, f(c01)[1], n)];
         const col = [
           (corners[0][0] + corners[1][0] + corners[2][0] + corners[3][0]) / 4,
           (corners[0][1] + corners[1][1] + corners[2][1] + corners[3][1]) / 4,

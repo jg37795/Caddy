@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.79'; // + 3D: no backface culling — rim quads no longer see-through
+const CACHE_VERSION = 'v1.0.80'; // + 3D: edge-fill masked corners — surface meets skirt, no gap ring
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
