@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.88'; // + 3D rim: polygon-first fine mask + NaN-corner crash fix + hole-view corridor mesh repair
+const CACHE_VERSION = 'v1.0.89'; // + hole view: no skirt pillar/floor, tee flag occluded; green view: skirt at true polygon (no red lip)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

@@ -1579,30 +1579,19 @@
     ctx.stroke();
   }
 
-  // v-fix(skirt-inset): inset a boundary polygon toward its centroid by h
-  // metres. The surface mesh only reaches the last grid cell CENTRE (up to
-  // ~half a cell short of the true polygon), so wall tops built on the exact
-  // polygon left a sub-cell black gap ring at the rim. Insetting the skirt by
-  // one cell tucks the wall tops safely UNDER the surface.
-  function shrinkPolyLocal(pts, h) {
-    if (!pts || pts.length < 3 || !(h > 0)) return pts;
-    let cx = 0, cy = 0;
-    for (const p of pts) { cx += p[0]; cy += p[1]; }
-    cx /= pts.length; cy /= pts.length;
-    return pts.map(([mx, my]) => {
-      const dx = cx - mx, dy = cy - my;
-      const d = Math.hypot(dx, dy) || 1;
-      const k = Math.min(h, d * 0.5);      // never cross the centroid
-      return [mx + dx / d * k, my + dy / d * k];
-    });
-  }
-
   // Solid gray side walls extruding the green boundary down to the base
   // plane (z=0 pre-exaggeration) — gives the model physical thickness.
   function drawSkirt(cam, bpts) {
     const exag = state.v3.exag, M = state.mesh;
-    const insetH = (state.grid ? state.grid.cellSizeM : 0.6) * 1.0;
-    const sPts = shrinkPolyLocal(bpts, insetH);
+    // v-fix(no-inset): the skirt wall now sits AT the true polygon. The one-
+    // cell inset was a v1.0.86 crutch from when the surface rim was a ragged
+    // cell staircase (tucking wall tops under the ragged edge). Now the rim
+    // follows the polygon exactly, so the inset made the surface OVERHANG the
+    // wall — visible as a red lip below the gray wall at the back of the
+    // green, and dark background behind unbacked rim micro-teeth. Wall tops
+    // at the polygon edge meet the surface rim flush; depth ordering (wall
+    // painted after surface, skirt underlay pass) keeps it seam-free.
+    const sPts = bpts;
     const zAt = ([mx, my]) =>
       Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
       ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
@@ -1850,7 +1839,12 @@
     // if the surface were clear glass. (Skirt walls still paint after — they
     // are nearer than the surface rim at normal orbit pitches.)
     const bpts = greenBoundaryPts();
-    if (bpts) drawGridFloor(cam, bpts);
+    // v-fix(hole-flat): hole view is a PAINTED TERRAIN map — no extruded
+    // green skirt (it became a free-standing corrugated pillar: the corridor
+    // base plane sits far below the corridor surface) and no base-plane grid
+    // square floating in space under the pillar. Zone colour on the surface
+    // is the whole story here.
+    if (bpts && state.viewMode !== 'hole') drawGridFloor(cam, bpts);
 
     // Project all quad corners once; painter sort by mean depth (far first).
     // v-fix(seethrough2): NO backface culling on the top surface. The bowl's
@@ -1932,17 +1926,19 @@
     }
     // v-fix(skirtz): front-facing skirt walls rasterize into the depth buffer
     // too — dressing behind the near gray base walls must be hidden by them.
+    // v-fix(hole-flat): skipped in hole view (no skirt painted there).
     let scx = 0, scy = 0;
     for (const p of bpts || []) { scx += p[0]; scy += p[1]; }
-    const haveSkirt = bpts && bpts.length > 2;
+    const haveSkirt = bpts && bpts.length > 2 && state.viewMode !== 'hole';
     if (haveSkirt) { scx /= bpts.length; scy /= bpts.length; }
     const skirtCamPos = haveSkirt ? [
       -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist
     ] : null;
     if (haveSkirt) {
-      const insetH = (state.grid ? state.grid.cellSizeM : 0.6) * 1.0;
+      // v-fix(no-inset): match drawSkirt — walls at the true polygon, no
+      // one-cell inset (see drawSkirt comment).
       const sQuads = GreenMapCore.buildSkirtQuads(
-        shrinkPolyLocal(bpts, insetH), ([mx, my]) =>
+        bpts, ([mx, my]) =>
           Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
           ((sampleElevRaw(mx, my) - M.zmin) * state.v3.exag || 0), 0);
       for (const q of sQuads) {
@@ -2021,7 +2017,7 @@
     // sub-pixel gap between the surface rim and the wall tops shows gray wall
     // instead of black background (kills the jagged rim spikes). The after
     // pass below keeps near walls correctly overlaying the base.
-    if (bpts) {
+    if (bpts && state.viewMode !== 'hole') {
       drawSkirt(cam, bpts);
       drawGridFloor(cam, bpts);   // re-cover floor lines smeared by underlay
     }
@@ -2032,16 +2028,23 @@
     if (state.active === 'hole' && state.datasets.hole &&
         !state.datasets.hole.failed && state.datasets.hole.zoneMask) {
       // Tee marker: blue flag where a tee position is known.
-      if (state.teeLL) {
-        const dsH = state.datasets.hole;
-        const mLat = 110540;
-        const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
-        const tmx = (state.teeLL.lng - dsH.centerLL[0]) * mLng;
-        const tmy = (state.teeLL.lat - dsH.centerLL[1]) * mLat;
-        const base = GreenMapCore.projectPt(cam, tmx, tmy, surfZ3(tmx, tmy));
-        const top = GreenMapCore.projectPt(cam, tmx, tmy, surfZ3(tmx, tmy) + 3);
-        if (base && top) {
-          ctx.strokeStyle = '#ffffff';
+            // v-fix(tee-occ): depth-tested like all dressing — the pole used to be
+            // drawn unconditionally, floating in mid-air when the tee sat behind a
+            // hill. The flagpole is 3 m tall: test at ~1 m height on the pole.
+            if (state.teeLL) {
+              const dsH = state.datasets.hole;
+              const mLat = 110540;
+              const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
+              const tmx = (state.teeLL.lng - dsH.centerLL[0]) * mLng;
+              const tmy = (state.teeLL.lat - dsH.centerLL[1]) * mLat;
+              const base = GreenMapCore.projectPt(cam, tmx, tmy, surfZ3(tmx, tmy));
+              const top = GreenMapCore.projectPt(cam, tmx, tmy, surfZ3(tmx, tmy) + 3);
+              const pole = GreenMapCore.projectPt(cam, tmx, tmy,
+                surfZ3(tmx, tmy) + 1);
+              const occluded = pole && dressingOcclusion &&
+                dressingOcclusion(pole[0], pole[1], pole[2]);
+              if (base && top && !occluded) {
+                ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = Math.max(1.5, dpr * 1.0);
           ctx.beginPath(); ctx.moveTo(base[0], base[1]);
           ctx.lineTo(top[0], top[1]); ctx.stroke();
