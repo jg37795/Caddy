@@ -1650,8 +1650,16 @@
     let sx = 0;
     for (const p of bpts) sx += p[0];
     const midX = sx / bpts.length;
-    label('Front', midX, minY);
-    label('Back', midX, maxY);
+    // v-fix(label-z): Front/Back labels are depth-tested like all other
+    // dressing — a label on the far side of a rise/dip must not float over
+    // the near surface. Occluded labels are simply not drawn.
+    const labVis = (mx, my) => {
+      const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
+      if (!p) return false;
+      return !(dressingOcclusion && dressingOcclusion(p[0], p[1], p[2]));
+    };
+    if (labVis(midX, minY)) label('Front', midX, minY);
+    if (labVis(midX, maxY)) label('Back', midX, maxY);
   }
 
   function currentCam() {
@@ -1868,32 +1876,40 @@
         !state.datasets.hole.failed && state.datasets.hole.zoneMask) {
       const [gox, goy] = state.datasets.hole.gOff;
       ctx.beginPath();
+      let pen = false;
       if (state.datasets.green && state.datasets.green.polyLocal &&
           state.datasets.green.polyLocal.length > 2) {
         state.datasets.green.polyLocal.forEach(([mx, my], k) => {
           const p = GreenMapCore.projectPt(cam, mx + gox, my + goy,
             surfZ3(mx + gox, my + goy));
-          if (!p) return;
-          // v-fix(dressing-z): drop outline points hidden behind the surface;
-          // the open polyline simply dips behind the rim.
-          if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) return;
-          if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+          if (!p) { pen = false; return; }
+          // v-fix(outline-break): break (don't bridge) at hidden points.
+          if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
+            pen = false; return;
+          }
+          if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
+          else ctx.lineTo(p[0], p[1]);
         });
-        ctx.closePath();
       } else {
         const rM = SPAN_M * 0.36;
         for (let a = 0; a <= 64; a++) {
           const th = a / 64 * Math.PI * 2;
           const mx = gox + Math.cos(th) * rM, my = goy + Math.sin(th) * rM;
           const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
-          if (!p) continue;
-          if (a === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+          if (!p) { pen = false; continue; }
+          if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
+            pen = false; continue;
+          }
+          if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
+          else ctx.lineTo(p[0], p[1]);
         }
       }
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = 'rgba(248,252,249,0.85)';
-      ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
-      ctx.stroke();
+      if (pen) {
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(248,252,249,0.85)';
+        ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
+        ctx.stroke();
+      }
       // Tee marker: blue flag where a tee position is known.
       if (state.teeLL) {
         const dsH = state.datasets.hole;
@@ -1922,18 +1938,28 @@
     // Green polygon edge stroked in 3D along the surface.
     if (state.active === 'green' && state.polyLocal && state.polyLocal.length > 2) {
       ctx.beginPath();
+      let pen = false;
       state.polyLocal.forEach(([mx, my], k) => {
         const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
-        if (!p) return;
-        // v-fix(dressing-z): drop outline points hidden behind the surface.
-        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) return;
-        if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+        if (!p) { pen = false; return; }
+        // v-fix(outline-break): BREAK the path at hidden points instead of
+        // bridging — a straight jump line across a hidden dip read as a
+        // phantom outline drawn over the near face.
+        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
+          pen = false; return;
+        }
+        if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
+        else ctx.lineTo(p[0], p[1]);
       });
-      ctx.closePath();
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = 'rgba(248,252,249,0.85)';
-      ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
-      ctx.stroke();
+      // Only close when the ring came back to its start visibly; when points
+      // were hidden the path is broken, so closing would draw a jump chord.
+      if (pen) {
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(248,252,249,0.85)';
+        ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
+        ctx.closePath();
+        ctx.stroke();
+      }
     } else if (state.active === 'green') {
       // ellipse fallback outline
       ctx.beginPath();
@@ -1961,11 +1987,13 @@
       const p1 = GreenMapCore.projectPt(cam, x1m, y1m, surfZ3(x1m, y1m));
       const p2 = GreenMapCore.projectPt(cam, x2m, y2m, surfZ3(x2m, y2m));
       if (!p1 || !p2) continue;
-      // v-fix(dressing-z): skip arrows hidden behind a rise/rim.
+      // v-fix(dressing-z): drop arrows hidden behind the surface — test the
+      // midpoint AND both endpoints so a partially-hidden arrow (tail behind
+      // a rim, tip in front) can't streak across the near face.
       const zMid = surfZ3(a.mx, a.my);
       const pMid = GreenMapCore.projectPt(cam, a.mx, a.my, zMid);
-      if (dressingOcclusion && pMid &&
-          dressingOcclusion(pMid[0], pMid[1], pMid[2])) continue;
+      const occ = (p) => dressingOcclusion && dressingOcclusion(p[0], p[1], p[2]);
+      if ((pMid && occ(pMid)) || occ(p1) || occ(p2)) continue;
       const ang = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
       const hs = Math.max(2.6, cam.f / p2[2] * 0.05);
       ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
