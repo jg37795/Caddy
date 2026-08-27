@@ -1459,6 +1459,11 @@
     return null;
   }
 
+  // v-fix(dressing-z): set each frame by render3D — screen-space occlusion
+  // test (px, py, depth) → true when the surface hides that point. Null when
+  // no depth buffer is available (headless/2D).
+  let dressingOcclusion = null;
+
   // Thin semi-transparent iso-lines at fixed elevation intervals
   // (marching-squares along the live grid), projected onto the surface.
   function drawContours3D(cam) {
@@ -1481,6 +1486,10 @@
       const p2 = GreenMapCore.projectPt(cam, s.b[0], s.b[1],
         (s.z - M.zmin) * state.v3.exag);
       if (!p1 || !p2) continue;
+      // v-fix(dressing-z): drop contour segments hidden behind the surface.
+      if (dressingOcclusion &&
+          dressingOcclusion(p1[0], p1[1], p1[2]) &&
+          dressingOcclusion(p2[0], p2[1], p2[2])) continue;
       ctx.moveTo(p1[0], p1[1]);
       ctx.lineTo(p2[0], p2[1]);
     }
@@ -1759,6 +1768,58 @@
     const vis = Array.prototype.slice.call(order, 0, nVis)
       .sort((a, b) => dep[b] - dep[a]);       // far → near (painter's algo)
 
+    // v-fix(dressing-z): coarse screen-space depth buffer of the NEAREST
+    // surface at each cell, built from the projected quads. Dressing layers
+    // (contours, arrows, outline, putt line) are depth-tested against it so
+    // elements on the far side of a dip/rim no longer bleed through.
+    const ZCELL = 3 * dpr;
+    const zw = Math.max(1, Math.ceil(canvas.width / ZCELL));
+    const zh = Math.max(1, Math.ceil(canvas.height / ZCELL));
+    const zbuf = new Float32Array(zw * zh).fill(Infinity);
+    const triDepth = (ax, ay, bx, by, cx, cy, dA, dB, dC, px, py) => {
+      // Barycentric depth; returns -1 if (px,py) outside the triangle.
+      const det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (Math.abs(det) < 1e-9) return -1;
+      const l1 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / det;
+      const l2 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / det;
+      const l3 = 1 - l1 - l2;
+      if (l1 < -0.02 || l2 < -0.02 || l3 < -0.02) return -1;
+      return l1 * dA + l2 * dB + l3 * dC;
+    };
+    for (const q of vis) {
+      const xs = [sx[q * 4], sx[q * 4 + 1], sx[q * 4 + 2], sx[q * 4 + 3]];
+      const ys = [sy[q * 4], sy[q * 4 + 1], sy[q * 4 + 2], sy[q * 4 + 3]];
+      const ds = [dep[q], dep[q], dep[q], dep[q]];
+      const x0 = Math.max(0, Math.floor(Math.min(...xs) / ZCELL));
+      const x1 = Math.min(zw - 1, Math.ceil(Math.max(...xs) / ZCELL));
+      const y0 = Math.max(0, Math.floor(Math.min(...ys) / ZCELL));
+      const y1 = Math.min(zh - 1, Math.ceil(Math.max(...ys) / ZCELL));
+      for (let gy = y0; gy <= y1; gy++)
+        for (let gx = x0; gx <= x1; gx++) {
+          const px = (gx + 0.5) * ZCELL, py = (gy + 0.5) * ZCELL;
+          let d = triDepth(xs[0], ys[0], xs[1], ys[1], xs[2], ys[2],
+            ds[0], ds[1], ds[2], px, py);
+          if (d < 0) d = triDepth(xs[0], ys[0], xs[2], ys[2], xs[3], ys[3],
+            ds[0], ds[2], ds[3], px, py);
+          if (d >= 0) {
+            const zi = gy * zw + gx;
+            if (d < zbuf[zi]) zbuf[zi] = d;
+          }
+        }
+    }
+    // Occlusion test: true if a surface-depth sample exists at/behind the
+    // point (tolerance scales with camera distance so on-surface dressing
+    // never self-culls).
+    const eps = cam.dist * 0.012;
+    const isOccluded = (px, py, depth) => {
+      const gx = Math.floor(px / ZCELL), gy = Math.floor(py / ZCELL);
+      if (gx < 0 || gy < 0 || gx >= zw || gy >= zh) return false;
+      const zb = zbuf[gy * zw + gx];
+      return Number.isFinite(zb) && depth > zb + eps;
+    };
+
+    dressingOcclusion = isOccluded;
+
     for (const q of vis) {
       ctx.beginPath();
       ctx.moveTo(sx[q * 4], sy[q * 4]);
@@ -1813,6 +1874,9 @@
           const p = GreenMapCore.projectPt(cam, mx + gox, my + goy,
             surfZ3(mx + gox, my + goy));
           if (!p) return;
+          // v-fix(dressing-z): drop outline points hidden behind the surface;
+          // the open polyline simply dips behind the rim.
+          if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) return;
           if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
         });
         ctx.closePath();
@@ -1861,6 +1925,8 @@
       state.polyLocal.forEach(([mx, my], k) => {
         const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
         if (!p) return;
+        // v-fix(dressing-z): drop outline points hidden behind the surface.
+        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) return;
         if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
       });
       ctx.closePath();
@@ -1895,6 +1961,11 @@
       const p1 = GreenMapCore.projectPt(cam, x1m, y1m, surfZ3(x1m, y1m));
       const p2 = GreenMapCore.projectPt(cam, x2m, y2m, surfZ3(x2m, y2m));
       if (!p1 || !p2) continue;
+      // v-fix(dressing-z): skip arrows hidden behind a rise/rim.
+      const zMid = surfZ3(a.mx, a.my);
+      const pMid = GreenMapCore.projectPt(cam, a.mx, a.my, zMid);
+      if (dressingOcclusion && pMid &&
+          dressingOcclusion(pMid[0], pMid[1], pMid[2])) continue;
       const ang = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
       const hs = Math.max(2.6, cam.f / p2[2] * 0.05);
       ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
@@ -1933,6 +2004,8 @@
       pts.forEach(([mx, my]) => {
         const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
         if (!p) return;
+        // v-fix(dressing-z): putt path dips behind the surface when hidden.
+        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) return;
         if (!started) { ctx.moveTo(p[0], p[1]); started = true; }
         else ctx.lineTo(p[0], p[1]);
       });
