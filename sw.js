@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.90'; // + skirt winding cull + grown wall tops (kills OSM-polygon rim teeth), seam-cover stroke, grey rim lip, pin/tee occlusion
+const CACHE_VERSION = 'v1.0.91'; // + wall-top stroke removed (black line gone), per-segment rim lip incl. Back, lip on grown ring
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

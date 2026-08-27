@@ -1665,6 +1665,13 @@
       if (ok) items.push({ sp, d: dsum / 4 });
     }
     items.sort((a, b) => b.d - a.d);      // far → near
+    // v-fix(wall-no-stroke): the per-quad dark stroke drew a near-black line
+    // along the wall TOP — visible in James's screenshots as a persistent
+    // black zigzag line between surface and wall ("that black line"), and as
+    // the corrugated vertical ribs. The gradient alone gives the wall its
+    // shading; the top edge is sealed by the grey rim lip instead. Stroke
+    // only the BOTTOM edge (against the base plane) so the wall still reads
+    // as segmented plates where it meets the floor.
     for (const it of items) {
       const [a, b, c, d] = it.sp;
       const grad = ctx.createLinearGradient(a[0], a[1], d[0], d[1]);
@@ -1676,8 +1683,10 @@
       ctx.closePath();
       ctx.fillStyle = grad;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(52,60,56,0.85)';
+      ctx.strokeStyle = 'rgba(40,46,43,0.5)';
       ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(c[0], c[1]); ctx.lineTo(d[0], d[1]);
       ctx.stroke();
     }
   }
@@ -2109,29 +2118,43 @@
     // the rim, and the mesh rim now follows the true polygon edge precisely.
     // v-fix(rim-lip): the silhouette's last row of sub-quads ends in a fine
     // polygon-clipped serration (dark background pokes between teeth). Draw
-    // the skirt wall TOP edge as a thin grey line along the boundary —
-    // depth-tested per segment, so it hides behind rises like any dressing.
-    // It reads as the lip of the skirt, and gives the silhouette a clean
-    // edge instead of micro-steps.
+    // the skirt wall TOP edge as a thin grey line along the boundary.
+    // v-fix(lip-per-seg): stroke PER SEGMENT, each depth-tested — the old
+    // all-or-nothing version refused to draw whenever ANY point was hidden,
+    // leaving whole rim stretches (e.g. the Back at low angles) naked with
+    // sub-cell jaggies showing ("a couple pixels hanging off the edge").
     if (bpts && state.viewMode !== 'hole' && state.polyLocal &&
         state.polyLocal.length > 2 && state.active === 'green') {
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      let pen = false, anyHidden = false;
       const LIP = 1.1 * (window.devicePixelRatio || 1);
-      ctx.beginPath();
-      for (const [mx, my] of state.polyLocal) {
+      ctx.strokeStyle = 'rgba(158,168,162,0.9)';
+      ctx.lineWidth = LIP;
+      // v-fix(lip-on-walltop): trace the GROWN ring (the actual wall-top
+      // edge), not the bare polygon — surface quads overshoot the polygon by
+      // up to half a fine cell, and those nubbins poked past a polygon-level
+      // lip. The grown ring is where the wall top really is.
+      const lipPts = growPolyLocal(state.polyLocal,
+        (state.grid ? state.grid.cellSizeM : 0.6) * 0.25);
+      let prev = null;
+      let firstVis = null;
+      for (const [mx, my] of lipPts) {
         const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my) + 0.06);
-        if (!p) { pen = false; anyHidden = true; continue; }
-        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
-          pen = false; anyHidden = true; continue;
+        const hidden = !p || (dressingOcclusion &&
+          dressingOcclusion(p[0], p[1], p[2]));
+        if (!hidden && !firstVis) firstVis = { p, hidden };
+        if (!hidden && prev && !prev.hidden) {
+          ctx.beginPath();
+          ctx.moveTo(prev.p[0], prev.p[1]);
+          ctx.lineTo(p[0], p[1]);
+          ctx.stroke();
         }
-        if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
-        else ctx.lineTo(p[0], p[1]);
+        prev = { p, hidden };
       }
-      if (pen && !anyHidden) {
-        ctx.closePath();
-        ctx.strokeStyle = 'rgba(158,168,162,0.9)';
-        ctx.lineWidth = LIP;
+      // close the ring (last → first)
+      if (prev && !prev.hidden && firstVis && !firstVis.hidden) {
+        ctx.beginPath();
+        ctx.moveTo(prev.p[0], prev.p[1]);
+        ctx.lineTo(firstVis.p[0], firstVis.p[1]);
         ctx.stroke();
       }
     }
