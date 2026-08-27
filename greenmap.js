@@ -1860,10 +1860,12 @@
                sp[3][0], sp[3][1], sp[3][2]);
       }
     }
-    // Occlusion test: true if geometry-depth sample at/behind the point
-    // (tolerance scales with camera distance so on-surface dressing never
-    // self-culls).
-    const eps = cam.dist * 0.012;
+    // Occlusion test: true if geometry-depth sample at/behind the point.
+    // v-fix(ztol): tolerance is 3% of camera distance (was 1.2%) — outline
+    // and arrow points sit ON the surface, so at 1.2% they flickered in/out
+    // while rotating (sub-cell raster error). Genuinely hidden geometry on
+    // an exaggerated green is many times farther than this tolerance.
+    const eps = cam.dist * 0.03;
     const isOccluded = (px, py, depth) => {
       const gx = Math.floor(px / ZCELL), gy = Math.floor(py / ZCELL);
       if (gx < 0 || gy < 0 || gx >= zw || gy >= zh) return false;
@@ -1909,11 +1911,14 @@
 
     // 18Birdies dressing: contour iso-lines on the surface…
     drawContours3D(cam);
-    // Grid floor was moved BEFORE the surface quads (v-fix above) so its
-    // translucent lines can't show through the green. The skirt walls still
-    // draw after — at normal pitches they sit nearer than the surface rim.
-    if (bpts)
+    // v-fix(skirt-underlay): skirt painted BEFORE the surface as well — any
+    // sub-pixel gap between the surface rim and the wall tops shows gray wall
+    // instead of black background (kills the jagged rim spikes). The after
+    // pass below keeps near walls correctly overlaying the base.
+    if (bpts) {
       drawSkirt(cam, bpts);
+      drawGridFloor(cam, bpts);   // re-cover floor lines smeared by underlay
+    }
 
     // Hole view: green-zone outline sits at the green-centre offset within
     // the corridor frame, plus a tee marker. Pin/putt stay green-view only.
@@ -1921,16 +1926,16 @@
         !state.datasets.hole.failed && state.datasets.hole.zoneMask) {
       const [gox, goy] = state.datasets.hole.gOff;
       ctx.beginPath();
-      let pen = false;
+      let pen = false, anyHidden = false;
       if (state.datasets.green && state.datasets.green.polyLocal &&
           state.datasets.green.polyLocal.length > 2) {
         state.datasets.green.polyLocal.forEach(([mx, my], k) => {
           const p = GreenMapCore.projectPt(cam, mx + gox, my + goy,
             surfZ3(mx + gox, my + goy));
-          if (!p) { pen = false; return; }
+          if (!p) { pen = false; anyHidden = true; return; }
           // v-fix(outline-break): break (don't bridge) at hidden points.
           if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
-            pen = false; return;
+            pen = false; anyHidden = true; return;
           }
           if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
           else ctx.lineTo(p[0], p[1]);
@@ -1941,18 +1946,21 @@
           const th = a / 64 * Math.PI * 2;
           const mx = gox + Math.cos(th) * rM, my = goy + Math.sin(th) * rM;
           const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
-          if (!p) { pen = false; continue; }
+          if (!p) { pen = false; anyHidden = true; continue; }
           if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
-            pen = false; continue;
+            pen = false; anyHidden = true; continue;
           }
           if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
           else ctx.lineTo(p[0], p[1]);
         }
       }
+      // v-fix(chord): stroke only; a broken ring is never closed (closing
+      // drew a straight chord across the green).
       if (pen) {
         ctx.lineJoin = 'round';
         ctx.strokeStyle = 'rgba(248,252,249,0.85)';
         ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
+        if (!anyHidden) ctx.closePath();
         ctx.stroke();
       }
       // Tee marker: blue flag where a tee position is known.
@@ -1983,22 +1991,23 @@
     // Green polygon edge stroked in 3D along the surface.
     if (state.active === 'green' && state.polyLocal && state.polyLocal.length > 2) {
       ctx.beginPath();
-      let pen = false;
+      let pen = false, anyHidden = false;
       state.polyLocal.forEach(([mx, my], k) => {
         const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
-        if (!p) { pen = false; return; }
+        if (!p) { pen = false; anyHidden = true; return; }
         // v-fix(outline-break): BREAK the path at hidden points instead of
         // bridging — a straight jump line across a hidden dip read as a
         // phantom outline drawn over the near face.
         if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
-          pen = false; return;
+          pen = false; anyHidden = true; return;
         }
         if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
         else ctx.lineTo(p[0], p[1]);
       });
-      // Only close when the ring came back to its start visibly; when points
-      // were hidden the path is broken, so closing would draw a jump chord.
-      if (pen) {
+      // v-fix(chord): close the ring ONLY if every point was visible. Closing
+      // a broken ring stroked a straight chord from the last visible point
+      // back to the first — the "random line" across the green.
+      if (pen && !anyHidden) {
         ctx.lineJoin = 'round';
         ctx.strokeStyle = 'rgba(248,252,249,0.85)';
         ctx.lineWidth = Math.max(1.5, (window.devicePixelRatio || 1) * 1.2);
@@ -2076,9 +2085,12 @@
       let started = false;
       pts.forEach(([mx, my]) => {
         const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
-        if (!p) return;
-        // v-fix(dressing-z): putt path dips behind the surface when hidden.
-        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) return;
+        if (!p) { started = false; return; }
+        // v-fix(dressing-z): putt path dips behind the surface when hidden;
+        // v-fix(chord): breaks instead of bridging across the hidden span.
+        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
+          started = false; return;
+        }
         if (!started) { ctx.moveTo(p[0], p[1]); started = true; }
         else ctx.lineTo(p[0], p[1]);
       });
