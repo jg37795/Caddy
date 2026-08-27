@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.83'; // + 3D: labels occluded; outline paths BREAK at hidden points (no jump chords)
+const CACHE_VERSION = 'v1.0.84'; // + 3D: skirt walls in depth buffer; per-corner z interpolation — no jitter, wall occlusion
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

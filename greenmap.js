@@ -1777,47 +1777,92 @@
       .sort((a, b) => dep[b] - dep[a]);       // far → near (painter's algo)
 
     // v-fix(dressing-z): coarse screen-space depth buffer of the NEAREST
-    // surface at each cell, built from the projected quads. Dressing layers
-    // (contours, arrows, outline, putt line) are depth-tested against it so
-    // elements on the far side of a dip/rim no longer bleed through.
+    // geometry at each cell, built from the projected quads. Dressing layers
+    // (contours, arrows, outline, putt line, labels) are depth-tested against
+    // it so elements hidden behind a dip/rim/skirt wall no longer bleed
+    // through. v-fix(zjit): per-corner depth interpolation (barycentric), not
+    // flat quad-mean depth — the old approximation made border cells flip
+    // in/out while rotating (jitter).
     const ZCELL = 3 * dpr;
     const zw = Math.max(1, Math.ceil(canvas.width / ZCELL));
     const zh = Math.max(1, Math.ceil(canvas.height / ZCELL));
     const zbuf = new Float32Array(zw * zh).fill(Infinity);
-    const triDepth = (ax, ay, bx, by, cx, cy, dA, dB, dC, px, py) => {
-      // Barycentric depth; returns -1 if (px,py) outside the triangle.
+    const dpx = new Float32Array(n * 4), dpy = new Float32Array(n * 4),
+          dpd = new Float32Array(n * 4);
+    for (let q = 0; q < n; q++) {
+      for (let c = 0; c < 4; c++) {
+        const o = q * 12 + c * 3;
+        const p = GreenMapCore.projectPt(cam, M.pos[o], M.pos[o + 1],
+          M.pos[o + 2]);
+        dpx[q * 4 + c] = p ? p[0] : NaN;
+        dpy[q * 4 + c] = p ? p[1] : NaN;
+        dpd[q * 4 + c] = p ? p[2] : NaN;
+      }
+    }
+    const rasTri = (ax, ay, da, bx, by, db, cx, cy, dc) => {
+      if ([ax, ay, da, bx, by, db, cx, cy, dc].some(v => !Number.isFinite(v)))
+        return;
+      const x0 = Math.max(0, Math.floor(Math.min(ax, bx, cx) / ZCELL));
+      const x1 = Math.min(zw - 1, Math.ceil(Math.max(ax, bx, cx) / ZCELL));
+      const y0 = Math.max(0, Math.floor(Math.min(ay, by, cy) / ZCELL));
+      const y1 = Math.min(zh - 1, Math.ceil(Math.max(ay, by, cy) / ZCELL));
       const det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
-      if (Math.abs(det) < 1e-9) return -1;
-      const l1 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / det;
-      const l2 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / det;
-      const l3 = 1 - l1 - l2;
-      if (l1 < -0.02 || l2 < -0.02 || l3 < -0.02) return -1;
-      return l1 * dA + l2 * dB + l3 * dC;
-    };
-    for (const q of vis) {
-      const xs = [sx[q * 4], sx[q * 4 + 1], sx[q * 4 + 2], sx[q * 4 + 3]];
-      const ys = [sy[q * 4], sy[q * 4 + 1], sy[q * 4 + 2], sy[q * 4 + 3]];
-      const ds = [dep[q], dep[q], dep[q], dep[q]];
-      const x0 = Math.max(0, Math.floor(Math.min(...xs) / ZCELL));
-      const x1 = Math.min(zw - 1, Math.ceil(Math.max(...xs) / ZCELL));
-      const y0 = Math.max(0, Math.floor(Math.min(...ys) / ZCELL));
-      const y1 = Math.min(zh - 1, Math.ceil(Math.max(...ys) / ZCELL));
+      if (Math.abs(det) < 1e-9) return;
       for (let gy = y0; gy <= y1; gy++)
         for (let gx = x0; gx <= x1; gx++) {
           const px = (gx + 0.5) * ZCELL, py = (gy + 0.5) * ZCELL;
-          let d = triDepth(xs[0], ys[0], xs[1], ys[1], xs[2], ys[2],
-            ds[0], ds[1], ds[2], px, py);
-          if (d < 0) d = triDepth(xs[0], ys[0], xs[2], ys[2], xs[3], ys[3],
-            ds[0], ds[2], ds[3], px, py);
-          if (d >= 0) {
-            const zi = gy * zw + gx;
-            if (d < zbuf[zi]) zbuf[zi] = d;
-          }
+          const l1 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / det;
+          const l2 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / det;
+          const l3 = 1 - l1 - l2;
+          if (l1 < 0 || l2 < 0 || l3 < 0) continue;
+          const d = l1 * da + l2 * db + l3 * dc;
+          const zi = gy * zw + gx;
+          if (d < zbuf[zi]) zbuf[zi] = d;
         }
+    };
+    for (let q = 0; q < n; q++) {
+      const i = q * 4;
+      rasTri(dpx[i], dpy[i], dpd[i], dpx[i + 1], dpy[i + 1], dpd[i + 1],
+             dpx[i + 2], dpy[i + 2], dpd[i + 2]);
+      rasTri(dpx[i], dpy[i], dpd[i], dpx[i + 2], dpy[i + 2], dpd[i + 2],
+             dpx[i + 3], dpy[i + 3], dpd[i + 3]);
     }
-    // Occlusion test: true if a surface-depth sample exists at/behind the
-    // point (tolerance scales with camera distance so on-surface dressing
-    // never self-culls).
+    // v-fix(skirtz): front-facing skirt walls rasterize into the depth buffer
+    // too — dressing behind the near gray base walls must be hidden by them.
+    let scx = 0, scy = 0;
+    for (const p of bpts || []) { scx += p[0]; scy += p[1]; }
+    const haveSkirt = bpts && bpts.length > 2;
+    if (haveSkirt) { scx /= bpts.length; scy /= bpts.length; }
+    const skirtCamPos = haveSkirt ? [
+      -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist
+    ] : null;
+    if (haveSkirt) {
+      const sQuads = GreenMapCore.buildSkirtQuads(
+        bpts, ([mx, my]) =>
+          Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
+          ((sampleElevRaw(mx, my) - M.zmin) * state.v3.exag || 0), 0);
+      for (const q of sQuads) {
+        const ex = q.v[1][0] - q.v[0][0], ey = q.v[1][1] - q.v[0][1];
+        let nx = -ey, ny = ex;
+        const mx = (q.v[0][0] + q.v[1][0]) / 2,
+              my = (q.v[0][1] + q.v[1][1]) / 2;
+        if (nx * (mx - scx) + ny * (my - scy) < 0) { nx = -nx; ny = -ny; }
+        if (nx * (skirtCamPos[0] - mx) + ny * (skirtCamPos[1] - my) <= 0)
+          continue;                                  // back face — skip
+        const sp = q.v.map(v => GreenMapCore.projectPt(
+          cam, v[0], v[1], v[2]));
+        if (sp.some(p => !p)) continue;
+        rasTri(sp[0][0], sp[0][1], sp[0][2],
+               sp[1][0], sp[1][1], sp[1][2],
+               sp[2][0], sp[2][1], sp[2][2]);
+        rasTri(sp[0][0], sp[0][1], sp[0][2],
+               sp[2][0], sp[2][1], sp[2][2],
+               sp[3][0], sp[3][1], sp[3][2]);
+      }
+    }
+    // Occlusion test: true if geometry-depth sample at/behind the point
+    // (tolerance scales with camera distance so on-surface dressing never
+    // self-culls).
     const eps = cam.dist * 0.012;
     const isOccluded = (px, py, depth) => {
       const gx = Math.floor(px / ZCELL), gy = Math.floor(py / ZCELL);
