@@ -1496,14 +1496,34 @@
     ctx.stroke();
   }
 
+  // v-fix(skirt-inset): inset a boundary polygon toward its centroid by h
+  // metres. The surface mesh only reaches the last grid cell CENTRE (up to
+  // ~half a cell short of the true polygon), so wall tops built on the exact
+  // polygon left a sub-cell black gap ring at the rim. Insetting the skirt by
+  // one cell tucks the wall tops safely UNDER the surface.
+  function shrinkPolyLocal(pts, h) {
+    if (!pts || pts.length < 3 || !(h > 0)) return pts;
+    let cx = 0, cy = 0;
+    for (const p of pts) { cx += p[0]; cy += p[1]; }
+    cx /= pts.length; cy /= pts.length;
+    return pts.map(([mx, my]) => {
+      const dx = cx - mx, dy = cy - my;
+      const d = Math.hypot(dx, dy) || 1;
+      const k = Math.min(h, d * 0.5);      // never cross the centroid
+      return [mx + dx / d * k, my + dy / d * k];
+    });
+  }
+
   // Solid gray side walls extruding the green boundary down to the base
   // plane (z=0 pre-exaggeration) — gives the model physical thickness.
   function drawSkirt(cam, bpts) {
     const exag = state.v3.exag, M = state.mesh;
+    const insetH = (state.grid ? state.grid.cellSizeM : 0.6) * 1.0;
+    const sPts = shrinkPolyLocal(bpts, insetH);
     const zAt = ([mx, my]) =>
       Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
       ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
-    const quads = GreenMapCore.buildSkirtQuads(bpts, zAt, 0);
+    const quads = GreenMapCore.buildSkirtQuads(sPts, zAt, 0);
     // v-fix(skirtcull): cull wall quads whose OUTWARD face points away from
     // the camera. These are the far-side walls — previously they were drawn
     // unconditionally in a pass after the surface, so their interior (back)
@@ -1837,8 +1857,9 @@
       -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist
     ] : null;
     if (haveSkirt) {
+      const insetH = (state.grid ? state.grid.cellSizeM : 0.6) * 1.0;
       const sQuads = GreenMapCore.buildSkirtQuads(
-        bpts, ([mx, my]) =>
+        shrinkPolyLocal(bpts, insetH), ([mx, my]) =>
           Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
           ((sampleElevRaw(mx, my) - M.zmin) * state.v3.exag || 0), 0);
       for (const q of sQuads) {
@@ -1861,11 +1882,13 @@
       }
     }
     // Occlusion test: true if geometry-depth sample at/behind the point.
-    // v-fix(ztol): tolerance is 3% of camera distance (was 1.2%) — outline
-    // and arrow points sit ON the surface, so at 1.2% they flickered in/out
-    // while rotating (sub-cell raster error). Genuinely hidden geometry on
-    // an exaggerated green is many times farther than this tolerance.
-    const eps = cam.dist * 0.03;
+    // v-fix(ztol2): tolerance is 6% of camera distance. The outline/arrow
+    // points sit ON the surface, and the depth-buffer raster error near the
+    // rim scales with zoom — at 3% a close zoom misclassified on-surface
+    // points as hidden (outline vanished when zooming in or rotating).
+    // Hidden rim geometry on an exaggerated green is 20-40% farther, so 6%
+    // keeps a wide safety margin in both directions.
+    const eps = cam.dist * 0.06;
     const isOccluded = (px, py, depth) => {
       const gx = Math.floor(px / ZCELL), gy = Math.floor(py / ZCELL);
       if (gx < 0 || gy < 0 || gx >= zw || gy >= zh) return false;
