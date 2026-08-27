@@ -1579,19 +1579,49 @@
     ctx.stroke();
   }
 
+  // v-fix(skirt-grow): offset the boundary polygon OUTWARD by h metres along
+  // each vertex's outward bisector. Wall tops built on the grown ring always
+  // sit OUTSIDE the drawn surface edge (rim quads overshoot the polygon by up
+  // to half a fine cell where interior cells keep whole-cell quads), so every
+  // rim pixel has wall behind it — no black gaps between surface and skirt.
+  function growPolyLocal(pts, h) {
+    if (!pts || pts.length < 3 || !(h > 0)) return pts;
+    const n = pts.length;
+    let area2 = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++)
+      area2 += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+    const ccw = area2 > 0;
+    // Outward unit normal of edge a→b (from polygon winding, not centroid —
+    // correct for concave shapes).
+    const edgeN = (a, b) => {
+      const ex = b[0] - a[0], ey = b[1] - a[1];
+      const l = Math.hypot(ex, ey) || 1;
+      return ccw ? [ey / l, -ex / l] : [-ey / l, ex / l];
+    };
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], prev = pts[(i - 1 + n) % n], next = pts[(i + 1) % n];
+      const n1 = edgeN(prev, p), n2 = edgeN(p, next);
+      const nx = n1[0] + n2[0], ny = n1[1] + n2[1];
+      const l = Math.hypot(nx, ny);
+      if (l < 1e-6) { out[i] = [p[0], p[1]]; continue; }   // spike: keep put
+      out[i] = [p[0] + nx / l * h, p[1] + ny / l * h];
+    }
+    return out;
+  }
+
   // Solid gray side walls extruding the green boundary down to the base
   // plane (z=0 pre-exaggeration) — gives the model physical thickness.
   function drawSkirt(cam, bpts) {
     const exag = state.v3.exag, M = state.mesh;
-    // v-fix(no-inset): the skirt wall now sits AT the true polygon. The one-
-    // cell inset was a v1.0.86 crutch from when the surface rim was a ragged
-    // cell staircase (tucking wall tops under the ragged edge). Now the rim
-    // follows the polygon exactly, so the inset made the surface OVERHANG the
-    // wall — visible as a red lip below the gray wall at the back of the
-    // green, and dark background behind unbacked rim micro-teeth. Wall tops
-    // at the polygon edge meet the surface rim flush; depth ordering (wall
-    // painted after surface, skirt underlay pass) keeps it seam-free.
-    const sPts = bpts;
+    // v-fix(skirt-grow): wall tops on the polygon GROWN half a fine cell
+    // outward. The rim quads overshoot the polygon by up to half a cell
+    // (interior cells keep whole-cell quads), so an exact-polygon wall left
+    // sub-cell unsupported lip — surface colour visible past the wall with
+    // black background behind it. Grown wall tops are always OUTSIDE the
+    // drawn surface edge: every rim pixel has wall behind it.
+    const sPts = growPolyLocal(bpts,
+      (state.grid ? state.grid.cellSizeM : 0.6) * 0.25);
     const zAt = ([mx, my]) =>
       Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
       ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
@@ -1601,21 +1631,27 @@
     // unconditionally in a pass after the surface, so their interior (back)
     // faces showed above/behind the green rim as visible "inner walls".
     // A solid skirt is only ever seen from its outside.
-    let cx0 = 0, cy0 = 0;
-    for (const p of bpts) { cx0 += p[0]; cy0 += p[1]; }
-    cx0 /= bpts.length; cy0 /= bpts.length;
+    // v-fix(skirt-winding): outward direction comes from the polygon WINDING
+    // (signed area), not "away from the centroid" — the centroid test
+    // misclassified walls in CONCAVE sections of a non-convex green outline
+    // (real OSM greens), culling walls that face the camera. Those gaps read
+    // as red teeth hanging over black background at glancing angles.
+    let area2 = 0;
+    for (let i = 0, j = sPts.length - 1; i < sPts.length; j = i++)
+      area2 += sPts[j][0] * sPts[i][1] - sPts[i][0] * sPts[j][1];
+    const polyCCW = area2 > 0;
     // Camera position in local terrain coords (target + dist back along -fwd).
     const camPos = [
       -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist];
     const items = [];
     for (const q of quads) {
-      // Outward horizontal normal: perpendicular to the top edge, flipped to
-      // point away from the boundary centroid.
+      // Outward horizontal normal: edge perpendicular per winding.
       const ex = q.v[1][0] - q.v[0][0], ey = q.v[1][1] - q.v[0][1];
-      let nx = -ey, ny = ex;
+      const l = Math.hypot(ex, ey) || 1;
+      let nx = polyCCW ? ey / l : -ey / l;
+      let ny = polyCCW ? -ex / l : ex / l;
       const mx = (q.v[0][0] + q.v[1][0]) / 2,
             my = (q.v[0][1] + q.v[1][1]) / 2;
-      if (nx * (mx - cx0) + ny * (my - cy0) < 0) { nx = -nx; ny = -ny; }
       if (nx * (camPos[0] - mx) + ny * (camPos[1] - my) <= 0)
         continue;                                    // back face — skip
       let dsum = 0, ok = true;
@@ -1927,26 +1963,31 @@
     // v-fix(skirtz): front-facing skirt walls rasterize into the depth buffer
     // too — dressing behind the near gray base walls must be hidden by them.
     // v-fix(hole-flat): skipped in hole view (no skirt painted there).
-    let scx = 0, scy = 0;
-    for (const p of bpts || []) { scx += p[0]; scy += p[1]; }
     const haveSkirt = bpts && bpts.length > 2 && state.viewMode !== 'hole';
-    if (haveSkirt) { scx /= bpts.length; scy /= bpts.length; }
     const skirtCamPos = haveSkirt ? [
       -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist
     ] : null;
     if (haveSkirt) {
-      // v-fix(no-inset): match drawSkirt — walls at the true polygon, no
-      // one-cell inset (see drawSkirt comment).
+      // v-fix(skirt-winding + skirt-grow): match drawSkirt exactly — walls on
+      // the grown ring, culled by winding-based outward normals.
       const sQuads = GreenMapCore.buildSkirtQuads(
-        bpts, ([mx, my]) =>
+        growPolyLocal(bpts, (state.grid ? state.grid.cellSizeM : 0.6) * 0.25),
+        ([mx, my]) =>
           Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
           ((sampleElevRaw(mx, my) - M.zmin) * state.v3.exag || 0), 0);
+      let area2 = 0;
+      const gPts = growPolyLocal(bpts,
+        (state.grid ? state.grid.cellSizeM : 0.6) * 0.25);
+      for (let i = 0, j = gPts.length - 1; i < gPts.length; j = i++)
+        area2 += gPts[j][0] * gPts[i][1] - gPts[i][0] * gPts[j][1];
+      const polyCCW = area2 > 0;
       for (const q of sQuads) {
         const ex = q.v[1][0] - q.v[0][0], ey = q.v[1][1] - q.v[0][1];
-        let nx = -ey, ny = ex;
+        const l = Math.hypot(ex, ey) || 1;
+        const nx = polyCCW ? ey / l : -ey / l;
+        const ny = polyCCW ? -ex / l : ex / l;
         const mx = (q.v[0][0] + q.v[1][0]) / 2,
               my = (q.v[0][1] + q.v[1][1]) / 2;
-        if (nx * (mx - scx) + ny * (my - scy) < 0) { nx = -nx; ny = -ny; }
         if (nx * (skirtCamPos[0] - mx) + ny * (skirtCamPos[1] - my) <= 0)
           continue;                                  // back face — skip
         const sp = q.v.map(v => GreenMapCore.projectPt(
@@ -2006,7 +2047,12 @@
       }
       ctx.fillStyle = fill || midCol;
       ctx.strokeStyle = midCol;   // same-colour stroke hides seams
-      ctx.lineWidth = 1;
+      // v-fix(seam-cover): at grazing angles (steep 8×-exaggerated cliffs
+      // seen edge-on) consecutive quad rows leave hairline AA seams that a
+      // 1-device-px stroke can't cover — background sliced through as
+      // horizontal slits. Same-colour stroke at ~0.6 CSS px seals them with
+      // no visible thickening.
+      ctx.lineWidth = Math.max(1, (window.devicePixelRatio || 1) * 0.6);
       ctx.fill(); ctx.stroke();
     }
     void visible;
@@ -2061,6 +2107,34 @@
 
     // White green outline removed entirely (v1.0.87) — persistently buggy at
     // the rim, and the mesh rim now follows the true polygon edge precisely.
+    // v-fix(rim-lip): the silhouette's last row of sub-quads ends in a fine
+    // polygon-clipped serration (dark background pokes between teeth). Draw
+    // the skirt wall TOP edge as a thin grey line along the boundary —
+    // depth-tested per segment, so it hides behind rises like any dressing.
+    // It reads as the lip of the skirt, and gives the silhouette a clean
+    // edge instead of micro-steps.
+    if (bpts && state.viewMode !== 'hole' && state.polyLocal &&
+        state.polyLocal.length > 2 && state.active === 'green') {
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      let pen = false, anyHidden = false;
+      const LIP = 1.1 * (window.devicePixelRatio || 1);
+      ctx.beginPath();
+      for (const [mx, my] of state.polyLocal) {
+        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my) + 0.06);
+        if (!p) { pen = false; anyHidden = true; continue; }
+        if (dressingOcclusion && dressingOcclusion(p[0], p[1], p[2])) {
+          pen = false; anyHidden = true; continue;
+        }
+        if (!pen) { ctx.moveTo(p[0], p[1]); pen = true; }
+        else ctx.lineTo(p[0], p[1]);
+      }
+      if (pen && !anyHidden) {
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(158,168,162,0.9)';
+        ctx.lineWidth = LIP;
+        ctx.stroke();
+      }
+    }
 
     // Surface break arrows (downhill), drawn on top of the mesh.
     // v2 fix: arrows show in 'both' and 'arrows' modes; 'shading' hides them.
@@ -2140,7 +2214,13 @@
       const base = GreenMapCore.projectPt(cam, pmx, pmy, surfZ3(pmx, pmy));
       const top = GreenMapCore.projectPt(cam, pmx, pmy,
         surfZ3(pmx, pmy) + 2.2);            // ~2.2 m flagpole (un-exaggerated feel)
-      if (base && top) {
+      // v-fix(pin-occ): depth-test the pole like every other dressing
+      // element — behind a rise, the flag must not float in mid-air.
+      const mid = GreenMapCore.projectPt(cam, pmx, pmy,
+        surfZ3(pmx, pmy) + 0.8);
+      const pinHidden = mid && dressingOcclusion &&
+        dressingOcclusion(mid[0], mid[1], mid[2]);
+      if (base && top && !pinHidden) {
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = Math.max(1.5, dpr * 1.0);
         ctx.beginPath(); ctx.moveTo(base[0], base[1]);

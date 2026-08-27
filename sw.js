@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.89'; // + hole view: no skirt pillar/floor, tee flag occluded; green view: skirt at true polygon (no red lip)
+const CACHE_VERSION = 'v1.0.90'; // + skirt winding cull + grown wall tops (kills OSM-polygon rim teeth), seam-cover stroke, grey rim lip, pin/tee occlusion
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
