@@ -1096,13 +1096,9 @@
   /* ======================================================================
      2. DATA LOADING
      ====================================================================== */
-  const PRESETS = [
-    // Real OSM-mapped green (golf=green way) with strong 3DEP LiDAR relief
-    // (5.3m over 40m) — verified by coordinator. Old default was a flat field.
-    { name: 'Test green — real OSM green, hilly', lat: 41.91314, lng: -93.60971 },
-    { name: 'Test green 2 — same complex', lat: 41.91391, lng: -93.60242 },
-    { name: 'Ankeny — Timber Ridge area', lat: 41.9547, lng: -93.7308 }
-  ];
+  // v1.1.7: test presets removed — the tool loads the green handed to it by
+  // the Play tab. Bare URL (no params) falls back to the last-launched
+  // green remembered in localStorage, so Back-and-return keeps working.
   const SPAN_M = 40;         // bbox side, metres
   // v-fix(hi-res-lidar): 128×128 real 3DEP samples (0.31 m/cell) replace the
   // fake 2× bilinear upsample of 64×64 — same render cost (the upsample
@@ -1111,9 +1107,18 @@
 
   const qs = new URLSearchParams(
     (typeof location !== 'undefined' && location.search) || '');
+  // v1.1.7: remember the last-launched green so a bare greenmap.html (Back
+  // re-entry, PWA relaunch) still shows YOUR green, not a test preset.
+  const LAST_GREEN_KEY = 'caddy:greenmap:lastGreen';
+  let lastGreen = null;
+  try {
+    lastGreen = JSON.parse(localStorage.getItem(LAST_GREEN_KEY) || 'null');
+  } catch (e) { lastGreen = null; }
   const state = {
-    lat: parseFloat(qs.get('lat')) || PRESETS[0].lat,
-    lng: parseFloat(qs.get('lng')) || PRESETS[0].lng,
+    lat: parseFloat(qs.get('lat')) ||
+      (lastGreen && Number.isFinite(lastGreen.lat) ? lastGreen.lat : 41.91314),
+    lng: parseFloat(qs.get('lng')) ||
+      (lastGreen && Number.isFinite(lastGreen.lng) ? lastGreen.lng : -93.60971),
     teeLL: (Number.isFinite(parseFloat(qs.get('teelat'))) &&
             Number.isFinite(parseFloat(qs.get('teelng'))))
       ? { lat: parseFloat(qs.get('teelat')), lng: parseFloat(qs.get('teelng')) }
@@ -1325,6 +1330,11 @@
       ? 'ellipse fallback' : 'OSM green shape'} · ` +
       `${(sumS / Math.max(1, nValid)).toFixed(1)}% mean slope`;
     setLocLabel(state.polySource);
+    // v1.1.7: remember this green for bare-URL relaunches (Back/PWA resume).
+    try {
+      localStorage.setItem(LAST_GREEN_KEY, JSON.stringify({
+        lat: state.lat, lng: state.lng }));
+    } catch (e) { /* private mode etc. — non-fatal */ }
   }
 
   /* ======================================================================
@@ -3428,16 +3438,9 @@
   }
 
   function wireChrome() {
-    const sel = document.getElementById('gm-preset');
-    PRESETS.forEach((p, idx) => {
-      const o = document.createElement('option');
-      o.value = idx; o.textContent = p.name;
-      sel.appendChild(o);
-    });
-    sel.addEventListener('change', () => {
-      const p = PRESETS[sel.value];
-      location.search = `?lat=${p.lat}&lng=${p.lng}`;
-    });
+    // v1.1.7: preset dropdown REMOVED — the tool is app-integrated and loads
+    // the green passed by the Play tab (or the app's own saved default).
+    // Test presets deleted with it (James: no prototype chrome).
 
     document.querySelectorAll('.gm-layer-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -3595,33 +3598,10 @@
       }
     }
 
-    // Edit loc — nudge which green is loaded. Shows a shift sheet: move the
-    // sample point N/S/E/W in 5 m steps (the polygon + LiDAR re-fetch on
-    // Apply). This fixes "it loaded the neighbour green" without leaving.
+    // Edit loc / Check location — handled by greenedit.js (map-based
+    // verify + move; no coordinate typing). Nothing to wire here.
     const btn = document.getElementById('gm-editloc');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      const step = 5; // metres
-      const mLat = 1 / 111320;
-      const mLng = 1 / (111320 * Math.cos(state.lat * Math.PI / 180));
-      const move = (dy, dx) => {
-        state.lat += dy * step * mLat;
-        state.lng += dx * step * mLng;
-        loadGreen();
-      };
-      const dir = {
-        'N': [1, 0], 'S': [-1, 0], 'E': [0, 1], 'W': [0, -1],
-      };
-      const apply = (d) => { const v = dir[d]; if (v) move(v[0], v[1]); };
-      const ans = prompt(
-        'Nudge which green is loaded:\n' +
-        'Enter N, S, E or W to shift the sample point ' + step +
-        ' m (tap again to repeat).\n' +
-        'Current: ' + state.lat.toFixed(5) + ', ' + state.lng.toFixed(5) +
-        '\n(Leave empty + OK to re-fetch as-is; Cancel does nothing.)');
-      if (ans && dir[ans.trim().toUpperCase()]) apply(ans.trim().toUpperCase());
-      else if (ans === '') loadGreen();
-    });
+    void btn;
   }
 
   window.addEventListener('resize', () => { fitView(); render(); });

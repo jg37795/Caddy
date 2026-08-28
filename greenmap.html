@@ -1,18 +1,16 @@
 <!DOCTYPE html>
 <!-- =========================================================================
-  greenmap.html — STANDALONE Arccos-style green slope prototype.
-  NOT linked from the Caddy app UI. No tab bar, no SW precache.
-
-  Usage:
-    greenmap.html                      → default Ankeny test green (41.95,-93.75)
-    greenmap.html?lat=41.95&lng=-93.75 → arbitrary location
+  greenmap.html — 3D Green Slope (integral Caddy app view).
+  Launched from the Play tab's "3D Green" pill (greenlink.js) with
+  ?lat&lng&teelat&teelng of the current hole's green. Back returns to the app.
   ========================================================================= -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Green Slope Map — prototype</title>
+<title>3D Green — Caddy</title>
 <link rel="stylesheet" href="greenmap.css">
+<link rel="stylesheet" href="leaflet.css">
 </head>
 <body>
 
@@ -22,9 +20,8 @@
 
 <div id="gm-topbar" class="gm-chrome">
   <button class="gm-btn" id="gm-back" title="Back to the Caddy app" style="display:none">‹ Back</button>
-  <span id="gm-title">⛳ Green Slope</span>
+  <span id="gm-title">⛳ 3D Green</span>
   <span id="gm-loc" title="The green this view loaded"></span>
-  <select id="gm-preset" class="gm-select" title="Preset greens"></select>
   <select id="gm-mode" class="gm-select" title="Color mode" style="max-width:110px">
     <option value="slope">Slope</option>
     <option value="elev">Elev</option>
@@ -46,7 +43,7 @@
     <option value="12">Stimp 12</option>
   </select>
   <button class="gm-btn" id="gm-ball" title="Then tap the green to drop a ball for the putt preview">Ball ⛳</button>
-  <button class="gm-btn" id="gm-editloc" title="Verify / adjust which green is loaded">Edit loc</button>
+  <button class="gm-btn" id="gm-editloc" title="Verify / adjust which green is loaded">Check location</button>
   <button class="gm-btn" id="gm-clear-ball">Clear ball</button>
   <button class="gm-btn" id="gm-recenter">⤢ Fit</button>
   <span id="gm-status">Loading…</span>
@@ -62,7 +59,9 @@
 
 <div id="gm-tip"></div>
 
+<script src="leaflet.js"></script>
 <script src="caddy-elev.js"></script>
 <script src="greenmap.js"></script>
+<script src="greenedit.js"></script>
 </body>
 </html>

@@ -141,3 +141,92 @@ html, body {
   background: #2f4638;
   border-color: #9db3a6;
 }
+
+/* ==========================================================================
+   Green location editor (greenedit.js) — verify/edit which green is loaded.
+   Full-screen sheet over the tool; satellite mini-map + real OSM outlines.
+   ========================================================================== */
+#gm-editloc-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: #0e1411;
+  display: flex;
+  flex-direction: column;
+}
+
+.gel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.gel-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f2f6f3;
+  text-align: center;
+}
+
+.gel-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: #e8efe9;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gel-btn.gel-primary {
+  background: #2f4638;
+  border-color: #9db3a6;
+  color: #ffffff;
+}
+
+.gel-map {
+  flex: 1;
+  min-height: 0;
+}
+
+.gel-hint {
+  padding: 10px 14px calc(env(safe-area-inset-bottom, 0px) + 12px);
+  font-size: 12px;
+  color: #9db3a6;
+  text-align: center;
+}
+
+/* Draggable sample-point pin (crosshair dot) */
+.gel-pin-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 3px solid #ffd166;
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Tee context dot */
+.gel-tee-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #4488e0;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Header location badge */
+#gm-loc {
+  font-size: 10.5px;
+  color: #9db3a6;
+  white-space: nowrap;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

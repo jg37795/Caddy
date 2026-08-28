@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.1.6'; // + GREEN TRUST: tool shows WHICH green loaded (coords + real-OSM-outline vs approx-fallback badge); 'Edit loc' nudges the sample point N/S/E/W when it grabbed the wrong green; Back button returns to the Play map (same-tab launch)
+const CACHE_VERSION = 'v1.1.7'; // + INTEGRATION POLISH: prototype chrome removed (test preset dropdown deleted, real map-based Check location — satellite mini-map with the actual OSM green outlines drawn, tap to re-aim, no coordinates); last green remembered for Back/relaunch; greenedit.js added to shell
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
@@ -22,6 +22,7 @@ const APP_SHELL = [
   './range.css',
   './range.js',
   './greenlink.js',
+  './greenedit.js',
   './greenmap.html',
   './greenmap.css',
   './greenmap.js',
