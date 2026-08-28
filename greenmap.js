@@ -847,7 +847,10 @@
     { name: 'Ankeny — Timber Ridge area', lat: 41.9547, lng: -93.7308 }
   ];
   const SPAN_M = 40;         // bbox side, metres
-  const GRID_N = 64;         // cells per side
+  // v-fix(hi-res-lidar): 128×128 real 3DEP samples (0.31 m/cell) replace the
+  // fake 2× bilinear upsample of 64×64 — same render cost (the upsample
+  // branch auto-skips at W ≥ 100), half the cell error, finer rim trim.
+  const GRID_N = 128;        // cells per side
 
   const qs = new URLSearchParams(
     (typeof location !== 'undefined' && location.search) || '');
@@ -1719,23 +1722,61 @@
     return out;
   }
 
+  // v-fix(wall-envelope): the skirt wall top must never sit BELOW the drawn
+  // surface edge. The rim trim keeps sub-quads up to one sub-quad inside the
+  // ring, and on terrain that rises inward the drawn edge is HIGHER than the
+  // surface sampled AT the ring — the old ring-sampled wall top left a strip
+  // between edge and wall top covered by neither (black, gap widens with
+  // exaggeration: James 21:38/21:40/21:44 shots). Envelope: per wall-top
+  // vertex, take the MAX finite surface height sampled along the bare→ring
+  // segment — by construction ≥ every drawn rim quad corner in the strip,
+  // at ANY exaggeration. Returns { quads, topZ } — quads in the exact shape
+  // buildSkirtQuads produced, topZ aligned to the grown-ring vertices (the
+  // rim lip reuses it so the lip hugs the true wall top).
+  function wallQuadsWithEnvelope(bpts) {
+    const sPts = growPolyLocal(bpts, RING_M);
+    const M = state.mesh;
+    const quads = [];
+    const topZ = new Array(sPts.length);
+    for (let i = 0; i < sPts.length; i++) {
+      const p2 = sPts[i];
+      const p1 = bpts[i % bpts.length];   // bare vertex (same ring order)
+      let zTop = -Infinity;
+      // 7 samples (t step 1/6): surfZ3 along an arbitrary line is quadratic
+      // (bilinear), so the continuous max can sit between samples — 7 points
+      // bounds the underestimate to <1 mm of z at any real gradient.
+      // v-fix(precise): was 4 samples.
+      for (const t of [0, 1 / 6, 1 / 3, 1 / 2, 2 / 3, 5 / 6, 1]) {
+        const mx = p1[0] + (p2[0] - p1[0]) * t;
+        const my = p1[1] + (p2[1] - p1[1]) * t;
+        const z = surfZ3(mx, my);
+        if (Number.isFinite(z) && z > zTop) zTop = z;
+      }
+      if (!Number.isFinite(zTop))
+        zTop = ((sampleElevRaw(p2[0], p2[1]) - M.zmin) * state.v3.exag) || 0;
+      topZ[i] = zTop;
+    }
+    for (let i = 0; i < sPts.length; i++) {
+      const j = (i + 1) % sPts.length;
+      const a = sPts[i], b = sPts[j];
+      if (!Number.isFinite(topZ[i]) || !Number.isFinite(topZ[j])) continue;
+      quads.push({
+        v: [[a[0], a[1], topZ[i]], [b[0], b[1], topZ[j]],
+            [b[0], b[1], 0], [a[0], a[1], 0]]
+      });
+    }
+    return { quads, topZ, sPts };
+  }
+
   // Solid gray side walls extruding the green boundary down to the base
   // plane (z=0 pre-exaggeration) — gives the model physical thickness.
   function drawSkirt(cam, bpts) {
     const exag = state.v3.exag, M = state.mesh;
-    // v-fix(skirt-grow): wall tops on the polygon GROWN OUT to the ONE-RING
-    // (+0.25 m) — the exact ring the fine mask and sub-quad trim test
-    // against. Previously the skirt used cellSize*0.25 ≈ 0.156 m (a
-    // metres-vs-quarter-cell slip): the surface still reached ~9 cm past
-    // the wall-top line, and on a steep FALLING rim that outer band hung
-    // in space — serrated background-through teeth at glancing angles and
-    // pale tabs past the silhouette from above (James's 8× shots, 20:51).
-    // One ring, in one unit: 0.25 METRES everywhere.
-    const sPts = growPolyLocal(bpts, RING_M);
-    const zAt = ([mx, my]) =>
-      Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
-      ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
-    const quads = GreenMapCore.buildSkirtQuads(sPts, zAt, 0);
+    // v-fix(wall-envelope): wall tops on the strip envelope (see above) —
+    // they can never be undercut by the drawn rim edge at any exaggeration.
+    const { quads, topZ, sPts } = wallQuadsWithEnvelope(bpts);
+    state.v3.wallTopZ = topZ;      // rim lip traces the same envelope
+    void sPts;
     // v-fix(skirtcull): cull wall quads whose OUTWARD face points away from
     // the camera. These are the far-side walls — previously they were drawn
     // unconditionally in a pass after the surface, so their interior (back)
@@ -1762,19 +1803,10 @@
       let ny = polyCCW ? -ex / l : ex / l;
       const mx = (q.v[0][0] + q.v[1][0]) / 2,
             my = (q.v[0][1] + q.v[1][1]) / 2;
-      if (nx * (camPos[0] - mx) + ny * (camPos[1] - my) <= 0) {
-        // v-fix(near-inner-wall): a BACK face on the NEAR half still draws.
-        // At concave rim sections the outward normal points away from the
-        // camera, so the wall was culled exactly where the corner-tight
-        // sub-quad trim drops overhanging slivers — the slit showed the
-        // near cliff rows from outside (orange dashes) and the far side
-        // through the gaps (probe A/B: persists with arrows off, seals at
-        // 1× ⇒ displacement-scaled see-through, not paint). Far-side back
-        // faces stay culled (v1.0.95's "pieces rendering when not facing
-        // me" must not return).
-        if (mx * camPos[0] + my * camPos[1] <= 0)
-          continue;                                  // far back face — skip
-      }
+      if (nx * (camPos[0] - mx) + ny * (camPos[1] - my) <= 0)
+        continue;                    // back face — skip (v1.0.98: reverted —
+                                     // painting near-half inner walls put a
+                                     // grey barn door over the scene)
       let dsum = 0, ok = true;
       const sp = [];
       for (let c = 0; c < 4; c++) {
@@ -2104,16 +2136,12 @@
       -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist
     ] : null;
     if (haveSkirt) {
-      // v-fix(skirt-winding + skirt-grow): match drawSkirt exactly — walls on
-      // the ONE-RING (RING_M metres, the same constant as everything else),
-      // culled by winding-based outward normals. Was cellSize*0.25 ≈ 0.156 m.
-      const sQuads = GreenMapCore.buildSkirtQuads(
-        growPolyLocal(bpts, RING_M),
-        ([mx, my]) =>
-          Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
-          ((sampleElevRaw(mx, my) - M.zmin) * state.v3.exag || 0), 0);
+      // v-fix(wall-envelope): depth-prepass walls match drawSkirt exactly —
+      // strip-envelope tops (max surface height across bare→ring), not
+      // ring-sampled tops that fell below the drawn rim edge.
+      const { quads: sQuads, topZ: envZ, sPts: gPts } =
+        wallQuadsWithEnvelope(bpts);
       let area2 = 0;
-      const gPts = growPolyLocal(bpts, RING_M);
       for (let i = 0, j = gPts.length - 1; i < gPts.length; j = i++)
         area2 += gPts[j][0] * gPts[i][1] - gPts[i][0] * gPts[j][1];
       const polyCCW = area2 > 0;
@@ -2256,16 +2284,19 @@
       const LIP = 1.1 * (window.devicePixelRatio || 1);
       ctx.strokeStyle = 'rgba(158,168,162,0.9)';
       ctx.lineWidth = LIP;
-      // v-fix(lip-on-walltop): trace the ONE-RING (the actual wall-top edge),
-      // not the bare polygon. v1.0.96 grew this by cellSize*0.25 ≈ 0.156 m
-      // while the surface mask/trim used 0.25 m — the lip sat ~9 cm INSIDE
-      // the surface edge, so the outer band of surface hung past the lip
-      // (lone hanging pixels from above, micro gaps at the rim).
+      // v-fix(lip-on-walltop): the lip traces the SAME strip-envelope heights
+      // the wall was built from (state.v3.wallTopZ, set by drawSkirt) at the
+      // same grown-ring points — it hugs the true wall top exactly. Falls
+      // back to ring-sampled heights when the skirt didn't run this frame.
       const lipPts = growPolyLocal(state.polyLocal, RING_M);
+      const lipZ = state.v3.wallTopZ || null;
       let prev = null;
       let firstVis = null;
-      for (const [mx, my] of lipPts) {
-        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my) + 0.06);
+      lipPts.forEach(([mx, my], idx) => {
+        const z = (lipZ && Number.isFinite(lipZ[idx]))
+          ? lipZ[idx]
+          : surfZ3(mx, my) + 0.06;
+        const p = GreenMapCore.projectPt(cam, mx, my, z + 0.06);
         const hidden = !p || (dressingOcclusion &&
           dressingOcclusion(p[0], p[1], p[2]));
         if (!hidden && !firstVis) firstVis = { p, hidden };
@@ -2276,7 +2307,7 @@
           ctx.stroke();
         }
         prev = { p, hidden };
-      }
+      });
       // close the ring (last → first)
       if (prev && !prev.hidden && firstVis && !firstVis.hidden) {
         ctx.beginPath();
