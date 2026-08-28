@@ -132,6 +132,79 @@
     return inside;
   };
 
+  // Inset (negative-grow) a polygon — cached companion to growPolyLocal for
+  // the near-rim fast-path test. Same mitre-join math, h negative.
+  GreenMapCore.polyOffsetCache = function (pts, h) {
+    return growPolyLocal(pts, h);
+  };
+
+  // v-fix(quad-clip): clip ONE quad (4 corners [x,y]) to a convex-ish
+  // polygon with the Sutherland–Hodgman algorithm, returning 0, 1 or
+  // several clipped quads. The subject is a quad, the clip region a
+  // polygon with n edges: run SH once per clip edge. Elevation z is
+  // interpolated bilinearly by the same weights as x/y, so the clipped
+  // pieces sit exactly on the original surface. A quad fully inside is
+  // returned unchanged (reference-identical); a quad fully outside
+  // returns []; straddlers are cut EXACTLY at the polygon line.
+  GreenMapCore.clipQuadToPoly = function (q, poly) {
+    let out = [q];
+    const n = poly.length;
+    // Winding-agnostic: compute the polygon's signed area once and define
+    // "inside" as LEFT of each edge for CCW, RIGHT for CW. The real OSM
+    // polygon's node order is arbitrary (this CW polygon blanked the whole
+    // render when the test assumed CCW — v-fix clip-winding).
+    let area2 = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++)
+      area2 += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+    const ccw = area2 > 0;
+    for (let e = 0; e < n && out.length; e++) {
+      const A = poly[e], B = poly[(e + 1) % n];
+      const ex = B[0] - A[0], ey = B[1] - A[1];      // edge dir
+      // Signed side: >0 = left of A→B. Inside = left for CCW, right for CW.
+      const side = (px, py) =>
+        (ex * (py - A[1]) - ey * (px - A[0])) * (ccw ? 1 : -1);
+      const next = [];
+      for (const subj of out) {
+        // Sutherland–Hodgman of one subject (3 or 4 corners) vs one edge.
+        // v-fix: subjects may be TRIANGLES after an earlier clip stage —
+        // iterate pts.length, never a hardcoded 4.
+        const pts = subj;
+        const nv = pts.length;
+        const res = [];
+        for (let i = 0; i < nv; i++) {
+          const P = pts[i], Q = pts[(i + 1) % nv];
+          const sP = side(P[0], P[1]), sQ = side(Q[0], Q[1]);
+          if (sP >= 0) {
+            res.push(P);
+            if (sQ < 0) {
+              const t = sP / (sP - sQ);
+              res.push([P[0] + (Q[0] - P[0]) * t,
+                        P[1] + (Q[1] - P[1]) * t,
+                        P[2] + (Q[2] - P[2]) * t]);
+            }
+          } else if (sQ >= 0) {
+            const t = sP / (sP - sQ);
+            res.push([P[0] + (Q[0] - P[0]) * t,
+                      P[1] + (Q[1] - P[1]) * t,
+                      P[2] + (Q[2] - P[2]) * t]);
+          }
+        }
+        // Consumers expect exactly 4 corners: triangles become degenerate
+        // quads (4th vertex = 3rd), 5+-gons fan-triangulate the same way.
+        if (res.length === 4) next.push(res);
+        else if (res.length > 4) {
+          for (let i = 1; i < res.length - 1; i++)
+            next.push([res[0], res[i], res[i + 1], res[i + 1]]);
+        } else if (res.length === 3) {
+          next.push([res[0], res[1], res[2], res[2]]);
+        }
+        // res.length < 3 → fully outside this edge: dropped.
+      }
+      out = next;
+    }
+    return out;
+  };
+
   // Build a per-cell mask (Uint8Array W*H) from a polygon given in local
   // metre coords centred on the green centre (+x east, +y north).
   GreenMapCore.polyMask = function (polyLocalM, W, H, cellSize) {
@@ -628,60 +701,85 @@
         // existence BEFORE indexing mask[c[1]] — v1.0.87 dereferenced a null
         // corner here and crashed the whole mesh build whenever a void sat
         // beside valid cells inside the polygon.
-        if (O.polyLocalM && O.polyLocalM.length > 2 &&
-            (!c00 || !c10 || !c01 || !c11 ||
-             !mask[c00[1]] || !mask[c10[1]] ||
-             !mask[c01[1]] || !mask[c11[1]])) {
+        // v-fix(fastpath-overhang): the fast whole-cell path required only
+        // that the 4 corner NODES be masked — but a cell whose corners are
+        // inside the grown ring can still POKE PAST the ring between nodes
+        // (ring curvature cuts inside the straight cell edge). Those
+        // unclipped square corners sat above the wall-top profile as the
+        // staircase+black-gap zipper at the near rim (3x magnified proof,
+        // .toothzoom.png). Cells NEAR the ring now go through the
+        // sub-quad + Sutherland–Hodgman clip path; only cells entirely in
+        // the deep interior (all corners inside the ring INSET one cell)
+        // keep the fast path.
+        let nearRim = false;
+        if (O.polyLocalM && O.polyLocalM.length > 2) {
+          const insetRing = O.polyInset || (O.polyInset =
+            GreenMapCore.polyOffsetCache(O.polyLocalM, -cellSizeM * 1.5));
+          const pad = cellSizeM * 0.71;   // half-diagonal reach of a corner
+          nearRim =
+            !GreenMapCore.pointInPoly(cxm(x) - pad, cym(y) - pad, insetRing) ||
+            !GreenMapCore.pointInPoly(cxm(x + 1) + pad, cym(y) - pad, insetRing) ||
+            !GreenMapCore.pointInPoly(cxm(x + 1) + pad, cym(y + 1) + pad, insetRing) ||
+            !GreenMapCore.pointInPoly(cxm(x) - pad, cym(y + 1) + pad, insetRing);
+        }
+        if (nearRim ||
+            (O.polyLocalM && O.polyLocalM.length > 2 &&
+             (!c00 || !c10 || !c01 || !c11 ||
+              !mask[c00[1]] || !mask[c10[1]] ||
+              !mask[c01[1]] || !mask[c11[1]]))) {
           const SUB = 6;
-          const buildSubs = (SUBL) => {
-            const out = [];
-            for (let sy = 0; sy < SUBL; sy++)
-            for (let sx = 0; sx < SUBL; sx++) {
-              const sxa = cxm(x + sx / SUBL), sxb = cxm(x + (sx + 1) / SUBL);
-              const sya = cym(y + sy / SUBL), syb = cym(y + (sy + 1) / SUBL);
-              const scx = (sxa + sxb) / 2, scy = (sya + syb) / 2;
-              // v-fix(clip-silhouette): keep any sub-quad whose CENTRE is
-              // inside the ring — the silhouette is no longer shaped by the
-              // trim at all. render3D now CLIPS the surface paint to the
-              // projected boundary polygon, so quads that poke past the ring
-              // are cut exactly at the polygon outline (smooth, no staircase,
-              // no trim slack = no strip for background to show through).
-              // Subdivision here stays for VOID edge-filling (masked/NaN
-              // corners interpolate) — not for silhouette shaping.
-              // (Corner-tight + 6→48 ladder REMOVED: they shaped the edge by
-              // dropping quads, which LEFT the slack strip James sees as the
-              // black zigzag at zoom. v1.0.99.)
-              if (!GreenMapCore.pointInPoly(scx, scy, O.polyLocalM)) continue;
-              // Bilinear elevation sampled at EACH SUB-CORNER's own (fx,fy).
-              // v-fix(rim-continuous): the old code flattened every sub-quad
-              // to its centre height, so adjacent sub-quads met their shared
-              // edge at DIFFERENT heights (z at fx=0.083 vs fx=0.25) — on a
-              // steep gradient the rim was a staircase of alternating ledges:
-              // the sawtooth at the red-to-grey junction that survived every
-              // ring fix. Corner-exact sampling makes neighbours share
-              // bit-identical edge heights, continuous across cells too
-              // (a cell-edge sub-corner equals the neighbour's f(c00)-based
-              // value by the same bilinear formula).
-              const zAt = (fx, fy) => {
-                const tz = f(c00)[0] + (f(c10)[0] - f(c00)[0]) * fx;
-                const bz = f(c01)[0] + (f(c11)[0] - f(c01)[0]) * fx;
-                return (tz + (bz - tz) * fy - zmin) * exag;
-              };
-              out.push({
-                v: [[sxa, sya, zAt(sx / SUBL, sy / SUBL)],
-                    [sxb, sya, zAt((sx + 1) / SUBL, sy / SUBL)],
-                    [sxb, syb, zAt((sx + 1) / SUBL, (sy + 1) / SUBL)],
-                    [sxa, syb, zAt(sx / SUBL, (sy + 1) / SUBL)]],
-                col: col.map(Math.round), vc: corners, n });
-            }
-            return out;
+          // v-fix(whole-cell-clip): clip the WHOLE CELL to the ring in ONE
+          // Sutherland–Hodgman pass. The 6×6 sub-quad pass is obsolete:
+          // its purpose (interpolating across void corners) is now handled
+          // by the void-parity zAt below, and along a diagonal ring the
+          // independent sub-quad clips produced alternating degenerate
+          // slivers = a serrated zipper silhouette. One clip per cell: the
+          // drawn edge IS the ring polygon — continuous by construction.
+          const out = [];
+          // v-fix(void-parity): zAt must be the SAME interpolant as
+          // surfZ3 (which drives the wall top + lip) — blend ONLY finite
+          // node values with renormalized weights, same nearest-finite
+          // fallback. Previously void corners cloned a neighbour's value
+          // here while surfZ3 renormalized: two different heights near
+          // LiDAR voids → wall top ≠ drawn edge → the alternating black
+          // teeth at the rim (tooth zooms, layer isolation, all prior
+          // cull/height fixes never touched this convention mismatch).
+          const n00 = grid[y * W + x],           n10 = grid[y * W + x + 1];
+          const n01 = grid[(y + 1) * W + x],     n11 = grid[(y + 1) * W + x + 1];
+          const zAt = (fx, fy) => {
+            const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy);
+            const w01 = (1 - fx) * fy,       w11 = fx * fy;
+            let h = 0, wsum = 0;
+            if (Number.isFinite(n00)) { h += n00 * w00; wsum += w00; }
+            if (Number.isFinite(n10)) { h += n10 * w10; wsum += w10; }
+            if (Number.isFinite(n01)) { h += n01 * w01; wsum += w01; }
+            if (Number.isFinite(n11)) { h += n11 * w11; wsum += w11; }
+            if (wsum > 1e-9) return (h / wsum - zmin) * exag;
+            // all four void: nearest finite within 3 nodes (same policy
+            // and ordering as surfZ3's ring search).
+            for (let r = 1; r <= 3; r++)
+              for (let dy = -r; dy <= r; dy++)
+                for (let dx = -r; dx <= r; dx++) {
+                  if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+                  const nx2 = x + dx, ny2 = y + dy;
+                  if (nx2 < 0 || ny2 < 0 || nx2 >= W || ny2 >= H) continue;
+                  const v = grid[ny2 * W + nx2];
+                  if (Number.isFinite(v)) return (v - zmin) * exag;
+                }
+            return 0;
           };
-          // v-fix(clip-silhouette): single 6×6 pass (void edge-filling only).
-          // A cell with NO sub-centre inside keeps its whole cell — the clip
-          // pass trims the overhang exactly at the polygon, and the wall
-          // stands behind the ring, so nothing can show through.
-          const subs = buildSubs(6);
-          if (subs.length) { quads.push(...subs); continue; }
+          {
+            const pieces = GreenMapCore.clipQuadToPoly(
+              [[cxm(x), cym(y), zAt(0, 0)],
+               [cxm(x + 1), cym(y), zAt(1, 0)],
+               [cxm(x + 1), cym(y + 1), zAt(1, 1)],
+               [cxm(x), cym(y + 1), zAt(0, 1)]],
+              O.polyLocalM);
+            for (const v of pieces)
+              out.push({ v, col: col.map(Math.round), vc: corners, n });
+          }
+          quads.push(...out);
+          continue;
         }
         quads.push({ v: [v00, v10, v11, v01],
                      col: col.map(Math.round),
@@ -696,7 +794,7 @@
     const nrm = new Float32Array(count * 3);
     quads.forEach((q, k) => {
       q.v.forEach((p, c) => { pos.set(p, k * 12 + c * 3); });
-      q.vc.forEach((p, c) => { vcol.set(p, k * 12 + c * 3); });
+      if (q.vc) q.vc.forEach((p, c) => { vcol.set(p, k * 12 + c * 3); });
       col.set(q.col, k * 3);
       nrm.set(q.n, k * 3);
     });
@@ -1575,12 +1673,36 @@
     const y0 = Math.max(0, Math.min(g.H - 1, Math.floor(fy)));
     const x1 = Math.min(g.W - 1, x0 + 1), y1 = Math.min(g.H - 1, y0 + 1);
     const tx = fx - x0, ty = fy - y0;
-    const z = (a) => Number.isFinite(a) ? a : 0;
-    const h = z(g.grid[y0 * g.W + x0]) * (1 - tx) * (1 - ty) +
-              z(g.grid[y0 * g.W + x1]) * tx * (1 - ty) +
-              z(g.grid[y1 * g.W + x0]) * (1 - tx) * ty +
-              z(g.grid[y1 * g.W + x1]) * tx * ty;
-    return (h - M.zmin) * state.v3.exag;
+    // v-fix(void-bilinear): NaN (LiDAR void) nodes previously blended as
+    // ZERO elevation — the interpolated surface dipped at every void, and
+    // the wall top followed it below the drawn surface edge → alternating
+    // black slits along the rim wherever the ring crossed void cells (the
+    // teeth that survived every cull strategy; the no-wall probe proved the
+    // wall owned them). Blend ONLY finite nodes with renormalized weights;
+    // if all four are void, search outward rings (≤3 cells) for the nearest
+    // finite node.
+    const nodes = [
+      [g.grid[y0 * g.W + x0], (1 - tx) * (1 - ty)],
+      [g.grid[y0 * g.W + x1], tx * (1 - ty)],
+      [g.grid[y1 * g.W + x0], (1 - tx) * ty],
+      [g.grid[y1 * g.W + x1], tx * ty]];
+    let h = 0, wsum = 0;
+    for (const [v, w] of nodes)
+      if (Number.isFinite(v)) { h += v * w; wsum += w; }
+    if (wsum > 1e-9) {
+      return (h / wsum - M.zmin) * state.v3.exag;
+    }
+    const cx = Math.round(fx), cy = Math.round(fy);
+    for (let r = 1; r <= 3; r++)
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const nx2 = cx + dx, ny2 = cy + dy;
+          if (nx2 < 0 || ny2 < 0 || nx2 >= g.W || ny2 >= g.H) continue;
+          const v = g.grid[ny2 * g.W + nx2];
+          if (Number.isFinite(v)) return (v - M.zmin) * state.v3.exag;
+        }
+    return (0 - M.zmin) * state.v3.exag;
   }
 
   // ---- 18Birdies-grade scene dressing -----------------------------------
@@ -1760,15 +1882,98 @@
     return { quads, topZ, sPts };
   }
 
+  // v-fix(wall-profile): densify the boundary ring — every polygon edge is
+  // split into ~step-metre segments. The SURFACE edge's height along the
+  // polygon is piecewise-linear with breakpoints at every quad cut; a wall
+  // top built only at polygon VERTICES chords across that profile and
+  // diverges mid-edge by the surface curvature → alternating hairline
+  // slits/overlaps at the junction (seen at 12× zoom). Sampling every
+  // ~0.25 m bounds the chord error to <0.1 mm of z at real gradients:
+  // wall top, lip and surface edge become the same profile at any zoom.
+  function densifyRing(pts, step) {
+    const out = [];
+    const n = pts.length;
+    for (let i = 0; i < n; i++) {
+      const A = pts[i], B = pts[(i + 1) % n];
+      const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      const k = Math.max(1, Math.ceil(len / step));
+      for (let s = 0; s < k; s++) {
+        const t = s / k;
+        out.push([A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t]);
+      }
+    }
+    return out;
+  }
+
+  // v-fix(wall-ribbon): a filled ribbon that backs the entire rim: top edge
+  // = surface heights along the grown ring (the wall top), bottom edge =
+  // the same heights minus a small drop, plus a drop to z=0 for the full
+  // wall. Drawn as ONE canvas path (no per-segment stroke seams, no normal
+  // culling, no gates): painted BEFORE the surface it is invisible wherever
+  // surface quads cover it, and it guarantees that any pixel between the
+  // drawn surface edge and the wall body is wall-grey — never background.
+  // This is the final seal for the "black teeth" class: the ribbon exists
+  // at EVERY ring point by construction.
+  function drawWallRibbon(cam, bpts) {
+    const M = state.mesh;
+    if (!M) return;
+    const ring = densifyRing(growPolyLocal(bpts, RING_M), 0.25);
+    const front = [];
+    const ringNear = [];
+    const camPx = -cam.fwd[0] * cam.dist, camPy = -cam.fwd[1] * cam.dist;
+    for (const [mx, my] of ring) {
+      // +0.06 m: the ribbon top rides just above the sampled ring line so
+      // that clipped-cell chords (straight 3D segments crossing the curved
+      // surface between nodes) can never pass ABOVE it — the old lip used
+      // the same lift. The surface overpaints it wherever it is in front.
+      const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my) + 0.06);
+      if (p) {
+        ringNear.push(mx * camPx + my * camPy); // >0 = near half
+        front.push(p);
+      }
+    }
+    if (front.length < 2) return;
+    // v-fix(ribbon-all): draw EVERY segment unconditionally. On the near
+    // side the surface painter (which runs LATER) overpaints the ribbon
+    // wherever the surface has pixels — no gate needed. On the far side the
+    // ribbon's +6 cm crest peeks above the far silhouette: that is exactly
+    // what a green's rolled lip looks like from behind, and it is ONE
+    // continuous colour (no alternation). Any gate (depth or near/far
+    // half-space) classified wavy-boundary segments inconsistently and
+    // produced the alternating zipper.
+    ctx.fillStyle = 'rgba(150,158,152,0.98)';
+    for (let i = 0; i < front.length; i++) {
+      const j = (i + 1) % front.length;
+      const a = front[i], b = front[j];
+      const drop = 26 * (window.devicePixelRatio || 1);
+      ctx.beginPath();
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(b[0], b[1]);
+      ctx.lineTo(b[0], b[1] + drop);
+      ctx.lineTo(a[0], a[1] + drop);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
   // Solid gray side walls extruding the green boundary down to the base
   // plane (z=0 pre-exaggeration) — gives the model physical thickness.
-  function drawSkirt(cam, bpts) {
+  // v-fix(quad-clip): with the surface now clipped EXACTLY to the grown ring,
+  // the drawn edge height at a ring point IS surfZ3(ring). The wall top must
+  // equal it (any excess paints grey over the near face — the v1.0.98
+  // strip-max envelope did exactly that; any shortfall opens a slit). One
+  // height function, one ring: wall top = lip = surface edge.
+  function drawSkirt(cam, bpts, allowBackFaces) {
     const exag = state.v3.exag, M = state.mesh;
-    // v-fix(wall-envelope): wall tops on the strip envelope (see above) —
-    // they can never be undercut by the drawn rim edge at any exaggeration.
-    const { quads, topZ, sPts } = wallQuadsWithEnvelope(bpts);
-    state.v3.wallTopZ = topZ;      // rim lip traces the same envelope
-    void sPts;
+    // v-fix(wall-profile): DENSIFIED ring (~0.25 m segments) — the wall top
+    // follows the surface edge's piecewise-linear height profile instead of
+    // chording between polygon vertices.
+    const sPts = densifyRing(growPolyLocal(bpts, RING_M), 0.25);
+    const zAt = ([mx, my]) =>
+      Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
+      ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
+    const quads = GreenMapCore.buildSkirtQuads(sPts, zAt, 0);
+    state.v3.wallTopZ = null;      // lip falls back to ring sampling
     // v-fix(skirtcull): cull wall quads whose OUTWARD face points away from
     // the camera. These are the far-side walls — previously they were drawn
     // unconditionally in a pass after the surface, so their interior (back)
@@ -1788,17 +1993,31 @@
       -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist];
     const items = [];
     for (const q of quads) {
-      // Outward horizontal normal: edge perpendicular per winding.
-      const ex = q.v[1][0] - q.v[0][0], ey = q.v[1][1] - q.v[0][1];
-      const l = Math.hypot(ex, ey) || 1;
-      let nx = polyCCW ? ey / l : -ey / l;
-      let ny = polyCCW ? -ex / l : ex / l;
+      // v-fix(zipper-final): draw EVERY wall quad — no normal culling at
+      // all. Ordering: the skirt paints after the surface, so the far-side
+      // crest problem is moot (wall top ≡ surface edge now — same ring,
+      // same function: nothing can rise above the surface). The near-side
+      // zipper was the last artifact: normals on the wavy densified ring
+      // flip segment-to-segment, so ANY normal-based cull leaves alternating
+      // gaps. Depth-gate back faces so the inner wall never paints over the
+      // near rim (barn door): if the depth buffer says this quad's centre is
+      // behind surface geometry, skip it.
       const mx = (q.v[0][0] + q.v[1][0]) / 2,
             my = (q.v[0][1] + q.v[1][1]) / 2;
-      if (nx * (camPos[0] - mx) + ny * (camPos[1] - my) <= 0)
-        continue;                    // back face — skip (v1.0.98: reverted —
-                                     // painting near-half inner walls put a
-                                     // grey barn door over the scene)
+      // Outward normal (edge perpendicular per polygon winding).
+      const ex = q.v[1][0] - q.v[0][0], ey = q.v[1][1] - q.v[0][1];
+      const l = Math.hypot(ex, ey) || 1;
+      const wnx = polyCCW ? ey / l : -ey / l;
+      const wny = polyCCW ? -ex / l : ex / l;
+      const isBack = wnx * (camPos[0] - mx) +
+                     wny * (camPos[1] - my) <= 0;
+      if (isBack) {
+        const pc = GreenMapCore.projectPt(cam, mx, my,
+          (q.v[0][2] + q.v[2][2]) / 2);
+        if (!pc) continue;
+        if (dressingOcclusion && dressingOcclusion(pc[0], pc[1], pc[2]))
+          continue;
+      }
       let dsum = 0, ok = true;
       const sp = [];
       for (let c = 0; c < 4; c++) {
@@ -2034,6 +2253,16 @@
         // base plane sits far below the corridor surface) and no base-plane grid
         // square floating in space under the pillar. Zone colour on the surface
         // is the whole story here.
+        if (bpts && state.viewMode !== 'hole') {
+          // v-fix(wall-underlay-stack): the full wall body (ring heights →
+          // z=0) paints FIRST, then the ribbon seals the top 26 px seam
+          // region, then the surface paints over everything it covers.
+          // Without the body, the surface's lower stretches hung over raw
+          // background below the 26 px ribbon (black teeth on the red face
+          // at glancing angles).
+          drawSkirt(cam, bpts, true);
+          drawWallRibbon(cam, bpts);
+        }
         if (bpts && state.viewMode !== 'hole') drawGridFloor(cam, bpts);
     // v-fix(curtain-removed): the v1.0.92 unculled rim curtain was a backstop
     // for the wall-top slit that the v1.0.94 ONE-RING alignment closed for
@@ -2128,12 +2357,15 @@
       -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist
     ] : null;
     if (haveSkirt) {
-      // v-fix(wall-envelope): depth-prepass walls match drawSkirt exactly —
-      // strip-envelope tops (max surface height across bare→ring), not
-      // ring-sampled tops that fell below the drawn rim edge.
-      const { quads: sQuads, topZ: envZ, sPts: gPts } =
-        wallQuadsWithEnvelope(bpts);
+      // v-fix(wall-profile): depth-prepass walls match drawSkirt exactly —
+      // DENSIFIED ring, ring-sampled tops (identical construction).
+      const sQuads = GreenMapCore.buildSkirtQuads(
+        densifyRing(growPolyLocal(bpts, RING_M), 0.25),
+        ([mx, my]) =>
+          Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
+          ((sampleElevRaw(mx, my) - M.zmin) * state.v3.exag || 0), 0);
       let area2 = 0;
+      const gPts = densifyRing(growPolyLocal(bpts, RING_M), 0.25);
       for (let i = 0, j = gPts.length - 1; i < gPts.length; j = i++)
         area2 += gPts[j][0] * gPts[i][1] - gPts[i][0] * gPts[j][1];
       const polyCCW = area2 > 0;
@@ -2213,72 +2445,17 @@
     }
     void visible;
 
-    // v-fix(clip-silhouette): ERASE everything OUTSIDE the projected boundary
-    // polygon (even-odd clip: canvas rect + polygon ⇒ outside-polygon region).
-    // The surface mesh now keeps whole cells through the ring area (no trim
-    // slack to expose), and this pass cuts the paint EXACTLY at the polygon
-    // outline: smooth silhouette, zero staircase, zero slack strip — at any
-    // zoom, any exaggeration. It also post-hoc wipes any far-side wall crest
-    // (the old "teeth that render away when faced" cannot survive a pass
-    // that runs after the paint). Near walls are repainted by the after-pass
-    // drawSkirt below; the floor by the after-pass drawGridFloor.
-    if (bpts && bpts.length > 2 && state.viewMode !== 'hole') {
-      // v-fix(clip-nearplane): build the clip polygon HORIZON-SAFE. At
-      // extreme zoom + exaggeration, far-rim vertices can sit BEHIND the
-      // camera; projecting them anyway (or clamping z) folds the screen
-      // path into a self-intersecting star and even-odd parity erases the
-      // green itself. Instead: Sutherland–Hodgman clip of the 3D boundary
-      // ring against the camera near half-space (depth ≥ 0.5) FIRST, then
-      // project — a simple chain entirely in front of the eye projects to a
-      // simple screen polygon, guaranteed, at any zoom/exaggeration.
-      const NEAR = 0.5;
-      const dOf = (x, y, z) =>
-        cam.dist + x * cam.fwd[0] + y * cam.fwd[1] + z * cam.fwd[2];
-      let ring3 = bpts.map(([mx, my]) => [mx, my, surfZ3(mx, my)]);
-      const out3 = [];
-      const nR = ring3.length;
-      for (let i = 0; i < nR; i++) {
-        const A = ring3[i], B = ring3[(i + 1) % nR];
-        const dA = dOf(A[0], A[1], A[2]), dB = dOf(B[0], B[1], B[2]);
-        const Ain = dA >= NEAR, Bin = dB >= NEAR;
-        if (Ain) out3.push(A);
-        if (Ain !== Bin) {
-          const t = (NEAR - dA) / (dB - dA);
-          out3.push([A[0] + (B[0] - A[0]) * t,
-                     A[1] + (B[1] - A[1]) * t,
-                     A[2] + (B[2] - A[2]) * t]);
-        }
-      }
-      if (out3.length > 2) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, canvas.width, canvas.height);
-        let started = false;
-        for (const [mx, my, mz] of out3) {
-          const p = GreenMapCore.projectPt(cam, mx, my, mz);
-          if (!p) continue;
-          if (!started) { ctx.moveTo(p[0], p[1]); started = true; }
-          else ctx.lineTo(p[0], p[1]);
-        }
-        if (started) {
-          ctx.closePath();
-          ctx.clip('evenodd');
-          ctx.fillStyle = '#0e1411';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-        ctx.restore();
-      }
-    }
+    // v-fix(quad-clip): the screen-space ERASE pass is REMOVED. The surface
+    // geometry is now polygon-clipped at build time (clipQuadToPoly), so no
+    // overhang ever exists to erase: no near-plane fold cases, no bitten
+    // green, no fringe from mask/erase ring mismatch. The silhouette is the
+    // polygon — wall top, lip and surface edge all sample surfZ3 on the same
+    // grown ring.
 
     // 18Birdies dressing: contour iso-lines on the surface…
     drawContours3D(cam);
-    // v-fix(skirt-underlay): skirt painted BEFORE the surface as well — any
-    // sub-pixel gap between the surface rim and the wall tops shows gray wall
-    // instead of black background (kills the jagged rim spikes). The after
-    // pass below keeps near walls correctly overlaying the base.
     if (bpts && state.viewMode !== 'hole') {
-      drawSkirt(cam, bpts);
-      drawGridFloor(cam, bpts);   // re-cover floor lines smeared by underlay
+      drawGridFloor(cam, bpts);
     }
 
     // Hole view: tee marker only. The white green-zone outline was removed
@@ -2330,40 +2507,42 @@
     if (bpts && state.viewMode !== 'hole' && state.polyLocal &&
         state.polyLocal.length > 2 && state.active === 'green') {
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      const LIP = 1.1 * (window.devicePixelRatio || 1);
-      ctx.strokeStyle = 'rgba(158,168,162,0.9)';
-      ctx.lineWidth = LIP;
-      // v-fix(lip-on-walltop): the lip traces the SAME strip-envelope heights
-      // the wall was built from (state.v3.wallTopZ, set by drawSkirt) at the
-      // same grown-ring points — it hugs the true wall top exactly. Falls
-      // back to ring-sampled heights when the skirt didn't run this frame.
-      const lipPts = growPolyLocal(state.polyLocal, RING_M);
-      const lipZ = state.v3.wallTopZ || null;
-      let prev = null;
-      let firstVis = null;
-      lipPts.forEach(([mx, my], idx) => {
-        const z = (lipZ && Number.isFinite(lipZ[idx]))
-          ? lipZ[idx]
-          : surfZ3(mx, my) + 0.06;
-        const p = GreenMapCore.projectPt(cam, mx, my, z + 0.06);
-        const hidden = !p || (dressingOcclusion &&
-          dressingOcclusion(p[0], p[1], p[2]));
-        if (!hidden && !firstVis) firstVis = { p, hidden };
-        if (!hidden && prev && !prev.hidden) {
+      // v-fix(lip-seal): the lip is the green's coping — it must ALSO be the
+      // seal for sub-pixel junction seams. Two strokes: a slightly wider
+      // base pass (covers the wall/surface profile mismatch's last pixels),
+      // then the crisp line on top. Both at the SAME DENSIFIED ring and the
+      // same surfZ3 heights the wall top uses — one profile everywhere.
+      const lipPts = densifyRing(growPolyLocal(state.polyLocal, RING_M), 0.25);
+      const lipStroke = (widthPx, style) => {
+        ctx.strokeStyle = style;
+        ctx.lineWidth = widthPx;
+        let prev = null;
+        let firstVis = null;
+        for (const [mx, my] of lipPts) {
+          const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my) + 0.05);
+          const hidden = !p || (dressingOcclusion &&
+            dressingOcclusion(p[0], p[1], p[2]));
+          if (!hidden && !firstVis) firstVis = { p, hidden };
+          if (!hidden && prev && !prev.hidden) {
+            ctx.beginPath();
+            ctx.moveTo(prev.p[0], prev.p[1]);
+            ctx.lineTo(p[0], p[1]);
+            ctx.stroke();
+          }
+          prev = { p, hidden };
+        }
+        // close the ring (last → first)
+        if (prev && !prev.hidden && firstVis && !firstVis.hidden) {
           ctx.beginPath();
           ctx.moveTo(prev.p[0], prev.p[1]);
-          ctx.lineTo(p[0], p[1]);
+          ctx.lineTo(firstVis.p[0], firstVis.p[1]);
           ctx.stroke();
         }
-        prev = { p, hidden };
-      });
-      // close the ring (last → first)
-      if (prev && !prev.hidden && firstVis && !firstVis.hidden) {
-        ctx.beginPath();
-        ctx.moveTo(prev.p[0], prev.p[1]);
-        ctx.lineTo(firstVis.p[0], firstVis.p[1]);
-        ctx.stroke();
-      }
+      };
+      lipStroke(Math.max(2.2, 0.75 * (window.devicePixelRatio || 1)),
+        'rgba(150,160,154,0.95)');
+      lipStroke(1.1 * (window.devicePixelRatio || 1),
+        'rgba(176,186,180,0.95)');
     }
 
     // Surface break arrows (downhill), drawn on top of the mesh.

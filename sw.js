@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.99'; // + clip-silhouette: mesh keeps whole cells to the ring, everything outside the projected boundary polygon erased (near-plane-clipped) — no slack strip, no staircase, no tabs, any zoom/exag; arrow concave-chord fix; harness now verifies PINCH-ZOOMED like James actually views
+const CACHE_VERSION = 'v1.1.0'; // + geometry-clip rim (Sutherland-Hodgman, whole cells — silhouette IS the polygon), void-parity heights (mesh zAt ≡ surfZ3; NaN no longer blends as 0), wall body + ribbon underlay stack; harness: pinch-zoom frames, boot-race fix, winding-agnostic clip
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

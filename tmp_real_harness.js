@@ -51,11 +51,17 @@ require(path.join(__dirname, 'greenmap.js'));
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
   // wait for the real boot (Overpass + USGS can take a few seconds)
+  // v-fix(harness-boot-race): the old check broke at the FIRST status
+  // message ('Fetching USGS…' doesn't contain 'Loading'), so slow-USGS
+  // runs captured every frame before the mesh existed — blank, identical
+  // PNGs masquerading as a renderer regression. Wait for the READY status
+  // (mean-slope summary) instead.
   let ok = false;
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 240; i++) {
     await sleep(500);
     const st = getEl('gm-status').textContent || '';
-    if (st && !st.includes('Loading')) { ok = true; break; }
+    if (st.includes('mean slope') || st.includes('ridge') ||
+        st.toLowerCase().includes('failed')) { ok = true; break; }
   }
   console.log('[real] status:', getEl('gm-status').textContent, '(booted=' + ok + ')');
   await sleep(1000);
