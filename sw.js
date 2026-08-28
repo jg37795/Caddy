@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.95'; // + rim curtain removed (was cresting the far silhouette: gray teeth that render away when faced); one-ring seals the rim without it
+const CACHE_VERSION = 'v1.0.96'; // + gridRef on the mesh (launch bug: corridor loader poisoned the shared grid slot — slider "fixed" it); corner-tight rim trim kills hanging cells
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

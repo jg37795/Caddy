@@ -639,7 +639,16 @@
               const sxa = cxm(x + sx / SUB), sxb = cxm(x + (sx + 1) / SUB);
               const sya = cym(y + sy / SUB), syb = cym(y + (sy + 1) / SUB);
               const scx = (sxa + sxb) / 2, scy = (sya + syb) / 2;
-              if (!GreenMapCore.pointInPoly(scx, scy, O.polyLocalM)) continue;
+              // v-fix(corner-tight): keep only sub-quads FULLY inside the
+              // ring (centre AND all four corners). Centre-only testing let
+              // corners poke past the rim by up to ~0.15 m — lone hanging
+              // cells past the wall (James's screenshot). Anything dropped
+              // here reveals the wall behind the rim, never background.
+              if (!GreenMapCore.pointInPoly(scx, scy, O.polyLocalM) ||
+                  !GreenMapCore.pointInPoly(sxa, sya, O.polyLocalM) ||
+                  !GreenMapCore.pointInPoly(sxb, sya, O.polyLocalM) ||
+                  !GreenMapCore.pointInPoly(sxb, syb, O.polyLocalM) ||
+                  !GreenMapCore.pointInPoly(sxa, syb, O.polyLocalM)) continue;
               // Bilinear elevation from the 4 (edge-filled) cell corners.
               const fx = (sx + 0.5) / SUB, fy = (sy + 0.5) / SUB;
               const topZ = f(c00)[0] + (f(c10)[0] - f(c00)[0]) * fx;
@@ -1141,9 +1150,9 @@
       {
         smooth: true, ao: true, aoRadius: 4,
         elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t),
-        // v-fix(rim-precision): true polygon for edge-cell subdivision.
-        polyLocalM: (state.datasets.green && state.datasets.green.polyLocal) ||
-                    state.polyLocal || null,
+        // v-fix(one-ring): same grown-ring trim as green view (wall top + lip
+        // use the same ring), or the corridor's zone edge slivers.
+        polyLocalM: null,
         colorFn: (i, zMid) => {
           if (zone && zone[i]) {
             // Active-ramp colour for green cells (3D → rainbow topo).
@@ -1167,6 +1176,7 @@
           return [110 * k, 130 * k, 106 * k].map(Math.round);
         }
       });
+    if (ds.mesh) ds.mesh.gridRef = state.meshGrid;
     // Downhill arrows over the corridor (sparse — bigger step than 2D).
     const arr = [];
     const step = 5;
@@ -1475,8 +1485,9 @@
             }
       void cellM;
           }
-          // v-fix(single-elev-source): remember the grid the mesh was BUILT from so
-          // surfZ3 (skirt tops, rim lip, labels) samples the same surface exactly.
+          // v-fix(meshgrid-scope): attach the build grid TO the mesh — surfZ3 reads
+          // M.gridRef, so the elevation source can never be poisoned by another
+          // dataset (the corridor loader used to overwrite the shared slot).
           state.meshGrid = { grid: mg, W: mW, H: mH, cellSizeM: cellM };
           ds.meshGrid = state.meshGrid;
           state.mesh = GreenMapCore.buildMesh3D(
@@ -1492,6 +1503,7 @@
         polyLocalM: (state.polyLocal && state.polyLocal.length > 2)
           ? growPolyLocal(state.polyLocal, 0.25)
           : null });
+    if (state.mesh) state.mesh.gridRef = state.meshGrid;
     ds.mesh = state.mesh;
     // Downhill arrows on the surface. v2: sparse & bold like 18Birdies —
     // ~every 8th refined cell (≈40 arrows), uniform bold styling, not fuzz.
@@ -1526,7 +1538,14 @@
   function surfZ3(mx, my) {
     const M = state.mesh;
     if (!M) return 0;
-    const g = state.meshGrid || state.grid;
+    // v-fix(meshgrid-scope): the elevation source travels ON the mesh object
+    // (M.gridRef). The previous shared state.meshGrid slot was overwritten by
+    // the corridor loader ~1s after launch while the user sat in green view —
+    // green-view skirt/lip heights then sampled the COARSE corridor grid
+    // (black band / see-through at steep rims on first render; dragging the
+    // Exag slider "fixed" it by re-running buildScene). Attached to the mesh,
+    // it can never mismatch the active dataset.
+    const g = M.gridRef || state.grid;
     if (!g) return 0;
     const fx = mx / g.cellSizeM + g.W / 2 - 0.5;
     const fy = g.H / 2 - 0.5 - my / g.cellSizeM;
