@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.98'; // + wall-envelope tops (max surface height across the rim strip — no see-through strip at any exaggeration); barn-door inner-wall paint reverted; lip traces the envelope; 128x128 real LiDAR (0.31 m/cell, 97% valid)
+const CACHE_VERSION = 'v1.0.99'; // + clip-silhouette: mesh keeps whole cells to the ring, everything outside the projected boundary polygon erased (near-plane-clipped) — no slack strip, no staircase, no tabs, any zoom/exag; arrow concave-chord fix; harness now verifies PINCH-ZOOMED like James actually views
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

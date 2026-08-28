@@ -640,16 +640,18 @@
               const sxa = cxm(x + sx / SUBL), sxb = cxm(x + (sx + 1) / SUBL);
               const sya = cym(y + sy / SUBL), syb = cym(y + (sy + 1) / SUBL);
               const scx = (sxa + sxb) / 2, scy = (sya + syb) / 2;
-              // v-fix(corner-tight): keep only sub-quads FULLY inside the
-              // ring (centre AND all four corners). Centre-only testing let
-              // corners poke past the rim by up to ~0.15 m — lone hanging
-              // cells past the wall (James's screenshot). Anything dropped
-              // here reveals the wall behind the rim, never background.
-              if (!GreenMapCore.pointInPoly(scx, scy, O.polyLocalM) ||
-                  !GreenMapCore.pointInPoly(sxa, sya, O.polyLocalM) ||
-                  !GreenMapCore.pointInPoly(sxb, sya, O.polyLocalM) ||
-                  !GreenMapCore.pointInPoly(sxb, syb, O.polyLocalM) ||
-                  !GreenMapCore.pointInPoly(sxa, syb, O.polyLocalM)) continue;
+              // v-fix(clip-silhouette): keep any sub-quad whose CENTRE is
+              // inside the ring — the silhouette is no longer shaped by the
+              // trim at all. render3D now CLIPS the surface paint to the
+              // projected boundary polygon, so quads that poke past the ring
+              // are cut exactly at the polygon outline (smooth, no staircase,
+              // no trim slack = no strip for background to show through).
+              // Subdivision here stays for VOID edge-filling (masked/NaN
+              // corners interpolate) — not for silhouette shaping.
+              // (Corner-tight + 6→48 ladder REMOVED: they shaped the edge by
+              // dropping quads, which LEFT the slack strip James sees as the
+              // black zigzag at zoom. v1.0.99.)
+              if (!GreenMapCore.pointInPoly(scx, scy, O.polyLocalM)) continue;
               // Bilinear elevation sampled at EACH SUB-CORNER's own (fx,fy).
               // v-fix(rim-continuous): the old code flattened every sub-quad
               // to its centre height, so adjacent sub-quads met their shared
@@ -674,22 +676,12 @@
             }
             return out;
           };
-          // v-fix(sliver-depth): a boundary sliver so thin that NO 6×6
-          // sub-centre lands inside the ring used to keep the WHOLE cell —
-          // its far corners poked past the wall top as lone hanging tabs.
-          // Ladder 6→12→24→48: the widest cell that still fails all levels
-          // has <0.65 m/48 ≈ 1.3 cm of inside-ring width, so keeping finer
-          // levels bounds the trim slack (drawn-edge → ring gap) to ~0.65 cm
-          // — sub-pixel at every real zoom. A cell that fails ALL levels is
-          // a degenerate sliver: DROP it — the wall stands behind the ring,
-          // so a drop reveals wall, never background (standing invariant).
-          let subs = null;
-          for (const L of [6, 12, 24, 48]) {
-            const s = buildSubs(L);
-            if (s.length) { subs = s; break; }
-          }
-          if (subs) { quads.push(...subs); continue; }
-          continue;   // degenerate sliver: drop (wall behind, never background)
+          // v-fix(clip-silhouette): single 6×6 pass (void edge-filling only).
+          // A cell with NO sub-centre inside keeps its whole cell — the clip
+          // pass trims the overhang exactly at the polygon, and the wall
+          // stands behind the ring, so nothing can show through.
+          const subs = buildSubs(6);
+          if (subs.length) { quads.push(...subs); continue; }
         }
         quads.push({ v: [v00, v10, v11, v01],
                      col: col.map(Math.round),
@@ -2221,6 +2213,63 @@
     }
     void visible;
 
+    // v-fix(clip-silhouette): ERASE everything OUTSIDE the projected boundary
+    // polygon (even-odd clip: canvas rect + polygon ⇒ outside-polygon region).
+    // The surface mesh now keeps whole cells through the ring area (no trim
+    // slack to expose), and this pass cuts the paint EXACTLY at the polygon
+    // outline: smooth silhouette, zero staircase, zero slack strip — at any
+    // zoom, any exaggeration. It also post-hoc wipes any far-side wall crest
+    // (the old "teeth that render away when faced" cannot survive a pass
+    // that runs after the paint). Near walls are repainted by the after-pass
+    // drawSkirt below; the floor by the after-pass drawGridFloor.
+    if (bpts && bpts.length > 2 && state.viewMode !== 'hole') {
+      // v-fix(clip-nearplane): build the clip polygon HORIZON-SAFE. At
+      // extreme zoom + exaggeration, far-rim vertices can sit BEHIND the
+      // camera; projecting them anyway (or clamping z) folds the screen
+      // path into a self-intersecting star and even-odd parity erases the
+      // green itself. Instead: Sutherland–Hodgman clip of the 3D boundary
+      // ring against the camera near half-space (depth ≥ 0.5) FIRST, then
+      // project — a simple chain entirely in front of the eye projects to a
+      // simple screen polygon, guaranteed, at any zoom/exaggeration.
+      const NEAR = 0.5;
+      const dOf = (x, y, z) =>
+        cam.dist + x * cam.fwd[0] + y * cam.fwd[1] + z * cam.fwd[2];
+      let ring3 = bpts.map(([mx, my]) => [mx, my, surfZ3(mx, my)]);
+      const out3 = [];
+      const nR = ring3.length;
+      for (let i = 0; i < nR; i++) {
+        const A = ring3[i], B = ring3[(i + 1) % nR];
+        const dA = dOf(A[0], A[1], A[2]), dB = dOf(B[0], B[1], B[2]);
+        const Ain = dA >= NEAR, Bin = dB >= NEAR;
+        if (Ain) out3.push(A);
+        if (Ain !== Bin) {
+          const t = (NEAR - dA) / (dB - dA);
+          out3.push([A[0] + (B[0] - A[0]) * t,
+                     A[1] + (B[1] - A[1]) * t,
+                     A[2] + (B[2] - A[2]) * t]);
+        }
+      }
+      if (out3.length > 2) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, canvas.width, canvas.height);
+        let started = false;
+        for (const [mx, my, mz] of out3) {
+          const p = GreenMapCore.projectPt(cam, mx, my, mz);
+          if (!p) continue;
+          if (!started) { ctx.moveTo(p[0], p[1]); started = true; }
+          else ctx.lineTo(p[0], p[1]);
+        }
+        if (started) {
+          ctx.closePath();
+          ctx.clip('evenodd');
+          ctx.fillStyle = '#0e1411';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.restore();
+      }
+    }
+
     // 18Birdies dressing: contour iso-lines on the surface…
     drawContours3D(cam);
     // v-fix(skirt-underlay): skirt painted BEFORE the surface as well — any
@@ -2343,9 +2392,18 @@
           arrowRingSrc = state.polyLocal;
           arrowRing = growPolyLocal(state.polyLocal, -0.15);
         }
-        if (!GreenMapCore.pointInPoly(a.mx, a.my, arrowRing) ||
-            !GreenMapCore.pointInPoly(x1m, y1m, arrowRing) ||
-            !GreenMapCore.pointInPoly(x2m, y2m, arrowRing)) continue;
+        // v-fix(arrow-chord): 3-point tests (mid + ends) fail on CONCAVE
+        // ring sections — a chord between two inside points exits the
+        // polygon (James 22:06 15x: arrows crossing the silhouette exactly
+        // at the concave stretch). Sample the WHOLE segment; every point
+        // must be inside.
+        let inside = true;
+        for (let s = 0; s <= 6 && inside; s++) {
+          const t = s / 6;
+          const px2 = x1m + (x2m - x1m) * t, py2 = y1m + (y2m - y1m) * t;
+          if (!GreenMapCore.pointInPoly(px2, py2, arrowRing)) inside = false;
+        }
+        if (!inside) continue;
       }
       // v-fix(dressing-z): drop arrows hidden behind the surface — test the
       // midpoint AND both endpoints so a partially-hidden arrow (tail behind
