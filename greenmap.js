@@ -1457,14 +1457,13 @@
             // them and the rim kept macro teeth (dark background showing through
             // at glancing orbit angles). Polygon-first mask + finite-elevation
             // check gives the subdividing rim full coverage to the true outline.
-            // v-fix(surface-meets-wall): test against the polygon GROWN past the
-            // skirt's wall-top ring (+0.25 m) — the surface must REACH the wall
-            // top, or the horizontal annulus between polygon and wall reads as a
-            // black serrated band wherever the terrain falls away steeply at the
-            // rim (James's 8× screenshot). Wall tops are at +0.25 m; +0.35 m mask
-            // keeps the surface edge just outside the wall top at every point.
-            if (state.polyLocal && state.polyLocal.length > 2) {
-              const P = growPolyLocal(state.polyLocal, 0.35);
+            // v-fix(surface-meets-wall): test against the polygon GROWN to the skirt's
+                  // wall-top ring (+0.25 m) — surface edge, wall top and rim lip must be
+                  // the SAME ring. v1.0.93 grew the mask but not the sub-quad trim, so
+                  // whole-cell interior quads overhung the trimmed boundary by up to a
+                  // full fine cell — the hanging triangle teeth and widening slits.
+                  if (state.polyLocal && state.polyLocal.length > 2) {
+                    const P = growPolyLocal(state.polyLocal, 0.25);
               for (let y = 0; y < mH; y++)
                 for (let x = 0; x < mW; x++) {
                   const i = y * mW + x;
@@ -1486,7 +1485,13 @@
         // 18Birdies look: 3D views default to the classic topo rainbow.
         elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t),
         // v-fix(rim-precision): true boundary polygon for edge subdivision.
-        polyLocalM: state.polyLocal || null });
+        // v-fix(one-ring): trim against the GROWN ring — the same ring the
+        // skirt wall tops and rim lip use. Trimming the sub-quads against the
+        // bare polygon left a sub-cell sliver between surface edge and wall
+        // top at the far rim; the wall showed through it as gray teeth.
+        polyLocalM: (state.polyLocal && state.polyLocal.length > 2)
+          ? growPolyLocal(state.polyLocal, 0.25)
+          : null });
     ds.mesh = state.mesh;
     // Downhill arrows on the surface. v2: sparse & bold like 18Birdies —
     // ~every 8th refined cell (≈40 arrows), uniform bold styling, not fuzz.
@@ -1923,9 +1928,16 @@
         // the real skirt pass painted after the surface.
         if (bpts && bpts.length > 2 && state.viewMode !== 'hole') {
           const exag = state.v3.exag, Mz = state.mesh;
-          const zAtC = ([mx, my]) =>
-            Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
-            ((sampleElevRaw(mx, my) - Mz.zmin) * exag || 0);
+                // v-fix(curtain-tuck): the curtain top edge is a SMOOTH ring while the
+                // surface trim is a sub-cell staircase — wherever the staircase dips
+                // inside the ring, the curtain peeked above the far rim as gray teeth.
+                // Tuck the top edge below the surface: the curtain is a backstop, and
+                // everything below its top is still curtain, so lowering can't open a
+                // gap — it only stops it cresting the silhouette.
+                const TUCK = 0.055 * exag;
+                const zAtC = ([mx, my]) =>
+                  Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) - TUCK :
+                  ((sampleElevRaw(mx, my) - Mz.zmin) * exag || 0) - TUCK;
           const cQuads = GreenMapCore.buildSkirtQuads(
             growPolyLocal(bpts, (state.grid ? state.grid.cellSizeM : 0.6) * 0.25),
             zAtC, 0);

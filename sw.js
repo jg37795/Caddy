@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.93'; // + surface extended to the wall-top ring (fine mask on grown polygon) — no annulus, no black serrated band at any exag
+const CACHE_VERSION = 'v1.0.94'; // + ONE-RING: mesh sub-quads trim against the same grown ring as wall top + lip — kills far-rim gray teeth (verified on REAL OSM+LiDAR data)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
