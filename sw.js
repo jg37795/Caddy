@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.1.1'; // + closed drum: underlay wall draws ALL quads (far side included) — no more see-through-to-the-other-side; picker 64-cell fallback on 128 fetch failure (fixes "no data" when switching courses)
+const CACHE_VERSION = 'v1.1.2'; // + CONCAVE CLIP FIX: S-H deleted cells in re-entrant shadow of concave outline (250/942 cells = the 15x black moat); ear-clip triangulation + per-triangle S-H; far-wall/lip crest envelope; drum backboard; lip 2-sample occlusion // + closed drum: underlay wall draws ALL quads (far side included) — no more see-through-to-the-other-side; picker 64-cell fallback on 128 fetch failure (fixes "no data" when switching courses)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

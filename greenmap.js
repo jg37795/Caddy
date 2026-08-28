@@ -146,61 +146,112 @@
   // pieces sit exactly on the original surface. A quad fully inside is
   // returned unchanged (reference-identical); a quad fully outside
   // returns []; straddlers are cut EXACTLY at the polygon line.
-  GreenMapCore.clipQuadToPoly = function (q, poly) {
-    let out = [q];
-    const n = poly.length;
-    // Winding-agnostic: compute the polygon's signed area once and define
-    // "inside" as LEFT of each edge for CCW, RIGHT for CW. The real OSM
-    // polygon's node order is arbitrary (this CW polygon blanked the whole
-    // render when the test assumed CCW — v-fix clip-winding).
+  // v-fix(clip-concave): Sutherland–Hodgman against ALL edges is only valid
+  // for CONVEX clip polygons. The real OSM green is CONCAVE — the old
+  // whole-polygon pass deleted cells sitting in the re-entrant shadow of
+  // every concave arc (250/942 valid cells on the test green, 239 of them
+  // entirely INSIDE the ring; each deleted cell = a hole in the surface =
+  // the black moat between surface edge and wall at 15x, James 06:43 shot).
+  // Fix: ear-clip the polygon into triangles (an EXACT cover of any simple
+  // polygon, winding-agnostic), S-H the quad against each triangle, and
+  // return the union of pieces. Same primitive, correct for every shape.
+  // Triangulation is memoized per polygon reference (buildMesh3D clips the
+  // same ring for every boundary cell in one build).
+  const _triCache = new Map();
+  GreenMapCore.triangulatePoly = function (pts) {
+    const n = pts.length;
+    if (n < 3) return [];
+    const cached = _triCache.get(pts);
+    if (cached) return cached;
     let area2 = 0;
     for (let i = 0, j = n - 1; i < n; j = i++)
-      area2 += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+      area2 += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
     const ccw = area2 > 0;
-    for (let e = 0; e < n && out.length; e++) {
-      const A = poly[e], B = poly[(e + 1) % n];
-      const ex = B[0] - A[0], ey = B[1] - A[1];      // edge dir
-      // Signed side: >0 = left of A→B. Inside = left for CCW, right for CW.
-      const side = (px, py) =>
-        (ex * (py - A[1]) - ey * (px - A[0])) * (ccw ? 1 : -1);
-      const next = [];
-      for (const subj of out) {
-        // Sutherland–Hodgman of one subject (3 or 4 corners) vs one edge.
-        // v-fix: subjects may be TRIANGLES after an earlier clip stage —
-        // iterate pts.length, never a hardcoded 4.
-        const pts = subj;
-        const nv = pts.length;
-        const res = [];
-        for (let i = 0; i < nv; i++) {
-          const P = pts[i], Q = pts[(i + 1) % nv];
-          const sP = side(P[0], P[1]), sQ = side(Q[0], Q[1]);
-          if (sP >= 0) {
-            res.push(P);
-            if (sQ < 0) {
+    const idx = [];
+    for (let i = 0; i < n; i++) idx.push(i);
+    const tris = [];
+    let guard = 0;
+    while (idx.length > 3 && guard++ < 4 * n + 16) {
+      let clipped = false;
+      for (let k = 0; k < idx.length; k++) {
+        const a = idx[(k + idx.length - 1) % idx.length],
+              b = idx[k],
+              c = idx[(k + 1) % idx.length];
+        const A = pts[a], B = pts[b], C2 = pts[c];
+        const cross = (B[0] - A[0]) * (C2[1] - A[1]) -
+                      (B[1] - A[1]) * (C2[0] - A[0]);
+        const convex = ccw ? cross > 1e-9 : cross < -1e-9;
+        if (!convex) continue;
+        // No other vertex inside this ear (collinear ring members excluded
+        // by the strict cross test above).
+        let contains = false;
+        for (const m of idx) {
+          if (m === a || m === b || m === c) continue;
+          const P = pts[m];
+          const s1 = (B[0] - A[0]) * (P[1] - A[1]) - (B[1] - A[1]) * (P[0] - A[0]);
+          const s2 = (C2[0] - B[0]) * (P[1] - B[1]) - (C2[1] - B[1]) * (P[0] - B[0]);
+          const s3 = (A[0] - C2[0]) * (P[1] - C2[1]) - (A[1] - C2[1]) * (P[0] - C2[0]);
+          const inside = ccw ? (s1 >= -1e-9 && s2 >= -1e-9 && s3 >= -1e-9)
+                             : (s1 <= 1e-9 && s2 <= 1e-9 && s3 <= 1e-9);
+          if (inside) { contains = true; break; }
+        }
+        if (contains) continue;
+        tris.push([A, B, C2]);
+        idx.splice(k, 1);
+        clipped = true;
+        break;
+      }
+      if (!clipped) break;    // degenerate input: keep what we have
+    }
+    if (idx.length === 3)
+      tris.push([pts[idx[0]], pts[idx[1]], pts[idx[2]]]);
+    _triCache.set(pts, tris);
+    return tris;
+  };
+  GreenMapCore.clipQuadToPoly = function (q, poly) {
+    const tris = GreenMapCore.triangulatePoly(poly);
+    if (!tris.length) return [];
+    const out = [];
+    for (const tri of tris) {
+      let subj = [q];
+      // S-H of the (remaining) subject against this ONE triangle edge.
+      for (let e = 0; e < 3 && subj.length; e++) {
+        const A = tri[e], B = tri[(e + 1) % 3];
+        const ex = B[0] - A[0], ey = B[1] - A[1];
+        const side = (px, py) => ex * (py - A[1]) - ey * (px - A[0]);
+        const next = [];
+        for (const pts of subj) {
+          const nv = pts.length;
+          const res = [];
+          for (let i = 0; i < nv; i++) {
+            const P = pts[i], Q = pts[(i + 1) % nv];
+            const sP = side(P[0], P[1]), sQ = side(Q[0], Q[1]);
+            if (sP >= 0) {
+              res.push(P);
+              if (sQ < 0) {
+                const t = sP / (sP - sQ);
+                res.push([P[0] + (Q[0] - P[0]) * t,
+                          P[1] + (Q[1] - P[1]) * t,
+                          P[2] + (Q[2] - P[2]) * t]);
+              }
+            } else if (sQ >= 0) {
               const t = sP / (sP - sQ);
               res.push([P[0] + (Q[0] - P[0]) * t,
                         P[1] + (Q[1] - P[1]) * t,
                         P[2] + (Q[2] - P[2]) * t]);
             }
-          } else if (sQ >= 0) {
-            const t = sP / (sP - sQ);
-            res.push([P[0] + (Q[0] - P[0]) * t,
-                      P[1] + (Q[1] - P[1]) * t,
-                      P[2] + (Q[2] - P[2]) * t]);
           }
+          if (res.length === 4) next.push(res);
+          else if (res.length > 4)
+            for (let i = 1; i < res.length - 1; i++)
+              next.push([res[0], res[i], res[i + 1], res[i + 1]]);
+          else if (res.length === 3)
+            next.push([res[0], res[1], res[2], res[2]]);
+          // res.length < 3 → subject fully outside this triangle: dropped.
         }
-        // Consumers expect exactly 4 corners: triangles become degenerate
-        // quads (4th vertex = 3rd), 5+-gons fan-triangulate the same way.
-        if (res.length === 4) next.push(res);
-        else if (res.length > 4) {
-          for (let i = 1; i < res.length - 1; i++)
-            next.push([res[0], res[i], res[i + 1], res[i + 1]]);
-        } else if (res.length === 3) {
-          next.push([res[0], res[1], res[2], res[2]]);
-        }
-        // res.length < 3 → fully outside this edge: dropped.
+        subj = next;
       }
-      out = next;
+      for (const piece of subj) out.push(piece);
     }
     return out;
   };
@@ -1944,6 +1995,38 @@
       }
     }
     if (front.length < 2) return;
+    // v-fix(far-lip-envelope): mirror of the skirt far-wall fix — on the FAR
+    // half the ribbon top must reach the LOCAL MAX surface height along the
+    // ring (±1 densified vertex ≈ ±0.25 m, the scale of a rim-tab V-notch),
+    // or the sightline that cleared the wall crest clears the ribbon too.
+    // Local window only — never a camera-direction ray (that couples each
+    // vertex to the green's global max).
+    {
+      // v-fix(lip-envelope-all): apply the crest envelope to EVERY ribbon
+      // vertex, not just the far half. The 15x black sliver sat on a segment
+      // the near/far half-space classified as NEAR: left at exact ring
+      // height, the clipped-cell chord passed ABOVE it (chord sag scales
+      // with exaggeration). The ribbon is a pure underlay — the surface
+      // painter overpaints it wherever surface pixels exist — so raising
+      // its crest to the local ring max can only ADD coverage in the V
+      // notches, never paint over the green. Where it pokes past the
+      // silhouette at a falling notch it reads as the rolled lip.
+      for (let i = 0; i < ring.length; i++) {
+        // v-fix(far-lip-widen): ±2 densified vertices on BOTH sides (the
+        // V-notch pitch is up to a full cell wide; ±1 under-covers).
+        let zMax = -Infinity;
+        for (let d = -2; d <= 2; d++) {
+          const nb = ring[(i + d + ring.length) % ring.length];
+          const z = surfZ3(nb[0], nb[1]);
+          if (Number.isFinite(z) && z > zMax) zMax = z;
+        }
+        if (Number.isFinite(zMax)) {
+          const p2 = GreenMapCore.projectPt(cam, ring[i][0], ring[i][1],
+                                            zMax + 0.06);
+          if (p2) front[i] = p2;
+        }
+      }
+    }
     // v-fix(ribbon-all): draw EVERY segment unconditionally. On the near
     // side the surface painter (which runs LATER) overpaints the ribbon
     // wherever the surface has pixels — no gate needed. On the far side the
@@ -2022,6 +2105,31 @@
       const wny = polyCCW ? -ex / l : ex / l;
       const isBack = wnx * (camPos[0] - mx) +
                      wny * (camPos[1] - my) <= 0;
+      // v-fix(far-lip-envelope): the far wall's top follows the RING height,
+      // which chords between cell-corner crests — in the V between two rim
+      // tabs the crest dips and a sightline at 15x passes over it to the
+      // background (single black triangle between tabs, .fringecrop.png).
+      // Back quads only: raise the top to the MAX surface height along the
+      // segment. By construction that max is a height the adjacent surface
+      // tabs themselves reach, so the crest can never overtop the silhouette
+      // (the v1.0.98 grey-over-near-face bug came from enveloping the NEAR
+      // walls, which the surface already covers — near walls stay exact).
+      if (isBack) {
+        // v-fix(far-lip-widen): sample ±2 densified-vertex lengths BEYOND the
+        // segment along its own tangent (13 points ≈ ±0.5 m window) — the
+        // V-notch pitch between rim tabs is a full cell (0.31–0.62 m), so a
+        // window shorter than that can still sit below the tab tops.
+        let zMax = -Infinity;
+        const sxx = q.v[1][0] - q.v[0][0], syy = q.v[1][1] - q.v[0][1];
+        for (const tt of [-1, -2 / 3, -1 / 3, 0, 1 / 6, 1 / 3, 1 / 2,
+                          2 / 3, 5 / 6, 1, 4 / 3, 5 / 3, 2]) {
+          const ex2 = q.v[0][0] + sxx * tt;
+          const ey2 = q.v[0][1] + syy * tt;
+          const z = surfZ3(ex2, ey2);
+          if (Number.isFinite(z) && z > zMax) zMax = z;
+        }
+        if (zMax > -Infinity) { q.v[0][2] = zMax; q.v[1][2] = zMax; }
+      }
       if (isBack && !allowBackFaces) {
         // AFTER pass: back faces are depth-gated (fill visible holes only).
         // v-fix(drum): the underlay pass (allowBackFaces=true, runs BEFORE
@@ -2048,6 +2156,49 @@
       if (ok) items.push({ sp, d: dsum / 4 });
     }
     items.sort((a, b) => b.d - a.d);      // far → near
+    // v-fix(drum-backboard): ONE filled band between the crest ring and the
+    // base ring, drawn BEFORE the plates. Plates are individual quads — at a
+    // convex ring corner they fan apart in screen space and a wedge of
+    // background showed through between them (the last 15x triangle; three
+    // crest-envelope variants and per-vertex welds could not seal it,
+    // .fringecrop.png series). A single closed fill has no inter-quad seams:
+    // cracks become impossible by construction. Same grey family as the
+    // plates (they paint over it with their gradient); wherever the green
+    // surface exists the later surface painter overpaints the band top.
+    {
+      const crest = [], base = [];
+      for (let i = 0; i < sPts.length; i++) {
+        const [mx, my] = sPts[i];
+        let zMax = -Infinity;
+        for (let d2 = -2; d2 <= 2; d2++) {
+          const nb = sPts[(i + d2 + sPts.length) % sPts.length];
+          const z = surfZ3(nb[0], nb[1]);
+          if (Number.isFinite(z) && z > zMax) zMax = z;
+        }
+        if (!Number.isFinite(zMax)) { crest.push(null); base.push(null); continue; }
+        crest.push(GreenMapCore.projectPt(cam, mx, my, zMax + 0.06));
+        base.push(GreenMapCore.projectPt(cam, mx, my, 0));
+      }
+      ctx.fillStyle = 'rgb(96,104,100)';
+      let run = [];
+      const flushRun = () => {
+        if (run.length > 1) {
+          ctx.beginPath();
+          run.forEach((i, k) => k ? ctx.lineTo(crest[i][0], crest[i][1])
+                                  : ctx.moveTo(crest[i][0], crest[i][1]));
+          for (let k = run.length - 1; k >= 0; k--) {
+            const i = run[k];
+            ctx.lineTo(base[i][0], base[i][1]);
+          }
+          ctx.closePath();
+          ctx.fill();
+        }
+        run = [];
+      };
+      for (let i = 0; i < sPts.length; i++)
+        if (crest[i] && base[i]) run.push(i); else flushRun();
+      flushRun();
+    }
     // v-fix(wall-no-stroke): the per-quad dark stroke drew a near-black line
     // along the wall TOP — visible in James's screenshots as a persistent
     // black zigzag line between surface and wall ("that black line"), and as
@@ -2539,8 +2690,19 @@
         let firstVis = null;
         for (const [mx, my] of lipPts) {
           const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my) + 0.05);
+          // v-fix(lip-occ-cell): a point is hidden only when occluded at
+          // ring height AND at +0.5 m. The coarse depth cells (9 px) at a
+          // rim-tab boundary hold the ADJACENT tab's nearer depth, so the
+          // old single-height test classified visible far-lip segments as
+          // hidden and skipped them — leaving a 3 px wedge of background
+          // between the tab edge and the ribbon (last 15x triangle,
+          // .fringecrop.png). The second sample clears the contamination;
+          // genuinely buried segments still fail BOTH tests.
+          const pHi = GreenMapCore.projectPt(cam, mx, my,
+            surfZ3(mx, my) + 0.5);
           const hidden = !p || (dressingOcclusion &&
-            dressingOcclusion(p[0], p[1], p[2]));
+            dressingOcclusion(p[0], p[1], p[2]) &&
+            (!pHi || dressingOcclusion(pHi[0], pHi[1], pHi[2])));
           if (!hidden && !firstVis) firstVis = { p, hidden };
           if (!hidden && prev && !prev.hidden) {
             ctx.beginPath();
