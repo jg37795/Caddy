@@ -1324,6 +1324,7 @@
     status.textContent = `${state.polySource === 'ellipse'
       ? 'ellipse fallback' : 'OSM green shape'} · ` +
       `${(sumS / Math.max(1, nValid)).toFixed(1)}% mean slope`;
+    setLocLabel(state.polySource);
   }
 
   /* ======================================================================
@@ -3557,11 +3558,78 @@
     });
   }
 
+  /* ======================================================================
+     5c. LOCATION TRUST — prove which green loaded; adjust it if wrong.
+     ====================================================================== */
+  // Header readout: coordinates + where they came from. The OSM polygon
+  // check is the REAL proof: if Overpass finds a mapped green at these
+  // coords, say so; if we fell back to the ellipse, SAY SO — that is the
+  // "am I looking at the right green" tell.
+  function setLocLabel(polySource) {
+    const el = document.getElementById('gm-loc');
+    if (!el) return;
+    const la = state.lat.toFixed(5), ln = state.lng.toFixed(5);
+    const src = polySource === 'osm'
+      ? '✓ real green outline (OSM)'
+      : polySource === 'ellipse'
+        ? '⚠ approx outline — no OSM green found here'
+        : '…';
+    el.textContent = `${la}, ${ln} · ${src}`;
+  }
+
+  function wireLocationTools() {
+    // ‹ Back — returns to the app tab that launched us (postMessage for
+    // same-origin app shells; location.assign otherwise; plain history.back
+    // as the last resort). Hidden when we were opened cold (no referrer).
+    const back = document.getElementById('gm-back');
+    if (back) {
+      const hasHistory = typeof window.history !== 'undefined' &&
+        Number.isFinite(window.history.length);
+      if (document.referrer || (hasHistory && window.history.length > 1)) {
+        back.style.display = '';
+        back.addEventListener('click', () => {
+          try { window.close(); } catch (e) {}
+          if (hasHistory && window.history.length > 1) window.history.back();
+          else location.href = './index.html';
+        });
+      }
+    }
+
+    // Edit loc — nudge which green is loaded. Shows a shift sheet: move the
+    // sample point N/S/E/W in 5 m steps (the polygon + LiDAR re-fetch on
+    // Apply). This fixes "it loaded the neighbour green" without leaving.
+    const btn = document.getElementById('gm-editloc');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const step = 5; // metres
+      const mLat = 1 / 111320;
+      const mLng = 1 / (111320 * Math.cos(state.lat * Math.PI / 180));
+      const move = (dy, dx) => {
+        state.lat += dy * step * mLat;
+        state.lng += dx * step * mLng;
+        loadGreen();
+      };
+      const dir = {
+        'N': [1, 0], 'S': [-1, 0], 'E': [0, 1], 'W': [0, -1],
+      };
+      const apply = (d) => { const v = dir[d]; if (v) move(v[0], v[1]); };
+      const ans = prompt(
+        'Nudge which green is loaded:\n' +
+        'Enter N, S, E or W to shift the sample point ' + step +
+        ' m (tap again to repeat).\n' +
+        'Current: ' + state.lat.toFixed(5) + ', ' + state.lng.toFixed(5) +
+        '\n(Leave empty + OK to re-fetch as-is; Cancel does nothing.)');
+      if (ans && dir[ans.trim().toUpperCase()]) apply(ans.trim().toUpperCase());
+      else if (ans === '') loadGreen();
+    });
+  }
+
   window.addEventListener('resize', () => { fitView(); render(); });
 
   /* ======================================================================
      6. BOOT
      ====================================================================== */
   wireChrome();
+  wireLocationTools();
   loadGreen();
 })();

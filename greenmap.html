@@ -21,7 +21,9 @@
 </div>
 
 <div id="gm-topbar" class="gm-chrome">
-  <span id="gm-title">⛳ Green Slope <span style="color:#9db3a6;font-weight:400">prototype</span></span>
+  <button class="gm-btn" id="gm-back" title="Back to the Caddy app" style="display:none">‹ Back</button>
+  <span id="gm-title">⛳ Green Slope</span>
+  <span id="gm-loc" title="The green this view loaded"></span>
   <select id="gm-preset" class="gm-select" title="Preset greens"></select>
   <select id="gm-mode" class="gm-select" title="Color mode" style="max-width:110px">
     <option value="slope">Slope</option>
@@ -44,6 +46,7 @@
     <option value="12">Stimp 12</option>
   </select>
   <button class="gm-btn" id="gm-ball" title="Then tap the green to drop a ball for the putt preview">Ball ⛳</button>
+  <button class="gm-btn" id="gm-editloc" title="Verify / adjust which green is loaded">Edit loc</button>
   <button class="gm-btn" id="gm-clear-ball">Clear ball</button>
   <button class="gm-btn" id="gm-recenter">⤢ Fit</button>
   <span id="gm-status">Loading…</span>

@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.1.5'; // + APP INTEGRATION: '3D Green' pill on the Play tab (greenlink.js) opens greenmap.html at the CURRENT hole's green/tee from the live round session; greenmap shell + greenlink precached; sw.js body restored (it had been truncated to the version line - offline shell was gone) (numeric camera fit; fairway brightened; sparse arrows with void-parity + off-surface gate) + GREENMAP INTEGRATION: '3D Green' pill on Play tab launches greenmap.html at the current hole's green/tee (greenlink.js, read-only); greenmap shell + greenlink precached; sw.js body restored (it had been truncated to the version line alone - offline shell was gone)
+const CACHE_VERSION = 'v1.1.6'; // + GREEN TRUST: tool shows WHICH green loaded (coords + real-OSM-outline vs approx-fallback badge); 'Edit loc' nudges the sample point N/S/E/W when it grabbed the wrong green; Back button returns to the Play map (same-tab launch)
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

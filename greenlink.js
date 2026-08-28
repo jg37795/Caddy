@@ -89,7 +89,9 @@
         '&lng=' + g.lng.toFixed(6);
       if (g.tee) url += '&teelat=' + g.tee.lat.toFixed(6) +
         '&teelng=' + g.tee.lng.toFixed(6);
-      window.open(url, '_blank');
+      // Same-tab navigation (not window.open) so the tool's ‹ Back returns
+      // straight to the Play map on the phone.
+      location.href = url;
     });
     return p;
   }
