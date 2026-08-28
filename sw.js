@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.96'; // + gridRef on the mesh (launch bug: corridor loader poisoned the shared grid slot — slider "fixed" it); corner-tight rim trim kills hanging cells
+const CACHE_VERSION = 'v1.0.97'; // + ONE-RING in metres everywhere (0.25, was 0.156 skirt/lip); corner-exact rim heights (sawtooth killer); sliver ladder 6-48; mitre-joined rings; arrow silhouette gate; harness orbit honesty fix
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

@@ -633,11 +633,12 @@
              !mask[c00[1]] || !mask[c10[1]] ||
              !mask[c01[1]] || !mask[c11[1]])) {
           const SUB = 6;
-          const subs = [];
-          for (let sy = 0; sy < SUB; sy++)
-            for (let sx = 0; sx < SUB; sx++) {
-              const sxa = cxm(x + sx / SUB), sxb = cxm(x + (sx + 1) / SUB);
-              const sya = cym(y + sy / SUB), syb = cym(y + (sy + 1) / SUB);
+          const buildSubs = (SUBL) => {
+            const out = [];
+            for (let sy = 0; sy < SUBL; sy++)
+            for (let sx = 0; sx < SUBL; sx++) {
+              const sxa = cxm(x + sx / SUBL), sxb = cxm(x + (sx + 1) / SUBL);
+              const sya = cym(y + sy / SUBL), syb = cym(y + (sy + 1) / SUBL);
               const scx = (sxa + sxb) / 2, scy = (sya + syb) / 2;
               // v-fix(corner-tight): keep only sub-quads FULLY inside the
               // ring (centre AND all four corners). Centre-only testing let
@@ -649,20 +650,46 @@
                   !GreenMapCore.pointInPoly(sxb, sya, O.polyLocalM) ||
                   !GreenMapCore.pointInPoly(sxb, syb, O.polyLocalM) ||
                   !GreenMapCore.pointInPoly(sxa, syb, O.polyLocalM)) continue;
-              // Bilinear elevation from the 4 (edge-filled) cell corners.
-              const fx = (sx + 0.5) / SUB, fy = (sy + 0.5) / SUB;
-              const topZ = f(c00)[0] + (f(c10)[0] - f(c00)[0]) * fx;
-              const botZ = f(c01)[0] + (f(c11)[0] - f(c01)[0]) * fx;
-              const zz = topZ + (botZ - topZ) * fy;
-              const sz = (zz - zmin) * exag;
-              subs.push({
-                v: [[sxa, sya, sz], [sxb, sya, sz],
-                    [sxb, syb, sz], [sxa, syb, sz]],
+              // Bilinear elevation sampled at EACH SUB-CORNER's own (fx,fy).
+              // v-fix(rim-continuous): the old code flattened every sub-quad
+              // to its centre height, so adjacent sub-quads met their shared
+              // edge at DIFFERENT heights (z at fx=0.083 vs fx=0.25) — on a
+              // steep gradient the rim was a staircase of alternating ledges:
+              // the sawtooth at the red-to-grey junction that survived every
+              // ring fix. Corner-exact sampling makes neighbours share
+              // bit-identical edge heights, continuous across cells too
+              // (a cell-edge sub-corner equals the neighbour's f(c00)-based
+              // value by the same bilinear formula).
+              const zAt = (fx, fy) => {
+                const tz = f(c00)[0] + (f(c10)[0] - f(c00)[0]) * fx;
+                const bz = f(c01)[0] + (f(c11)[0] - f(c01)[0]) * fx;
+                return (tz + (bz - tz) * fy - zmin) * exag;
+              };
+              out.push({
+                v: [[sxa, sya, zAt(sx / SUBL, sy / SUBL)],
+                    [sxb, sya, zAt((sx + 1) / SUBL, sy / SUBL)],
+                    [sxb, syb, zAt((sx + 1) / SUBL, (sy + 1) / SUBL)],
+                    [sxa, syb, zAt(sx / SUBL, (sy + 1) / SUBL)]],
                 col: col.map(Math.round), vc: corners, n });
             }
-          if (subs.length) { quads.push(...subs); continue; }
-          // Thin sliver: no sub-centre inside — keep the whole cell so the
-          // rim never opens a hole.
+            return out;
+          };
+          // v-fix(sliver-depth): a boundary sliver so thin that NO 6×6
+          // sub-centre lands inside the ring used to keep the WHOLE cell —
+          // its far corners poked past the wall top as lone hanging tabs.
+          // Ladder 6→12→24→48: the widest cell that still fails all levels
+          // has <0.65 m/48 ≈ 1.3 cm of inside-ring width, so keeping finer
+          // levels bounds the trim slack (drawn-edge → ring gap) to ~0.65 cm
+          // — sub-pixel at every real zoom. A cell that fails ALL levels is
+          // a degenerate sliver: DROP it — the wall stands behind the ring,
+          // so a drop reveals wall, never background (standing invariant).
+          let subs = null;
+          for (const L of [6, 12, 24, 48]) {
+            const s = buildSubs(L);
+            if (s.length) { subs = s; break; }
+          }
+          if (subs) { quads.push(...subs); continue; }
+          continue;   // degenerate sliver: drop (wall behind, never background)
         }
         quads.push({ v: [v00, v10, v11, v01],
                      col: col.map(Math.round),
@@ -1473,7 +1500,7 @@
                   // whole-cell interior quads overhung the trimmed boundary by up to a
                   // full fine cell — the hanging triangle teeth and widening slits.
                   if (state.polyLocal && state.polyLocal.length > 2) {
-                    const P = growPolyLocal(state.polyLocal, 0.25);
+                    const P = growPolyLocal(state.polyLocal, RING_M);
               for (let y = 0; y < mH; y++)
                 for (let x = 0; x < mW; x++) {
                   const i = y * mW + x;
@@ -1501,7 +1528,7 @@
         // bare polygon left a sub-cell sliver between surface edge and wall
         // top at the far rim; the wall showed through it as gray teeth.
         polyLocalM: (state.polyLocal && state.polyLocal.length > 2)
-          ? growPolyLocal(state.polyLocal, 0.25)
+          ? growPolyLocal(state.polyLocal, RING_M)
           : null });
     if (state.mesh) state.mesh.gridRef = state.meshGrid;
     ds.mesh = state.mesh;
@@ -1628,13 +1655,26 @@
     ctx.stroke();
   }
 
+  // THE one-ring (v1.0.97): every boundary-offset consumer — fine mask,
+  // sub-quad trim, skirt wall tops, depth-prepass skirt, rim lip — grows the
+  // bare boundary polygon by exactly THIS many metres. v1.0.94 said "one
+  // ring" but the skirt/lip computed cellSize*0.25 ≈ 0.156 m (quarter-COARSE-
+  // cell, a units slip) while the mask/trim used a literal 0.25 m — a ~9 cm
+  // mismatch that left the surface's outer band unsupported over the wall on
+  // steep falling rims (serrated background-through teeth at glancing angles,
+  // pale tabs past the silhouette from above). Metres, one constant, one ring.
+  const RING_M = 0.25;
+  // Cached boundary ring INSET 0.15 m for the arrow silhouette gate
+  // (v-fix arrow-silhouette); re-derived whenever state.polyLocal changes.
+  let arrowRing = null, arrowRingSrc = null;
+
   // v-fix(skirt-grow): offset the boundary polygon OUTWARD by h metres along
   // each vertex's outward bisector. Wall tops built on the grown ring always
   // sit OUTSIDE the drawn surface edge (rim quads overshoot the polygon by up
   // to half a fine cell where interior cells keep whole-cell quads), so every
   // rim pixel has wall behind it — no black gaps between surface and skirt.
   function growPolyLocal(pts, h) {
-    if (!pts || pts.length < 3 || !(h > 0)) return pts;
+    if (!pts || pts.length < 3 || !(Math.abs(h) > 0)) return pts;
     const n = pts.length;
     let area2 = 0;
     for (let i = 0, j = n - 1; i < n; j = i++)
@@ -1647,14 +1687,34 @@
       const l = Math.hypot(ex, ey) || 1;
       return ccw ? [ey / l, -ex / l] : [-ey / l, ex / l];
     };
+    // v-fix(mitre-join): offset each EDGE's supporting LINE by h, then
+    // rebuild vertices as intersections of consecutive offset lines.
+    // Offsetting VERTICES along bisectors (the old code) under-covers at
+    // sharp CONCAVE corners — the two offset edge lines cross before the
+    // bisector point lands, so the ring dipped INSIDE the drawn surface
+    // edge and the wall top left a red surface fragment visible past the
+    // grey at glancing angles (Front-left dip, .rimreal10 zoom). Line-line
+    // offsets give a true mitre join at every winding. Parallel/degenerate
+    // neighbours fall back to the bisector point.
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       const p = pts[i], prev = pts[(i - 1 + n) % n], next = pts[(i + 1) % n];
       const n1 = edgeN(prev, p), n2 = edgeN(p, next);
-      const nx = n1[0] + n2[0], ny = n1[1] + n2[1];
-      const l = Math.hypot(nx, ny);
-      if (l < 1e-6) { out[i] = [p[0], p[1]]; continue; }   // spike: keep put
-      out[i] = [p[0] + nx / l * h, p[1] + ny / l * h];
+      // Offset line 1: point A = prev + n1*h, dir d1 = p - prev.
+      // Offset line 2: point B = p + n2*h,    dir d2 = next - p.
+      const ax = prev[0] + n1[0] * h, ay = prev[1] + n1[1] * h;
+      const d1x = p[0] - prev[0], d1y = p[1] - prev[1];
+      const bx = p[0] + n2[0] * h, by = p[1] + n2[1] * h;
+      const d2x = next[0] - p[0], d2y = next[1] - p[1];
+      const den = d1x * d2y - d1y * d2x;
+      if (Math.abs(den) < 1e-9) {
+        // Near-parallel edges (collinear run): the offset lines coincide —
+        // either offset point is the vertex.
+        out[i] = [bx, by];
+        continue;
+      }
+      const t = ((bx - ax) * d2y - (by - ay) * d2x) / den;
+      out[i] = [ax + d1x * t, ay + d1y * t];
     }
     return out;
   }
@@ -1663,14 +1723,15 @@
   // plane (z=0 pre-exaggeration) — gives the model physical thickness.
   function drawSkirt(cam, bpts) {
     const exag = state.v3.exag, M = state.mesh;
-    // v-fix(skirt-grow): wall tops on the polygon GROWN half a fine cell
-    // outward. The rim quads overshoot the polygon by up to half a cell
-    // (interior cells keep whole-cell quads), so an exact-polygon wall left
-    // sub-cell unsupported lip — surface colour visible past the wall with
-    // black background behind it. Grown wall tops are always OUTSIDE the
-    // drawn surface edge: every rim pixel has wall behind it.
-    const sPts = growPolyLocal(bpts,
-      (state.grid ? state.grid.cellSizeM : 0.6) * 0.25);
+    // v-fix(skirt-grow): wall tops on the polygon GROWN OUT to the ONE-RING
+    // (+0.25 m) — the exact ring the fine mask and sub-quad trim test
+    // against. Previously the skirt used cellSize*0.25 ≈ 0.156 m (a
+    // metres-vs-quarter-cell slip): the surface still reached ~9 cm past
+    // the wall-top line, and on a steep FALLING rim that outer band hung
+    // in space — serrated background-through teeth at glancing angles and
+    // pale tabs past the silhouette from above (James's 8× shots, 20:51).
+    // One ring, in one unit: 0.25 METRES everywhere.
+    const sPts = growPolyLocal(bpts, RING_M);
     const zAt = ([mx, my]) =>
       Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
       ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
@@ -1701,8 +1762,19 @@
       let ny = polyCCW ? -ex / l : ex / l;
       const mx = (q.v[0][0] + q.v[1][0]) / 2,
             my = (q.v[0][1] + q.v[1][1]) / 2;
-      if (nx * (camPos[0] - mx) + ny * (camPos[1] - my) <= 0)
-        continue;                                    // back face — skip
+      if (nx * (camPos[0] - mx) + ny * (camPos[1] - my) <= 0) {
+        // v-fix(near-inner-wall): a BACK face on the NEAR half still draws.
+        // At concave rim sections the outward normal points away from the
+        // camera, so the wall was culled exactly where the corner-tight
+        // sub-quad trim drops overhanging slivers — the slit showed the
+        // near cliff rows from outside (orange dashes) and the far side
+        // through the gaps (probe A/B: persists with arrows off, seals at
+        // 1× ⇒ displacement-scaled see-through, not paint). Far-side back
+        // faces stay culled (v1.0.95's "pieces rendering when not facing
+        // me" must not return).
+        if (mx * camPos[0] + my * camPos[1] <= 0)
+          continue;                                  // far back face — skip
+      }
       let dsum = 0, ok = true;
       const sp = [];
       for (let c = 0; c < 4; c++) {
@@ -2033,15 +2105,15 @@
     ] : null;
     if (haveSkirt) {
       // v-fix(skirt-winding + skirt-grow): match drawSkirt exactly — walls on
-      // the grown ring, culled by winding-based outward normals.
+      // the ONE-RING (RING_M metres, the same constant as everything else),
+      // culled by winding-based outward normals. Was cellSize*0.25 ≈ 0.156 m.
       const sQuads = GreenMapCore.buildSkirtQuads(
-        growPolyLocal(bpts, (state.grid ? state.grid.cellSizeM : 0.6) * 0.25),
+        growPolyLocal(bpts, RING_M),
         ([mx, my]) =>
           Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
           ((sampleElevRaw(mx, my) - M.zmin) * state.v3.exag || 0), 0);
       let area2 = 0;
-      const gPts = growPolyLocal(bpts,
-        (state.grid ? state.grid.cellSizeM : 0.6) * 0.25);
+      const gPts = growPolyLocal(bpts, RING_M);
       for (let i = 0, j = gPts.length - 1; i < gPts.length; j = i++)
         area2 += gPts[j][0] * gPts[i][1] - gPts[i][0] * gPts[j][1];
       const polyCCW = area2 > 0;
@@ -2184,12 +2256,12 @@
       const LIP = 1.1 * (window.devicePixelRatio || 1);
       ctx.strokeStyle = 'rgba(158,168,162,0.9)';
       ctx.lineWidth = LIP;
-      // v-fix(lip-on-walltop): trace the GROWN ring (the actual wall-top
-      // edge), not the bare polygon — surface quads overshoot the polygon by
-      // up to half a fine cell, and those nubbins poked past a polygon-level
-      // lip. The grown ring is where the wall top really is.
-      const lipPts = growPolyLocal(state.polyLocal,
-        (state.grid ? state.grid.cellSizeM : 0.6) * 0.25);
+      // v-fix(lip-on-walltop): trace the ONE-RING (the actual wall-top edge),
+      // not the bare polygon. v1.0.96 grew this by cellSize*0.25 ≈ 0.156 m
+      // while the surface mask/trim used 0.25 m — the lip sat ~9 cm INSIDE
+      // the surface edge, so the outer band of surface hung past the lip
+      // (lone hanging pixels from above, micro gaps at the rim).
+      const lipPts = growPolyLocal(state.polyLocal, RING_M);
       let prev = null;
       let firstVis = null;
       for (const [mx, my] of lipPts) {
@@ -2225,7 +2297,25 @@
       const x2m = a.mx + a.dxm * a.lenM / 2, y2m = a.my + a.dym * a.lenM / 2;
       const p1 = GreenMapCore.projectPt(cam, x1m, y1m, surfZ3(x1m, y1m));
       const p2 = GreenMapCore.projectPt(cam, x2m, y2m, surfZ3(x2m, y2m));
+      // v-fix(arrow-silhouette): arrows are occlusion-tested but nothing
+      // stops a rim arrow from projecting past the SURFACE EDGE into the
+      // background — nothing is rasterized there, so the depth test always
+      // passes and the arrow tip/tail drew as pale specks hanging off the
+      // silhouette (honest glancing-angle harness, .rimreal8, Front-left
+      // rim). Gate every arrow sample (mid + both ends) inside the boundary
+      // ring INSET 0.15 m so tips land on real drawn surface, never the
+      // trimmed margin.
       if (!p1 || !p2) continue;
+      if (state.active === 'green' &&
+          state.polyLocal && state.polyLocal.length > 2) {
+        if (arrowRingSrc !== state.polyLocal) {
+          arrowRingSrc = state.polyLocal;
+          arrowRing = growPolyLocal(state.polyLocal, -0.15);
+        }
+        if (!GreenMapCore.pointInPoly(a.mx, a.my, arrowRing) ||
+            !GreenMapCore.pointInPoly(x1m, y1m, arrowRing) ||
+            !GreenMapCore.pointInPoly(x2m, y2m, arrowRing)) continue;
+      }
       // v-fix(dressing-z): drop arrows hidden behind the surface — test the
       // midpoint AND both endpoints so a partially-hidden arrow (tail behind
       // a rim, tip in front) can't streak across the near face.

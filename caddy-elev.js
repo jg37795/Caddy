@@ -354,7 +354,7 @@
       `${ENDPOINT}?f=json&bbox=${w},${s},${e},${n}&bboxSR=4326&imageSR=4326` +
       `&size=${sz},${sz}&format=tiff&pixelType=F32`;
 
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const r1 = await fetchWithTimeout(step1Url, FETCH_TIMEOUT_MS, signal);
         const meta = await r1.json();
@@ -376,7 +376,11 @@
         return eg;
       } catch (err) {
         if (err && err.name === 'AbortError') return null;
-        if (attempt === 1) { warn1('elevation fetch unavailable', err.message || err); return null; }
+        // v-fix: the _ags_*.tif href is a TEMPORARY export (~60-90s life).
+        // A 400 here usually means the link expired before step 2 ran
+        // (slow mobile connection). Retrying the SAME href never works —
+        // loop back to step 1 to mint a fresh export instead.
+        if (attempt === 2) { warn1('elevation fetch unavailable', err.message || err); return null; }
       }
     }
     return null;
