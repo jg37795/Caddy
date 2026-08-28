@@ -330,6 +330,11 @@
      ~0.4 m/s²) and steers under the lateral component of gravity from the
      surface slope perpendicular to its velocity. v0 is chosen so the ball
      would just reach the pin on flat ground: v0 = sqrt(2·k·d).
+     v1.1.3 (accuracy pass): gravity ALONG the roll now applies too —
+     uphill slows the ball, downhill speeds it (×5/7 rolling factor, same
+     factor on the lateral turn); finer default substeps. Previously the
+     speed profile was flat-ground-only, so uphill putts didn't die and
+     downhill ones didn't run — the speed was as wrong as the line.
      Stops at: pin (<0.30 m) | dead (speed <0.15 m/s) | edge (left mask).
      Returns { pts, stopped, breakIn } — breakIn is the max perpendicular
      deviation from the straight ball→pin line in INCHES, signed
@@ -338,12 +343,13 @@
                                        mask, opts) {
     const o = opts || {};
     const stimp = Number.isFinite(o.stimp) ? o.stimp : 10;
-    const dt = o.dt || 0.02;
+    const dt = o.dt || 0.008;           // finer substeps (was 0.02)
     const GRAV = 9.81;
+    const ROLL = 5 / 7;                 // rolling-ball factor
     const K_FLAT_AT_10 = 0.4;           // stimp 10 ⇒ k ≈ 0.4 m/s²
     const V_DEAD = 0.15;                // ball "dies" below this speed
     const PIN_R = 0.30;                 // holed within 30 cm
-    const MAX_S = 4000;                 // hard step cap (~80 s)
+    const MAX_S = 12000;                // hard step cap (finer dt)
 
     // Faster greens (higher Stimpmeter) roll with LESS friction.
     const k = K_FLAT_AT_10 * 10 / Math.max(1, stimp);
@@ -351,8 +357,11 @@
     const d = Math.hypot(dx, dy);
     if (d < PIN_R)
       return { pts: [ballM.slice(), pinM.slice()], stopped: 'pin', breakIn: 0 };
-    const v0 = Math.sqrt(2 * k * d);
-    let theta = Math.atan2(dy, dx);
+    // v1.1.3: optional launch controls for the aim solver — aimOffRad
+    // offsets the initial direction, pace scales the flat-ground speed,
+    // endV reports the arrival speed (die-pace detection).
+    const v0 = Math.sqrt(2 * k * d) * (Number.isFinite(o.pace) ? o.pace : 1);
+    let theta = Math.atan2(dy, dx) + (Number.isFinite(o.aimOffRad) ? o.aimOffRad : 0);
     let v = v0;
     let mx = ballM[0], my = ballM[1];
     const ux0 = dx / d, uy0 = dy / d;   // straight-line reference direction
@@ -368,6 +377,7 @@
     const pts = [[mx, my]];
     let maxDev = 0, devSign = 0;
     let stopped = 'dead';
+    let endV = 0;
     for (let s = 0; s < MAX_S; s++) {
       const i = cellIdx(mx, my);
       if (i < 0) { stopped = 'edge'; break; }
@@ -379,11 +389,17 @@
       // along it → lateral acceleration g·grad_perp rotates the velocity.
       const nx = -uy, ny = ux;
       const gradPerp = gradx * nx + grady * ny;
-      // Gravity accelerates DOWN-slope: a = −g·∇h, perp component here.
-      const aLat = -GRAV * gradPerp;
+      // v1.1.3: gravity ALONG the roll (× rolling factor) — uphill slows,
+      // downhill speeds. gradAlong > 0 = surface rising along travel.
+      const gradAlong = gradx * ux + grady * uy;
+      const aAlong = -GRAV * ROLL * gradAlong;
+      // Gravity accelerates DOWN-slope: a = −g·∇h, perp component here
+      // (same rolling factor on the turn).
+      const aLat = -GRAV * ROLL * gradPerp;
       theta += (aLat / Math.max(v, 1e-6)) * dt;
-      // Friction: constant deceleration along the direction of travel.
-      v = Math.max(0, v - k * dt);
+      // Friction: constant deceleration along the direction of travel,
+      // combined with the along-slope acceleration.
+      v = Math.max(0, v + (aAlong - k) * dt);
       mx += Math.cos(theta) * v * dt;
       my += Math.sin(theta) * v * dt;
       pts.push([mx, my]);
@@ -395,6 +411,7 @@
       if (Math.hypot(pinM[0] - mx, pinM[1] - my) <= PIN_R) {
         stopped = 'pin';
         pts.push([pinM[0], pinM[1]]);
+        endV = v;
         break;
       }
       if (v < V_DEAD) { stopped = 'dead'; break; }
@@ -402,7 +419,106 @@
     devSign = maxDev >= 0 ? 1 : -1;
     return {
       pts, stopped,
+      endV,
       breakIn: devSign * Math.abs(maxDev) * 39.3701   // metres → inches
+    };
+  };
+
+  /* ---- Makeable-line aim solver (v1.1.3, pure, headless-testable) -------
+     The old preview simulated ONLY "aim straight at the pin" — it drew the
+     putt you'd miss, not the putt you should play. solvePutt searches the
+     launch (aim offset, speed factor) for a launch whose roll finishes in
+     the cup, then reports BOTH the makeable line and what the straight-aim
+     putt would have done (for the honest "play N inches of break" readout).
+     Strategy per James: ONE line — the one you should play. Returns
+     { ok, pts, stopped, breakIn (in of break the MAKEABLE line plays),
+       straightBreak (in the naive straight putt would break),
+       diePace (true when the makeable line arrives <0.35 m/s) }
+     ok=false when no launch within the search box holes out (extreme
+     slope) — caller shows an honest "no makeable line" message. */
+  GreenMapCore.solvePutt = function (ballM, pinM, field, W, H, cellSizeM,
+                                     mask, opts) {
+    const o = opts || {};
+    const stimp = Number.isFinite(o.stimp) ? o.stimp : 10;
+    const sim = (aimOffRad, pace) => GreenMapCore.simPuttPath(
+      ballM, pinM, field, W, H, cellSizeM, mask,
+      { stimp, aimOffRad, pace });
+    // Launch search v3: aim and pace control different axes — aim moves the
+    // endpoint ACROSS the ball→pin line, pace moves it ALONG it. So: for
+    // each pace, BRACKET the aim where the roll crosses the pin line
+    // (signed endpoint lateral changes sign) and bisect; a crossing within
+    // 30 cm of the cup is the makeable line. (Grid+hope v2 missed islands
+    // narrower than one coarse step — a provably makeable putt reported
+    // unsolvable.) aimOff sign: positive aims LEFT of the pin.
+    // v-fix(double-base): simPuttPath computes the straight-line angle
+    // INTERNALLY and adds aimOffRad on top — pass the OFFSET ONLY. Passing
+    // base+a aimed every launch off by the whole ball→pin angle (the flat
+    // test grid passed only because its base is 0 — the worst kind of
+    // false green). a is the aim offset in radians, + = left of the pin.
+    const d = Math.hypot(pinM[0] - ballM[0], pinM[1] - ballM[1]);
+    const ux0 = (pinM[0] - ballM[0]) / d, uy0 = (pinM[1] - ballM[1]) / d;
+    const endLat = (r) => {
+      const last = r.pts[r.pts.length - 1];
+      return ux0 * (last[1] - ballM[1]) - uy0 * (last[0] - ballM[0]);
+    };
+    const endDist = (r) => {
+      const last = r.pts[r.pts.length - 1];
+      return Math.hypot(last[0] - pinM[0], last[1] - pinM[1]);
+    };
+    let best = null;                 // { a, pace, r } holed launch
+    let fallback = null;             // closest miss (for ok:false path)
+    const note = (r, a, pace) => {
+      const dd = endDist(r);
+      if (!fallback || dd < fallback.d) fallback = { a, pace, r, d: dd };
+    };
+    // v-fix(uphill-pace): the ladder must cover FIRM uphill putts — climbing
+    // a 10% face bleeds ~0.7 m/s², so a Front-fringe putt needs ~1.6× the
+    // flat-ground speed. Capping at 1.25 reported provably makeable uphill
+    // putts as "no line" (far-tap probe). Die paces first, firm paces last.
+    const PACES = [1.0, 1.06, 0.94, 1.12, 0.88, 1.18, 1.25, 1.35, 1.5, 1.7];
+    for (const pace of PACES) {
+      if (best) break;
+      // Bracket: 13 aims, find adjacent pair whose endpoint laterals straddle 0.
+      let lo = null, hi = null;
+      let prevA = null, prevLat = null;
+      for (let i = 0; i <= 12 && !lo; i++) {
+        const a = -0.30 + 0.60 * i / 12;
+        const r = sim(a, pace);
+        if (r.stopped === 'pin') { best = { a, pace, r }; break; }
+        note(r, a, pace);
+        const lat = endLat(r);
+        if (prevA !== null && Math.sign(lat) !== Math.sign(prevLat)) {
+          lo = { a: prevA, lat: prevLat }; hi = { a, lat };
+        }
+        prevA = a; prevLat = lat;
+      }
+      if (best || !lo) continue;
+      // Bisect the crossing (8 rounds), holed anywhere along the way wins.
+      for (let it = 0; it < 8 && !best; it++) {
+        const mid = (lo.a + hi.a) / 2;
+        const r = sim(mid, pace);
+        if (r.stopped === 'pin') { best = { a: mid, pace, r }; break; }
+        note(r, mid, pace);
+        const lat = endLat(r);
+        if (Math.sign(lat) === Math.sign(lo.lat)) { lo = { a: mid, lat }; }
+        else { hi = { a: mid, lat }; }
+      }
+    }
+    // (No polish stage: bisection already converges to ~mm of the crossing,
+    // and the cup is 30 cm wide — a "still holed" nudge stage only walked
+    // the aim around inside the cup radius and drifted the reported line.)
+    const straight = GreenMapCore.simPuttPath(ballM, pinM, field, W, H,
+      cellSizeM, mask, { stimp });
+    if (!best)
+      return { ok: false, pts: straight.pts, stopped: straight.stopped,
+        straightBreak: straight.breakIn };
+    return {
+      ok: true,
+      pts: best.r.pts, stopped: best.r.stopped,
+      breakIn: best.r.breakIn,
+      straightBreak: straight.breakIn,
+      aimIn: best.a * 180 / Math.PI,        // aim offset, degrees (+ = left)
+      diePace: Number.isFinite(best.r.endV) ? best.r.endV < 0.35 : false
     };
   };
 
@@ -1560,18 +1676,21 @@
   }
 
   function drawPutt() {
-    // Physics preview: GreenMapCore.simPuttPath roll model (friction ∝
-    // stimp, lateral gravity from the slope field). Dashed white + ball dot.
+    // v1.1.3: the MAKEABLE line. solvePutt searches launch aim+pace until
+    // the simulated roll finishes in the cup, then draws the line you
+    // should play — not the straight-aim putt you'd miss (old behaviour
+    // simulated "aim at the pin" only; on any real slope that line lied).
     const g = state.grid;
     if (!state.field) return;
-    const { pts, stopped, breakIn } = GreenMapCore.simPuttPath(
+    const r = GreenMapCore.solvePutt(
       state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM, state.mask,
       { stimp: state.stimp });
+    state.puttResult = r;
     ctx.strokeStyle = 'rgba(255,255,255,0.92)';
     ctx.lineWidth = Math.max(1.5, state.view.scale * 0.035);
     ctx.setLineDash([state.view.scale * 0.18, state.view.scale * 0.12]);
     ctx.beginPath();
-    pts.forEach((p, k) => {
+    r.pts.forEach((p, k) => {
       const [sx, sy] = toScreen(p[0], p[1]);
       if (k === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
     });
@@ -1584,14 +1703,23 @@
       Math.max(3, state.view.scale * 0.08), 0, 7); ctx.fill();
     ctx.strokeStyle = 'rgba(10,16,13,0.8)'; ctx.lineWidth = 1;
     ctx.stroke();
-    if (stopped === 'edge')
-      setStatus('Preview: ball leaves the green before reaching the pin');
-    else if (stopped === 'dead')
-      setStatus('Preview: ball dies short of the pin');
-    else if (stopped === 'pin' && Math.abs(breakIn) >= 0.5)
-      setStatus(`Break: ~${Math.abs(breakIn).toFixed(0)} in ` +
-        (breakIn > 0 ? 'right' : 'left'));
-    else if (stopped === 'pin') setStatus('Preview: dead-straight putt holds its line');
+    setStatus(puttStatusText(r));
+  }
+
+  // v1.1.3: ONE status readout for the putt line, shared by 2D and 3D.
+  // Makeable line: "Play N in of break · die/firm pace". Unmakeable: honest
+  // "no makeable line — <n> in of break" instead of a hopeful fake arc.
+  function puttStatusText(r) {
+    const sb = Math.abs(r.straightBreak) >= 0.5
+      ? Math.round(r.straightBreak) : r.straightBreak.toFixed(1);
+    if (!r.ok)
+      return `No makeable line from here — the slope would break the ` +
+        `straight putt ~${sb} in. Consider a different angle.`;
+    const side = r.straightBreak > 0 ? 'right' : 'left';
+    const lb = Math.abs(r.breakIn) >= 0.5
+      ? Math.round(Math.abs(r.breakIn)) : Math.abs(r.breakIn).toFixed(1);
+    const pace = r.diePace ? 'die it at the cup' : 'firm — take the break out';
+    return `Play ~${lb} in of break (${side}) · ${pace}`;
   }
 
   function drawScaleBar() {
@@ -1690,7 +1818,7 @@
     // Downhill arrows on the surface. v2: sparse & bold like 18Birdies —
     // ~every 8th refined cell (≈40 arrows), uniform bold styling, not fuzz.
     const arr = [];
-    const step = 8;
+    const step = 11;                    // v1.1.3: sparser — uniform arrows read calmer
     for (let y = 4; y < g.H - 1; y += step)
       for (let x = 4; x < g.W - 1; x += step) {
         const i = y * g.W + x;
@@ -2720,10 +2848,12 @@
           ctx.stroke();
         }
       };
+      // v1.1.3 prettify: warmer sage-grey lip so the band blends with the
+      // green instead of fighting it (was cool blue-grey).
       lipStroke(Math.max(2.2, 0.75 * (window.devicePixelRatio || 1)),
-        'rgba(150,160,154,0.95)');
+        'rgba(156,166,155,0.95)');
       lipStroke(1.1 * (window.devicePixelRatio || 1),
-        'rgba(176,186,180,0.95)');
+        'rgba(184,192,182,0.95)');
     }
 
     // Surface break arrows (downhill), drawn on top of the mesh.
@@ -2732,11 +2862,21 @@
       const dpr = window.devicePixelRatio || 1;
     ctx.lineCap = 'round';
     for (const a of state.meshArrows) {
-      const z = surfZ3(a.mx, a.my);
+      // v1.1.3 (18Birdies look): arrows are UNIFORM screen-space dashes.
+      // The old full-segment projection let a 1.6 m surface arrow plunge
+      // seven screen metres down an exaggerated cliff face — long poles on
+      // every steep stretch. Now: centre projected at surface height,
+      // direction taken from the HORIZONTAL downhill bearing (what you see
+      // looking down at the green), fixed pixel length. Direction honest,
+      // length calm. Edge/occlusion gates still test the TRUE segment so a
+      // dash can never hang past the silhouette.
+      const zC = surfZ3(a.mx, a.my);
+      const pC = GreenMapCore.projectPt(cam, a.mx, a.my, zC);
+      const xHm = a.mx + a.dxm * 1.0, yHm = a.my + a.dym * 1.0;
+      const pH = GreenMapCore.projectPt(cam, xHm, yHm, zC);
+      if (!pC || !pH) continue;
       const x1m = a.mx - a.dxm * a.lenM / 2, y1m = a.my - a.dym * a.lenM / 2;
       const x2m = a.mx + a.dxm * a.lenM / 2, y2m = a.my + a.dym * a.lenM / 2;
-      const p1 = GreenMapCore.projectPt(cam, x1m, y1m, surfZ3(x1m, y1m));
-      const p2 = GreenMapCore.projectPt(cam, x2m, y2m, surfZ3(x2m, y2m));
       // v-fix(arrow-silhouette): arrows are occlusion-tested but nothing
       // stops a rim arrow from projecting past the SURFACE EDGE into the
       // background — nothing is rasterized there, so the depth test always
@@ -2745,7 +2885,6 @@
       // rim). Gate every arrow sample (mid + both ends) inside the boundary
       // ring INSET 0.15 m so tips land on real drawn surface, never the
       // trimmed margin.
-      if (!p1 || !p2) continue;
       if (state.active === 'green' &&
           state.polyLocal && state.polyLocal.length > 2) {
         if (arrowRingSrc !== state.polyLocal) {
@@ -2768,13 +2907,19 @@
       // v-fix(dressing-z): drop arrows hidden behind the surface — test the
       // midpoint AND both endpoints so a partially-hidden arrow (tail behind
       // a rim, tip in front) can't streak across the near face.
-      const zMid = surfZ3(a.mx, a.my);
-      const pMid = GreenMapCore.projectPt(cam, a.mx, a.my, zMid);
+      const pMid = pC;
+      const p1 = GreenMapCore.projectPt(cam, x1m, y1m, surfZ3(x1m, y1m));
+      const p2 = GreenMapCore.projectPt(cam, x2m, y2m, surfZ3(x2m, y2m));
       const occ = (p) => dressingOcclusion && dressingOcclusion(p[0], p[1], p[2]);
-      if ((pMid && occ(pMid)) || occ(p1) || occ(p2)) continue;
-      const ang = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
-      const hs = Math.max(2.6, cam.f / p2[2] * 0.05);
-      ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
+      if ((pMid && occ(pMid)) || (p1 && occ(p1)) || (p2 && occ(p2))) continue;
+      // Uniform screen-space arrow along the horizontal downhill direction.
+      const ang = Math.atan2(pH[1] - pC[1], pH[0] - pC[0]);
+      const len = 9 * dpr;
+      const ax = pC[0], ay = pC[1];
+      const bx = ax + Math.cos(ang) * len, by = ay + Math.sin(ang) * len;
+      const cx0 = ax - Math.cos(ang) * len, cy0 = ay - Math.sin(ang) * len;
+      const hs = len * 0.42;
+      ctx.beginPath(); ctx.moveTo(cx0, cy0); ctx.lineTo(bx, by);
       // v3-visual: bolder uniform black arrow with a stronger white halo.
       ctx.strokeStyle = 'rgba(12,18,15,0.9)';
       ctx.lineWidth = Math.max(3.8, dpr * 2.2);
@@ -2785,11 +2930,11 @@
       const head = (size, color) => {
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.moveTo(p2[0], p2[1]);
-        ctx.lineTo(p2[0] - size * Math.cos(ang - 0.42),
-                   p2[1] - size * Math.sin(ang - 0.42));
-        ctx.lineTo(p2[0] - size * Math.cos(ang + 0.42),
-                   p2[1] - size * Math.sin(ang + 0.42));
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx - size * Math.cos(ang - 0.42),
+                   by - size * Math.sin(ang - 0.42));
+        ctx.lineTo(bx - size * Math.cos(ang + 0.42),
+                   by - size * Math.sin(ang + 0.42));
         ctx.closePath(); ctx.fill();
       };
       head(hs * 1.55, 'rgba(12,18,15,0.9)');
@@ -2798,16 +2943,19 @@
     }
 
     // Putt line projected onto the surface (green view only).
+    // v1.1.3: the MAKEABLE line from solvePutt (same as 2D) — one model,
+    // one readout, both views.
     if (state.active === 'green' &&
         state.showPutt && state.ball && state.pin && state.field) {
       const g = state.grid;
-      const { pts } = GreenMapCore.simPuttPath(
+      const r = GreenMapCore.solvePutt(
         state.ball, state.pin, state.field, g.W, g.H, g.cellSizeM,
         state.mask, { stimp: state.stimp });
+      state.puttResult = r;
       ctx.setLineDash([6 * dpr, 4 * dpr]);
       ctx.beginPath();
       let started = false;
-      pts.forEach(([mx, my]) => {
+      r.pts.forEach(([mx, my]) => {
         const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
         if (!p) { started = false; return; }
         // v-fix(dressing-z): putt path dips behind the surface when hidden;
@@ -2822,6 +2970,7 @@
       ctx.lineWidth = Math.max(1.5, dpr * 1.1);
       ctx.stroke();
       ctx.setLineDash([]);
+      setStatus(puttStatusText(r));
     }
 
     // Pin: small flag standing upright at its grid position (green view only;
@@ -3083,7 +3232,9 @@
   }
 
   // Shared tooltip content: slope/fall + precise bilinear elevation in ft
-  // relative to the green centre.
+  // relative to the green centre. v1.1.3 prettify: two-line hierarchy —
+  // big slope number + fall direction, elevation as a dim sub-line (the
+  // raw bearing degrees were golfer-noise; the compass label carries it).
   function tipReadout(s) {
     const pct = GreenMapCore.slopePctAt(state.field, s.i);
     const brg = GreenMapCore.fallBearingDeg(state.field.gx[s.i],
@@ -3094,10 +3245,10 @@
     const z = egLike ? GreenMapCore.sampleElevLocalM(egLike, s.mx, s.my) : null;
     if (z != null && state.greenZ != null) {
       const ft = (z - state.greenZ) * 3.28084;
-      elevTxt = ` · ${ft >= 0 ? '+' : '−'}${Math.abs(ft).toFixed(1)} ft`;
+      elevTxt = `<div class="tip-sub">${ft >= 0 ? '+' : '−'}${Math.abs(ft).toFixed(1)} ft vs green centre</div>`;
     }
-    return `<b>Slope ${pct.toFixed(1)}%</b> · falls ` +
-      `${GreenMapCore.bearingLabel(brg)} (${brg.toFixed(0)}°)${elevTxt}`;
+    return `<div class="tip-big">Slope ${pct.toFixed(1)}%` +
+      `<span> · falls ${GreenMapCore.bearingLabel(brg)}</span></div>${elevTxt}`;
   }
 
   function updateTooltip(px, py, clientX, clientY) {
@@ -3133,7 +3284,7 @@
       state.ball = [mx, my];
       state.showPutt = true;
       armBallNext = false;
-      setStatus('Putt preview ON (naive) — tap "Clear ball" to remove');
+      setStatus('Putt preview ON — tap "Clear ball" to remove');
     }
     render();
   }

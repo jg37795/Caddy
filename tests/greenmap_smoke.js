@@ -244,6 +244,54 @@ console.log('5b. Physics putt simulator (simPuttPath)');
   }
 }
 
+console.log('5c. Makeable-line aim solver (solvePutt)');
+{
+  const W = 80, H = 80, cs = 0.25;
+  const mask = GM.polyMask([[-10, -10], [10, -10], [10, 10], [-10, 10]],
+    W, H, cs);
+  const flat = GM.computeGradientField(new Float32Array(W * H), W, H, cs);
+  const mkTilt2 = (slope) => {
+    const grid = new Float32Array(W * H);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) grid[y * W + x] = -slope * x * cs;
+    return GM.computeGradientField(grid, W, H, cs);
+  };
+  // (a) Flat: solve = straight, holes, zero aim offset.
+  const rf = GM.solvePutt([-6, 0], [6, 0], flat, W, H, cs, mask,
+    { stimp: 10 });
+  check('solve: flat putt holes straight', rf.ok &&
+    Math.abs(rf.aimIn) < 0.05 && rf.stopped === 'pin',
+    `aim ${rf.aimIn} stopped ${rf.stopped}`);
+  // (b) 2% tilt: solvable, aims LEFT (positive) into a right-breaking putt.
+  const rt = GM.solvePutt([0, -7], [0, 7], mkTilt2(0.02), W, H, cs, mask,
+    { stimp: 10 });
+  check('solve: tilted putt finds makeable line aiming left',
+    rt.ok && rt.aimIn > 2, `aim ${rt.aimIn && rt.aimIn.toFixed(1)}°`);
+  check('solve: makeable line breaks far less than straight aim',
+    rt.ok && Math.abs(rt.breakIn) < Math.abs(rt.straightBreak),
+    `line ${rt.breakIn && rt.breakIn.toFixed(0)} vs straight ` +
+    rt.straightBreak.toFixed(0));
+  // (c) Steeper tilt ⇒ larger aim offset (monotonic sanity).
+  const rt2 = GM.solvePutt([0, -7], [0, 7], mkTilt2(0.04), W, H, cs, mask,
+    { stimp: 10 });
+  check('solve: steeper tilt ⇒ larger aim offset',
+    rt.ok && rt2.ok && rt2.aimIn > rt.aimIn,
+    `${rt2.aimIn.toFixed(1)}° vs ${rt.aimIn.toFixed(1)}°`);
+  // (d) Steep UPHILL putt: honestly reports no makeable line — a 20% grade
+  // needs ~2.1x flat pace, beyond the firm cap. (Cross-slope putts are
+  // almost always solvable with enough aim + pace; a grade this steep is
+  // the real "no line from here" case.)
+  {
+    const grid3 = new Float32Array(W * H);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) grid3[y * W + x] = -0.20 * y * cs;
+    const rX = GM.solvePutt([0, -7], [0, 7],
+      GM.computeGradientField(grid3, W, H, cs), W, H, cs, mask, { stimp: 10 });
+    check('solve: steep uphill reports no makeable line', rX.ok === false,
+      `ok=${rX.ok}`);
+  }
+}
+
 console.log('6. 3D orbit math — camera, projection, mesh');
 {
   const cam = GM.makeCam(0, 35, 62);
