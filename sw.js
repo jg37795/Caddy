@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.94'; // + ONE-RING: mesh sub-quads trim against the same grown ring as wall top + lip — kills far-rim gray teeth (verified on REAL OSM+LiDAR data)
+const CACHE_VERSION = 'v1.0.95'; // + rim curtain removed (was cresting the far silhouette: gray teeth that render away when faced); one-ring seals the rim without it
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

@@ -1920,50 +1920,12 @@
         // square floating in space under the pillar. Zone colour on the surface
         // is the whole story here.
         if (bpts && state.viewMode !== 'hole') drawGridFloor(cam, bpts);
-        // v-fix(rim-curtain): UNCULLED flat dark curtain around the whole skirt
-        // ring, painted before the surface. It sits beneath every layer, so it
-        // can never ghost through — it only guarantees that no rim pixel ever
-        // has naked background behind it (comb teeth at high exaggeration read
-        // as wall plates instead of see-through). Culling decisions stay with
-        // the real skirt pass painted after the surface.
-        if (bpts && bpts.length > 2 && state.viewMode !== 'hole') {
-          const exag = state.v3.exag, Mz = state.mesh;
-                // v-fix(curtain-tuck): the curtain top edge is a SMOOTH ring while the
-                // surface trim is a sub-cell staircase — wherever the staircase dips
-                // inside the ring, the curtain peeked above the far rim as gray teeth.
-                // Tuck the top edge below the surface: the curtain is a backstop, and
-                // everything below its top is still curtain, so lowering can't open a
-                // gap — it only stops it cresting the silhouette.
-                const TUCK = 0.055 * exag;
-                const zAtC = ([mx, my]) =>
-                  Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) - TUCK :
-                  ((sampleElevRaw(mx, my) - Mz.zmin) * exag || 0) - TUCK;
-          const cQuads = GreenMapCore.buildSkirtQuads(
-            growPolyLocal(bpts, (state.grid ? state.grid.cellSizeM : 0.6) * 0.25),
-            zAtC, 0);
-          const cItems = [];
-          for (const q of cQuads) {
-            let dsum = 0, ok = true;
-            const sp = [];
-            for (let c = 0; c < 4; c++) {
-              const p = GreenMapCore.projectPt(cam, q.v[c][0], q.v[c][1],
-                q.v[c][2]);
-              if (!p) { ok = false; break; }
-              sp.push(p); dsum += p[2];
-            }
-            if (ok) cItems.push({ sp, d: dsum / 4 });
-          }
-          cItems.sort((a, b) => b.d - a.d);
-          ctx.fillStyle = 'rgb(52,58,55)';
-          for (const it of cItems) {
-            const [a, b, c, d] = it.sp;
-            ctx.beginPath();
-            ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
-            ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]);
-            ctx.closePath();
-            ctx.fill();
-          }
-        }
+    // v-fix(curtain-removed): the v1.0.92 unculled rim curtain was a backstop
+    // for the wall-top slit that the v1.0.94 ONE-RING alignment closed for
+    // good. Unculled, it drew on BOTH sides — its top ring crested above the
+    // stepped surface edge on the FAR side (gray teeth that "render away when
+    // I face them"). Removed: the wall pass + one-ring alignment seal the rim
+    // without it (verified on real OSM+LiDAR data at multiple angles).
 
     // Project all quad corners once; painter sort by mean depth (far first).
     // v-fix(seethrough2): NO backface culling on the top surface. The bowl's
