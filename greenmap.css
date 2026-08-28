@@ -144,64 +144,97 @@ html, body {
 
 /* ==========================================================================
    Green location editor (greenedit.js) — verify/edit which green is loaded.
-   Full-screen sheet over the tool; satellite mini-map + real OSM outlines.
+   Styled with the APP's design language (glass chrome, app tokens), not the
+   prototype's dark look. Leaflet attribution hidden while testing.
    ========================================================================== */
 #gm-editloc-sheet {
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: #0e1411;
+  background: var(--bg);
   display: flex;
   flex-direction: column;
+  font-family: inherit;
 }
 
 .gel-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: calc(var(--safe-top) + 10px) 12px 10px;
+  border-bottom: 0.5px solid var(--glass-stroke);
 }
 
 .gel-title {
   flex: 1;
-  font-size: 14px;
-  font-weight: 700;
-  color: #f2f6f3;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
   text-align: center;
 }
 
 .gel-btn {
   appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: transparent;
-  color: #e8efe9;
-  border-radius: 8px;
-  padding: 7px 12px;
+  border: 0.5px solid var(--glass-stroke);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--glass-shadow);
+  color: var(--glass-text);
+  border-radius: 999px;
+  padding: 8px 14px;
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   cursor: pointer;
 }
 
+.gel-btn:active {
+  transform: scale(0.96);
+}
+
 .gel-btn.gel-primary {
-  background: #2f4638;
-  border-color: #9db3a6;
+  background: linear-gradient(145deg, var(--green), var(--green-2));
+  border-color: transparent;
   color: #ffffff;
 }
 
 .gel-map {
   flex: 1;
   min-height: 0;
+  background: var(--canvas);
+}
+
+/* Leaflet chrome → app styling */
+.leaflet-container {
+  background: var(--canvas);
+  font-family: inherit;
+}
+
+.leaflet-control-zoom a {
+  background: var(--glass-bg) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  color: var(--glass-text) !important;
+  border-color: var(--glass-stroke) !important;
+}
+
+/* Hidden while testing (James): attribution control + any injected prefix */
+.leaflet-control-attribution,
+.leaflet-control-container .leaflet-bottom.leaflet-right {
+  display: none !important;
 }
 
 .gel-hint {
-  padding: 10px 14px calc(env(safe-area-inset-bottom, 0px) + 12px);
+  padding: 10px 14px calc(var(--safe-bottom) + 12px);
   font-size: 12px;
-  color: #9db3a6;
+  font-weight: 600;
+  color: var(--muted);
   text-align: center;
 }
 
-/* Draggable sample-point pin (crosshair dot) */
+/* Draggable sample-point pin (crosshair dot) — app accent gold */
 .gel-pin-dot {
   width: 18px;
   height: 18px;
@@ -211,12 +244,12 @@ html, body {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5);
 }
 
-/* Tee context dot */
+/* Tee context dot — app blue */
 .gel-tee-dot {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #4488e0;
+  background: var(--blue);
   border: 2px solid #ffffff;
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5);
 }
@@ -224,7 +257,7 @@ html, body {
 /* Header location badge */
 #gm-loc {
   font-size: 10.5px;
-  color: #9db3a6;
+  color: var(--muted);
   white-space: nowrap;
   max-width: 210px;
   overflow: hidden;

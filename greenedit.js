@@ -17,7 +17,6 @@
 
   const OVERPASS = 'https://overpass-api.de/api/interpreter';
   const TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-  const ATTR = 'Tiles © Esri';
 
   let sheet = null;
 
@@ -55,9 +54,12 @@
 
     document.body.appendChild(sheet);
 
-    const map = L.map('gelMap', { zoomControl: false }).setView(
+    const map = L.map('gelMap', {
+      zoomControl: false,
+      attributionControl: false,   // hidden while testing (James)
+    }).setView(
       [boot.lat, boot.lng], 17);
-    L.tileLayer(TILES, { attribution: ATTR, maxZoom: 19 }).addTo(map);
+    L.tileLayer(TILES, { attribution: '', maxZoom: 19 }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     // Crosshair = sample point (draggable marker + centre tick).

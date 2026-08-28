@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.1.7'; // + INTEGRATION POLISH: prototype chrome removed (test preset dropdown deleted, real map-based Check location — satellite mini-map with the actual OSM green outlines drawn, tap to re-aim, no coordinates); last green remembered for Back/relaunch; greenedit.js added to shell
+const CACHE_VERSION = 'v1.1.8'; // + Check-location map styled with the app design language (glass chrome, app tokens, safe areas); Leaflet attribution hidden while testing; app.css imported so tokens resolve
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
