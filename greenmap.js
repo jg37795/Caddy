@@ -1942,6 +1942,9 @@
   // test (px, py, depth) → true when the surface hides that point. Null when
   // no depth buffer is available (headless/2D).
   let dressingOcclusion = null;
+  // v1.1.4(hole-silhouette): true when no geometry was rasterized at the
+  // pixel — set per frame next to dressingOcclusion.
+  let dressingOffSurface = null;
 
   // Thin semi-transparent iso-lines at fixed elevation intervals
   // (marching-squares along the live grid), projected onto the surface.
@@ -2784,6 +2787,16 @@
     };
 
     dressingOcclusion = isOccluded;
+    // v1.1.4(hole-silhouette): true when NO geometry was rasterized at this
+    // pixel. The occlusion test above passes vacuously there (zbuf Infinity
+    // ⇒ "not hidden"), so dressing past the silhouette leaked onto raw
+    // background. Hole view has no corridor polygon to gate arrows (green
+    // view does), so its arrows gate on this instead.
+    dressingOffSurface = (px, py) => {
+      const gx = Math.floor(px / ZCELL), gy = Math.floor(py / ZCELL);
+      if (gx < 0 || gy < 0 || gx >= zw || gy >= zh) return true;
+      return !Number.isFinite(zbuf[gy * zw + gx]);
+    };
 
     for (const q of vis) {
       ctx.beginPath();
@@ -2999,6 +3012,15 @@
       const ax = pC[0], ay = pC[1];
       const bx = ax + Math.cos(ang) * len, by = ay + Math.sin(ang) * len;
       const cx0 = ax - Math.cos(ang) * len, cy0 = ay - Math.sin(ang) * len;
+      // v1.1.4(hole-silhouette): hole view has no boundary polygon to gate
+      // with — arrows past the terrain silhouette passed occlusion vacuously
+      // (zbuf Infinity there ⇒ "not hidden") and drew over raw background.
+      // Gate: tail, centre and head must all sit on rasterized surface.
+      if (state.viewMode === 'hole' && dressingOffSurface) {
+        if (dressingOffSurface(cx0, cy0) ||
+            dressingOffSurface(ax, ay) ||
+            dressingOffSurface(bx, by)) continue;
+      }
       const hs = len * 0.42;
       ctx.beginPath(); ctx.moveTo(cx0, cy0); ctx.lineTo(bx, by);
       // v3-visual: bolder uniform black arrow with a stronger white halo.
