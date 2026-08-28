@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.1.0'; // + geometry-clip rim (Sutherland-Hodgman, whole cells — silhouette IS the polygon), void-parity heights (mesh zAt ≡ surfZ3; NaN no longer blends as 0), wall body + ribbon underlay stack; harness: pinch-zoom frames, boot-race fix, winding-agnostic clip
+const CACHE_VERSION = 'v1.1.1'; // + closed drum: underlay wall draws ALL quads (far side included) — no more see-through-to-the-other-side; picker 64-cell fallback on 128 fetch failure (fixes "no data" when switching courses)
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

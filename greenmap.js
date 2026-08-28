@@ -1044,8 +1044,19 @@
     let elev = null;
     try {
       elev = await window.CaddyElev.fetchElevGrid(bbox, GRID_N);
+      // v-fix(picker-64-fallback): GRID_N 64→128 invalidated every cached
+      // preset; switching courses now re-hits USGS, which throttles under
+      // load — presets degraded to "no data". On a 128 failure, retry at
+      // 64: instant from the old cache when present, otherwise a much
+      // lighter request the server is far more willing to serve.
+      if (!elev || !elev.grid) {
+        elev = await window.CaddyElev.fetchElevGrid(bbox, 64);
+      }
     } catch (e) {
       console.error('[greenmap]', e);
+      try {
+        elev = await window.CaddyElev.fetchElevGrid(bbox, 64);
+      } catch (e2) { console.error('[greenmap] 64-fallback also failed', e2); }
     }
 
     const polyLL = await fetchGreenPolygon(state.lat, state.lng);
@@ -2011,7 +2022,15 @@
       const wny = polyCCW ? -ex / l : ex / l;
       const isBack = wnx * (camPos[0] - mx) +
                      wny * (camPos[1] - my) <= 0;
-      if (isBack) {
+      if (isBack && !allowBackFaces) {
+        // AFTER pass: back faces are depth-gated (fill visible holes only).
+        // v-fix(drum): the underlay pass (allowBackFaces=true, runs BEFORE
+        // the surface) draws EVERY quad unconditionally — a closed drum.
+        // The far-side holes in James's 04:44 15x shots were far wall quads
+        // culled by the old near/far split with nothing behind them; 18Birdies'
+        // reference shell is closed all the way around. The surface painter
+        // runs later and overpaints the drum wherever the surface exists, so
+        // the drum can only ADD coverage, never overwrite the green.
         const pc = GreenMapCore.projectPt(cam, mx, my,
           (q.v[0][2] + q.v[2][2]) / 2);
         if (!pc) continue;
