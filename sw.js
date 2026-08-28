@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.92'; // + single elevation source (surfZ3 samples mesh grid) seals wall-top slit at any exag; unculled rim curtain; conservative fine mask
+const CACHE_VERSION = 'v1.0.93'; // + surface extended to the wall-top ring (fine mask on grown polygon) — no annulus, no black serrated band at any exag
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;

@@ -1450,24 +1450,30 @@
           mMask[y * mW + x] = state.mask[sy * g.W + sx];
         }
       // v-fix(fine-mask-poly): derive the FINE mask from the true boundary
-      // polygon directly. Nearest-upsampling the coarse (cell-centre) mask
-      // under-covers the polygon by up to one COARSE cell wherever the
-      // outline bulges past masked coarse centres — the mesh had no cells
-      // there at all, so no amount of boundary-cell subdivision could fill
-      // them and the rim kept macro teeth (dark background showing through
-      // at glancing orbit angles). Polygon-first mask + finite-elevation
-      // check gives the subdividing rim full coverage to the true outline.
-      if (state.polyLocal && state.polyLocal.length > 2) {
-        const P = state.polyLocal;
-        for (let y = 0; y < mH; y++)
-          for (let x = 0; x < mW; x++) {
-            const i = y * mW + x;
-            const mx = (x + 0.5 - mW / 2) * cellM;
-            const my = (mH / 2 - y - 0.5) * cellM;
-            mMask[i] = (GreenMapCore.pointInPoly(mx, my, P) &&
-                        Number.isFinite(mg[i])) ? 1 : 0;
-          }
-      }
+            // polygon directly. Nearest-upsampling the coarse (cell-centre) mask
+            // under-covers the polygon by up to one COARSE cell wherever the
+            // outline bulges past masked coarse centres — the mesh had no cells
+            // there at all, so no amount of boundary-cell subdivision could fill
+            // them and the rim kept macro teeth (dark background showing through
+            // at glancing orbit angles). Polygon-first mask + finite-elevation
+            // check gives the subdividing rim full coverage to the true outline.
+            // v-fix(surface-meets-wall): test against the polygon GROWN past the
+            // skirt's wall-top ring (+0.25 m) — the surface must REACH the wall
+            // top, or the horizontal annulus between polygon and wall reads as a
+            // black serrated band wherever the terrain falls away steeply at the
+            // rim (James's 8× screenshot). Wall tops are at +0.25 m; +0.35 m mask
+            // keeps the surface edge just outside the wall top at every point.
+            if (state.polyLocal && state.polyLocal.length > 2) {
+              const P = growPolyLocal(state.polyLocal, 0.35);
+              for (let y = 0; y < mH; y++)
+                for (let x = 0; x < mW; x++) {
+                  const i = y * mW + x;
+                  const mx = (x + 0.5 - mW / 2) * cellM;
+                  const my = (mH / 2 - y - 0.5) * cellM;
+                  mMask[i] = (GreenMapCore.pointInPoly(mx, my, P) &&
+                              Number.isFinite(mg[i])) ? 1 : 0;
+                }
+            }
       void cellM;
           }
           // v-fix(single-elev-source): remember the grid the mesh was BUILT from so
