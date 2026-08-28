@@ -876,7 +876,10 @@
     state.grid = ds.grid; state.field = ds.field; state.mask = ds.mask;
     state.bbox = ds.bbox; state.elevRange = ds.elevRange;
     state.polyLocal = ds.polyLocal;
-    state.polySource = ds.polySource || state.polySource;
+        state.polySource = ds.polySource || state.polySource;
+        // v-fix(single-elev-source): each dataset carries the grid its mesh was
+        // built from; surfZ3 must follow the ACTIVE dataset.
+        if (ds.meshGrid) state.meshGrid = ds.meshGrid;
     state.mesh = ds.mesh; state.meshArrows = ds.arrows || [];
     return true;
   }
@@ -1124,10 +1127,15 @@
     if (!ds || !ds.grid) return;
     const [lo, hi] = ds.elevRange || [0, 1];
     const zone = ds.zoneMask, g = ds.eg.grid;
-    // v-fix(corridor-grid): ds.grid is the ElevGrid OBJECT (like green view's
-    // state.grid) so surfZ3/picking work in hole view; mesh + colour reads use
-    // ds.eg.grid (the raw Float32Array). Previously ds.grid was the bare array
-    // — buildMesh3D got undefined dims and Hole view spun on "Preparing…".
+        // v-fix(corridor-grid): ds.grid is the ElevGrid OBJECT (like green view's
+        // state.grid) so surfZ3/picking work in hole view; mesh + colour reads use
+        // ds.eg.grid (the raw Float32Array). Previously ds.grid was the bare array
+        // — buildMesh3D got undefined dims and Hole view spun on "Preparing…".
+        // v-fix(single-elev-source): corridor dressing (tee marker, labels,
+        // arrows) must sample the corridor grid, not green view's fine grid.
+        state.meshGrid = { grid: ds.eg.grid, W: ds.eg.W, H: ds.eg.H,
+          cellSizeM: ds.eg.cellSizeM };
+        ds.meshGrid = state.meshGrid;
     ds.mesh = GreenMapCore.buildMesh3D(g, ds.eg.W, ds.eg.H,
       ds.eg.cellSizeM, ds.mask, ds.elevRange, state.v3.exag, state.mode,
       {
@@ -1461,8 +1469,12 @@
           }
       }
       void cellM;
-    }
-    state.mesh = GreenMapCore.buildMesh3D(
+          }
+          // v-fix(single-elev-source): remember the grid the mesh was BUILT from so
+          // surfZ3 (skirt tops, rim lip, labels) samples the same surface exactly.
+          state.meshGrid = { grid: mg, W: mW, H: mH, cellSizeM: cellM };
+          ds.meshGrid = state.meshGrid;
+          state.mesh = GreenMapCore.buildMesh3D(
       mg, mW, mH, cellM, mMask, state.elevRange,
       state.v3.exag, state.mode, { smooth: true, ao: true, aoRadius: aoR,
         // 18Birdies look: 3D views default to the classic topo rainbow.
@@ -1493,11 +1505,18 @@
   }
 
   // Bilinear surface height (exaggerated world z) at local metres.
-  // Uses the raster cell-CENTRE convention (cell x centre at
-  // ((x+0.5)-W/2)*cs metres) — matches mesh vertices and picking exactly.
+  // v-fix(single-elev-source): sample the MESH's own grid (state.meshGrid —
+  // the fine upsampled grid the surface was actually built from), falling
+  // back to the coarse fetch grid only when no fine grid exists. Previously
+  // skirt walls / rim lip / labels sampled the COARSE grid while the surface
+  // mesh used the FINE grid: at high exaggeration (13.5×) the height
+  // mismatch opened a screen-space slit between wall top and surface edge —
+  // see-through to the other side. One elevation source ⇒ exact seal.
   function surfZ3(mx, my) {
-    const g = state.grid, M = state.mesh;
-    if (!g || !M) return 0;
+    const M = state.mesh;
+    if (!M) return 0;
+    const g = state.meshGrid || state.grid;
+    if (!g) return 0;
     const fx = mx / g.cellSizeM + g.W / 2 - 0.5;
     const fy = g.H / 2 - 0.5 - my / g.cellSizeM;
     const x0 = Math.max(0, Math.min(g.W - 1, Math.floor(fx)));
@@ -1884,12 +1903,49 @@
     // if the surface were clear glass. (Skirt walls still paint after — they
     // are nearer than the surface rim at normal orbit pitches.)
     const bpts = greenBoundaryPts();
-    // v-fix(hole-flat): hole view is a PAINTED TERRAIN map — no extruded
-    // green skirt (it became a free-standing corrugated pillar: the corridor
-    // base plane sits far below the corridor surface) and no base-plane grid
-    // square floating in space under the pillar. Zone colour on the surface
-    // is the whole story here.
-    if (bpts && state.viewMode !== 'hole') drawGridFloor(cam, bpts);
+        // v-fix(hole-flat): hole view is a PAINTED TERRAIN map — no extruded
+        // green skirt (it became a free-standing corrugated pillar: the corridor
+        // base plane sits far below the corridor surface) and no base-plane grid
+        // square floating in space under the pillar. Zone colour on the surface
+        // is the whole story here.
+        if (bpts && state.viewMode !== 'hole') drawGridFloor(cam, bpts);
+        // v-fix(rim-curtain): UNCULLED flat dark curtain around the whole skirt
+        // ring, painted before the surface. It sits beneath every layer, so it
+        // can never ghost through — it only guarantees that no rim pixel ever
+        // has naked background behind it (comb teeth at high exaggeration read
+        // as wall plates instead of see-through). Culling decisions stay with
+        // the real skirt pass painted after the surface.
+        if (bpts && bpts.length > 2 && state.viewMode !== 'hole') {
+          const exag = state.v3.exag, Mz = state.mesh;
+          const zAtC = ([mx, my]) =>
+            Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
+            ((sampleElevRaw(mx, my) - Mz.zmin) * exag || 0);
+          const cQuads = GreenMapCore.buildSkirtQuads(
+            growPolyLocal(bpts, (state.grid ? state.grid.cellSizeM : 0.6) * 0.25),
+            zAtC, 0);
+          const cItems = [];
+          for (const q of cQuads) {
+            let dsum = 0, ok = true;
+            const sp = [];
+            for (let c = 0; c < 4; c++) {
+              const p = GreenMapCore.projectPt(cam, q.v[c][0], q.v[c][1],
+                q.v[c][2]);
+              if (!p) { ok = false; break; }
+              sp.push(p); dsum += p[2];
+            }
+            if (ok) cItems.push({ sp, d: dsum / 4 });
+          }
+          cItems.sort((a, b) => b.d - a.d);
+          ctx.fillStyle = 'rgb(52,58,55)';
+          for (const it of cItems) {
+            const [a, b, c, d] = it.sp;
+            ctx.beginPath();
+            ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+            ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
 
     // Project all quad corners once; painter sort by mean depth (far first).
     // v-fix(seethrough2): NO backface culling on the top surface. The bowl's

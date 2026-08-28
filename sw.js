@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.0.91'; // + wall-top stroke removed (black line gone), per-segment rim lip incl. Back, lip on grown ring
+const CACHE_VERSION = 'v1.0.92'; // + single elevation source (surfZ3 samples mesh grid) seals wall-top slit at any exag; unculled rim curtain; conservative fine mask
 
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
