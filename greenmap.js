@@ -1403,7 +1403,7 @@
       // If the user is already waiting in Hole view, land them on it now.
       if (state.viewMode === 'hole' && state.active !== 'hole') {
         activateDataset('hole');
-        applyHoleFraming(ds);
+        fitHoleView();
         setStatus('Whole-hole 3D — drag = orbit · pinch/scroll = zoom · ' +
           'green highlighted, blue flag = tee');
         render();
@@ -1468,20 +1468,33 @@
             return GreenMapCore.slopeColor(slp);
           }
           // Muted fairway, gently varied by relative elevation.
+          // v1.1.4: brightened — the old base read near-black on shaded
+          // exaggerated faces and the whole tee half vanished into the
+          // background at glancing angles.
           const t = Math.max(-1, Math.min(1,
             (zMid - (lo + hi) / 2) / Math.max(0.5, hi - lo)));
           const k = 1 + t * 0.10;
-          return [110 * k, 130 * k, 106 * k].map(Math.round);
+          return [138 * k, 154 * k, 130 * k].map(Math.round);
         }
       });
     if (ds.mesh) ds.mesh.gridRef = state.meshGrid;
     // Downhill arrows over the corridor (sparse — bigger step than 2D).
+    // v1.1.4: step 5 → 14 — the corridor spawned ~350 arrows at the green
+    // view's density, a swarming thicket over a hole this size (~90 now).
     const arr = [];
-    const step = 5;
+    const step = 14;
     for (let y = 1; y < ds.eg.H - 1; y += step)
       for (let x = 1; x < ds.eg.W - 1; x += step) {
         const i = y * ds.eg.W + x;
         if (!ds.mask[i] || !ds.field.valid[i]) continue;
+        // v-fix(hole-void-parity): a mesh quad whose corner nodes are NaN
+        // (LiDAR void) is dropped at build time, but the ARROW on that cell
+        // still projected — white arrows floating over pure background in
+        // the void stretches (hole-view probe). Same rule as the green
+        // view's void parity: no finite corner nodes ⇒ no arrow.
+        if (!Number.isFinite(g[i]) || !Number.isFinite(g[i + 1]) ||
+            !Number.isFinite(g[i + ds.eg.W]) ||
+            !Number.isFinite(g[i + ds.eg.W + 1])) continue;
         const gxv = ds.field.gx[i], gyv = ds.field.gy[i];
         const mag = Math.hypot(gxv, gyv);
         if (mag < 1e-5) continue;
@@ -2427,16 +2440,50 @@
     };
     if (state.viewMode === 'hole') {
       const dsH = state.datasets.hole;
-      if (dsH && !dsH.failed && state.teeLL) {
+      const teeM = (dsH && !dsH.failed && state.teeLL) ? (() => {
         const mLat = 110540;
         const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
-        label('Tee', (state.teeLL.lng - dsH.centerLL[0]) * mLng,
-                      (state.teeLL.lat - dsH.centerLL[1]) * mLat);
-      }
+        return [(state.teeLL.lng - dsH.centerLL[0]) * mLng,
+                (state.teeLL.lat - dsH.centerLL[1]) * mLat];
+      })() : null;
+      if (teeM) label('Tee', teeM[0], teeM[1]);
+      let greenM = null;
       if (bpts && bpts.length) {
         let sx = 0, sy = 0;
         for (const p of bpts) { sx += p[0]; sy += p[1]; }
-        label('Green', sx / bpts.length, sy / bpts.length);
+        greenM = [sx / bpts.length, sy / bpts.length];
+        label('Green', greenM[0], greenM[1]);
+      }
+      // v1.1.4: tee→green aim line + yardage readout (only when a real tee
+      // is known — no fake numbers, same rule as everywhere else).
+      if (teeM && greenM) {
+        const a = GreenMapCore.projectPt(cam, teeM[0], teeM[1],
+          surfZ3(teeM[0], teeM[1]) + 0.3);
+        const b = GreenMapCore.projectPt(cam, greenM[0], greenM[1],
+          surfZ3(greenM[0], greenM[1]) + 0.3);
+        if (a && b && !(dressingOcclusion &&
+            dressingOcclusion(a[0], a[1], a[2]) &&
+            dressingOcclusion(b[0], b[1], b[2]))) {
+          ctx.setLineDash([4 * dpr, 6 * dpr]);
+          ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+          ctx.lineWidth = Math.max(1, dpr * 0.7);
+          ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          const yd = Math.hypot(greenM[0] - teeM[0], greenM[1] - teeM[1]) *
+            1.09361;
+          const mx2 = (a[0] + b[0]) / 2, my2 = (a[1] + b[1]) / 2 - 8 * dpr;
+          ctx.font = `600 ${11 * dpr}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.lineWidth = 3 * dpr;
+          ctx.strokeStyle = 'rgba(8,12,10,0.78)';
+          ctx.lineJoin = 'round';
+          const txt = `${Math.round(yd)} yd`;
+          ctx.strokeText(txt, mx2, my2);
+          ctx.fillStyle = '#ffd166';
+          ctx.fillText(txt, mx2, my2);
+          ctx.textAlign = 'left';
+        }
       }
       return;
     }
@@ -2468,17 +2515,51 @@
     cam.ox = canvas.width / 2;
     // Hole view: raise the principal point above centre so the green end of
     // the corridor sits low-centre in frame.
-    cam.oy = canvas.height * (state.viewMode === 'hole' ? 0.62 : 0.56);
+    // v1.1.4: match fitHoleView's principal point (0.52) so what the fit
+    // verified is what renders (was 0.62 — the fit/camera mismatch put the
+    // green end low in frame even after the numeric fit).
+    cam.oy = canvas.height * (state.viewMode === 'hole' ? 0.52 : 0.56);
     return cam;
   }
 
   // Shared hole-view framing: corridor fills ~80% of viewport width given
   // cam.f ⇒ dist ≈ span·0.9, clamped to a sensible range.
-  function applyHoleFraming(ds) {
-    const span = (ds && ds.spanM) || HOLE_SPAN_CAP_M;
-    state.v3.yaw = 0;
+  // v1.1.4 (hole fit): the old framing was a hardcoded guess —
+  // dist = span*0.9 clamped [120,400], oy 0.62 — tuned for 1x and blind to
+  // exaggeration. At 15x the corridor is a ~300 m tall slab: 2849/9025
+  // quads projected OFF-SCREEN (tmp_proj_audit coverage map) and the tee
+  // half of the hole vanished behind the frame edge while its arrows still
+  // projected (the "floating over void" look). Fix: numeric fit — project
+  // the ACTUAL mesh with the candidate camera and walk dist out until every
+  // quad is in frame with a margin. Exact at any exag; re-run on exag
+  // change and on corridor ready.
+  function fitHoleView() {
+    const ds = state.datasets.hole;
+    const M = ds && ds.mesh;
+    if (!M || !M.count) return;
+    const f = Math.min(canvas.width, canvas.height) * 1.15;
     state.v3.pitch = 26;
-    state.v3.dist = Math.max(120, Math.min(400, span * 0.9));
+    state.v3.yaw = 0;
+    for (let dist = 80; dist <= 2000; dist += 20) {
+      const cam = GreenMapCore.makeCam(state.v3.yaw, state.v3.pitch, dist);
+      cam.f = f;
+      cam.ox = canvas.width / 2;
+      cam.oy = canvas.height * 0.52;
+      let ok = true;
+      const mW = canvas.width * 0.96, mH = canvas.height * 0.90;
+      for (let q = 0; q < M.count && ok; q++) {
+        for (let c = 0; c < 4 && ok; c++) {
+          const p = GreenMapCore.projectPt(cam, M.pos[q * 12 + c * 3],
+            M.pos[q * 12 + c * 3 + 1], M.pos[q * 12 + c * 3 + 2]);
+          if (!p || p[0] < (canvas.width - mW) / 2 ||
+              p[0] > (canvas.width + mW) / 2 ||
+              p[1] < (canvas.height - mH) / 2 ||
+              p[1] > (canvas.height + mH) / 2) ok = false;
+        }
+      }
+      if (ok) { state.v3.dist = dist; return; }
+    }
+    state.v3.dist = 2000;      // even max didn't fit — clamp
   }
 
   function render3D() {
@@ -3348,7 +3429,7 @@
     // 2D | 3D | Hole view toggle — keeps pin/ball/mode state; just re-renders.
     function frameCameraForView(v) {
       if (v === 'hole' && state.datasets.hole && !state.datasets.hole.failed) {
-        applyHoleFraming(state.datasets.hole);
+        fitHoleView();
       } else if (v === '3d') {
         state.v3.yaw = 0; state.v3.pitch = 35; state.v3.dist = 62;
       }
