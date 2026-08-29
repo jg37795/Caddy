@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.4.4'; // HOLE VIEW GLOW-UP: (1) mosaic zoom 17->18 via MAX_TILES_PER_SIDE 8 (mosaic 672px->1343px = 2.2x sharper photo); (2) BILINEAR satellite sampling (was nearest-neighbour hard blocks); (3) PER-CORNER photo gradient — each terrain quad samples the photo at all 4 corners and paints a gradient, so adjacent quads share corner colours and the photo reads continuous; (4) VOID BRIDGE — LiDAR dropout islands on steep forested slopes filled by 3 mean-of-neighbours passes (the black rectangular blocks were missing quads showing background); (5) READABILITY FLOOR — mixed photo colours clamp to luminance >=42 so dark tree canopy keeps texture but never reads as holes; (6) legend/topbar as one layout stack (no clash possible)
+const CACHE_VERSION = 'v1.4.5'; // ROTATION LAG KILLED: v1.4.4 sampled the photo 5x per quad PER FRAME (~36k getImageData + gradient allocations per orbit frame). The photo does not change with the camera — bake ONCE: satellite colours sampled into M.qPhoto (quad fill) + M.vcol (per-corner) when the mosaic arrives and on every mesh rebuild; render3D now does zero photo work per frame. Same visual quality.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

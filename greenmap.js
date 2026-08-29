@@ -1518,8 +1518,11 @@
           }
           ds.sat = sat;
           ds.satSampler = window.CaddySat.makeSampler(sat, bb);
-          console.log('[greenmap] satellite mosaic ready',
-            sat.w + 'x' + sat.h);
+          console.log('[greenmap] satellite mosaic ready', sat.w + 'x' + sat.h);
+          // v1.4.5 (BAKE): sample the photo ONCE into per-quad colours
+          // (M.qPhoto) and blend into per-corner vertex colours (M.vcol)
+          // so render3D does ZERO photo work per frame. Rotation lag gone.
+          bakeSatelliteTexture(ds);
           if (state.viewMode === 'hole' && state.active === 'hole') render();
         }).catch(() => { /* topo colours stay */ });
       }
@@ -1548,6 +1551,69 @@
       }
       return null;
     }
+  }
+
+  // v1.4.5 (BAKE): sample the satellite photo once per quad + once per
+  // VERTEX corner, mix with the tint (with the readability floor), and
+  // store on the mesh: M.qPhoto (quad-centre fill) and M.vcol (per-corner
+  // colours replaced by photo+tint blends). render3D then paints pure
+  // gradients from baked colours — zero getImageData during rotation.
+  // Re-runs on every buildHoleScene (exag/mode change) via the sat loader
+  // callback AND here when the sat already arrived.
+  function bakeSatelliteTexture(ds) {
+    const M = ds.mesh;
+    const sat = ds.sat;
+    if (!M || !sat || !ds.satSampler || !M.gridRef) return;
+    const gr = M.gridRef, cs = gr.cellSizeM;
+    const mLat = 111320;
+    const mLng = 111320 * Math.cos(ds.centerLL[1] * Math.PI / 180);
+    const zone = ds.zoneMask;
+    const FLOOR = 42;
+    const qPhoto = new Array(M.count).fill(null);
+    // per-corner: vcol layout is 12 floats/quad (4 corners × RGB)
+    const vcol = new Float32Array(M.vcol ? M.vcol.length : M.count * 12);
+    if (M.vcol) vcol.set(M.vcol);
+    for (let q = 0; q < M.count; q++) {
+      const ix = q % (gr.W - 1), iy = (q / (gr.W - 1)) | 0;
+      const mx = (ix + 1 - gr.W / 2) * cs;
+      const my = (gr.H / 2 - iy - 1) * cs;
+      const inZone = zone && zone[Math.min(gr.W * gr.H - 1,
+        iy * gr.W + ix + 1)];
+      const photoShare = inZone ? 0.65 : 0.9;
+      const tintR = M.col[q * 3], tintG = M.col[q * 3 + 1],
+            tintB = M.col[q * 3 + 2];
+      const mix = (p) => {
+        if (!p) return null;
+        const r0 = (p[0] * photoShare + tintR * (1 - photoShare)) | 0,
+              g0 = (p[1] * photoShare + tintG * (1 - photoShare)) | 0,
+              b0 = (p[2] * photoShare + tintB * (1 - photoShare)) | 0;
+        const lum = 0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0;
+        const k = lum < FLOOR ? FLOOR / Math.max(1, lum) : 1;
+        return [
+          Math.min(255, r0 * k | 0),
+          Math.min(255, g0 * k | 0),
+          Math.min(255, b0 * k | 0)
+        ];
+      };
+      const samp = (ox, oy) => ds.satSampler(
+        ds.centerLL[0] + (mx + ox * cs) / mLng,
+        ds.centerLL[1] + (my + oy * cs) / mLat);
+      const mid = mix(samp(0, 0));
+      if (mid) qPhoto[q] = `rgb(${mid[0]},${mid[1]},${mid[2]})`;
+      // corners: blend photo+tint into the existing vertex colours so the
+      // painter's smooth-shading gradient carries the photo across quads.
+      const corners = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+      for (let c = 0; c < 4; c++) {
+        const p = mix(samp(corners[c][0], corners[c][1]));
+        if (!p) continue;
+        const o = q * 12 + c * 3;
+        vcol[o] = p[0]; vcol[o + 1] = p[1]; vcol[o + 2] = p[2];
+      }
+    }
+    M.qPhoto = qPhoto;
+    M.vcol = vcol;
+    console.log('[greenmap] satellite texture baked:',
+      M.count, 'quads');
   }
 
   // Build/refresh the corridor mesh: muted fairway tones outside the green
@@ -1605,6 +1671,9 @@
         }
       });
     if (ds.mesh) ds.mesh.gridRef = state.meshGrid;
+    // v1.4.5: mesh rebuilt (exag/mode change) — re-bake any satellite that
+    // already arrived, so the photo colours follow the new mesh.
+    if (ds.sat && ds.satSampler) bakeSatelliteTexture(ds);
     // Downhill arrows over the corridor (sparse — bigger step than 2D).
     // v1.1.4: step 5 → 14 — the corridor spawned ~350 arrows at the green
     // view's density, a swarming thicket over a hole this size (~90 now).
@@ -3084,69 +3153,17 @@
       const midCol = `rgb(${M.col[q * 3] | 0},${M.col[q * 3 + 1] | 0},${M.col[q * 3 + 2] | 0})`;
       if (state.layer === 'arrows') {
         fill = 'rgb(24,32,27)';   // near-background green-black
+      // v1.4.5 (BAKE, don't sample per frame): v1.4.4 sampled the photo at
+      // 4 corners + centre PER QUAD PER FRAME during rotation — ~36k
+      // getImageData calls + gradient allocations per orbit frame = the
+      // lag. The photo does NOT change when the camera rotates: bake the
+      // per-quad photo colours ONCE into qUV (quad-centre RGB) and use the
+      // EXISTING per-corner vertex colours (M.vcol) for the gradient. Zero
+      // per-frame photo work; rotation renders at painter speed again.
       } else if (state.viewMode === 'hole' && state.active === 'hole' &&
-                 state.datasets.hole && state.datasets.hole.satSampler &&
-                 M.gridRef) {
-        // v1.3.0: SATELLITE TEXTURE — sample the mosaic at the quad centre
-        // (world → lon/lat via the corridor's own gridRef + centerLL) and
-        // mix with the slope tint so the data stays readable on the photo.
-        const dsH = state.datasets.hole;
-        const gr = M.gridRef, cs = gr.cellSizeM;
-        const ix = q % (gr.W - 1), iy = (q / (gr.W - 1)) | 0;
-        const mx = (ix + 1 - gr.W / 2) * cs;
-        const my = (gr.H / 2 - iy - 1) * cs;
-        const mLat = 111320;
-        const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
-        // v1.4.4 (PER-CORNER PHOTO GRADIENT): one flat sample per quad made
-        // every quad a hard colour block — the "pixelated" hole view. Now:
-        // sample the photo at all FOUR corners, mix each with the quad tint,
-        // and paint a 2-stop linear gradient across the quad. Adjacent quads
-        // share corner colours → the photo reads continuous across the mesh.
-        const cornerRGB = [];
-        const cornerOff = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
-        for (const [ox, oy] of cornerOff) {
-          const lon = dsH.centerLL[0] + (mx + ox * cs) / mLng;
-          const lat = dsH.centerLL[1] + (my + oy * cs) / mLat;
-          cornerRGB.push(dsH.satSampler(lon, lat));
-        }
-        const tintR = M.col[q * 3], tintG = M.col[q * 3 + 1],
-              tintB = M.col[q * 3 + 2];
-        const inZone = dsH.zoneMask && dsH.zoneMask[
-          Math.min(gr.W * gr.H - 1, iy * gr.W + ix + 1)];
-        const photoShare = inZone ? 0.65 : 0.9;
-        // v1.4.4 (READABILITY FLOOR): dense tree canopy in the aerial photo
-        // is near-black; AO + shading multiply it darker. Those quads read
-        // as "black blocks on the terrain" (James's 16:34 shot). Clamp the
-        // mixed colour's brightness so photo-dark quads keep their texture
-        // but never drop below a readable floor (~17% luminance).
-        const mix = (p) => {
-          if (!p) return null;
-          const r0 = (p[0] * photoShare + tintR * (1 - photoShare)) | 0,
-                g0 = (p[1] * photoShare + tintG * (1 - photoShare)) | 0,
-                b0 = (p[2] * photoShare + tintB * (1 - photoShare)) | 0;
-          const lum = 0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0;
-          const FLOOR = 42, k = lum < FLOOR ? FLOOR / Math.max(1, lum) : 1;
-          return [
-            Math.min(255, r0 * k | 0),
-            Math.min(255, g0 * k | 0),
-            Math.min(255, b0 * k | 0)
-          ];
-        };
-        const c0 = mix(cornerRGB[0]), c1 = mix(cornerRGB[1]);
-        const c2m = mix(cornerRGB[2]), c3 = mix(cornerRGB[3]);
-        if (c0 && c1 && c2m && c3) {
-          const grad = ctx.createLinearGradient(
-            sx[q * 4], sy[q * 4], sx[q * 4 + 2], sy[q * 4 + 2]);
-          grad.addColorStop(0, `rgb(${c0[0]},${c0[1]},${c0[2]})`);
-          grad.addColorStop(1, `rgb(${c2m[0]},${c2m[1]},${c2m[2]})`);
-          fill = grad;
-          // stroke uses the centre colour to hide seams without tinting
-          const mid = mix(dsH.satSampler(
-            dsH.centerLL[0] + mx / mLng, dsH.centerLL[1] + my / mLat));
-          if (mid) strokeCol = `rgb(${mid[0]},${mid[1]},${mid[2]})`;
-        } else if (c0) {
-          fill = `rgb(${c0[0]},${c0[1]},${c0[2]})`;
-        }
+                 M.gridRef && M.qPhoto) {
+        const pq = M.qPhoto[q];
+        if (pq) fill = pq;
       }
       if (!fill && M.vcol) {
         const c0 = q * 12, c2 = q * 12 + 6;
