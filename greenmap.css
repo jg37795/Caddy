@@ -1,15 +1,9 @@
 /* ==========================================================================
-   greenmap.css — standalone Arccos-style green slope prototype
-   Not linked from the main app. Full-viewport map + minimal chrome only.
+   greenmap.css — 3D Green view chrome (integral Caddy app view, v1.2.2).
+   Styled with the APP design language: app.css tokens (--glass-*, --green,
+   --text, --muted, --safe-*) + glass pills. The canvas stays a dark stage
+   (it's a satellite-style data view, like the Play tab over imagery).
    ========================================================================== */
-
-:root {
-  --gm-bg: #0e1411;
-  --gm-panel: rgba(16, 22, 19, 0.92);
-  --gm-text: #e8efe9;
-  --gm-dim: #9db3a6;
-  --gm-accent: #ffd166;
-}
 
 * { box-sizing: border-box; }
 
@@ -19,7 +13,8 @@ html, body {
   height: 100%;
   background: var(--gm-bg);
   color: var(--gm-text);
-  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter,
+    'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   overflow: hidden;
 }
 
@@ -35,117 +30,203 @@ html, body {
 
 #gm-canvas { display: block; width: 100%; height: 100%; }
 
+/* ---- Glass chrome (the app's .glass language) ------------------------ */
 .gm-chrome {
   position: fixed;
   z-index: 10;
-  background: var(--gm-panel);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 13px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid var(--glass-stroke);
+  box-shadow: var(--glass-shadow);
+  color: var(--glass-text);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12.5px;
 }
 
 #gm-topbar {
-  top: 10px;
+  top: calc(var(--safe-top) + 10px);
   left: 10px;
   right: 10px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   flex-wrap: wrap;
+  border-radius: 22px;
+  padding: 8px 12px;
 }
 
-#gm-title { font-weight: 700; letter-spacing: 0.02em; margin-right: 4px; }
-#gm-status { color: var(--gm-dim); flex: 1; min-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#gm-title { font-weight: 800; letter-spacing: -0.01em; margin-right: 2px; }
+#gm-status { color: var(--muted); flex: 1; min-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 
+/* Buttons: glass pills; active = app green gradient (matches Play seg) */
 .gm-btn {
   appearance: none;
-  border: 1px solid rgba(255,255,255,0.15);
+  border: 0.5px solid var(--glass-stroke);
   background: transparent;
-  color: var(--gm-text);
-  border-radius: 7px;
-  padding: 5px 10px;
-  font-size: 12.5px;
+  color: var(--glass-text);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   cursor: pointer;
+  transition: transform 0.15s var(--spring-snappy, ease);
 }
+.gm-btn:active { transform: scale(0.95); }
 .gm-btn:hover { background: rgba(255,255,255,0.07); }
-.gm-btn.active { background: var(--gm-accent); color: #22200e; border-color: var(--gm-accent); font-weight: 600; }
+.gm-btn.active {
+  background: linear-gradient(145deg, var(--green), var(--green-2));
+  color: #ffffff;
+  border-color: transparent;
+}
 .gm-select {
   appearance: none;
   background: rgba(255,255,255,0.06);
-  color: var(--gm-text);
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 7px;
-  padding: 5px 8px;
-  font-size: 12.5px;
+  color: var(--glass-text);
+  border: 0.5px solid var(--glass-stroke);
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 600;
   max-width: 220px;
 }
 
+/* Legend: glass card bottom-right */
 #gm-legend {
   right: 10px;
-  bottom: 12px;
-  width: 190px;
-  max-height: min(46vh, calc(100dvh - 110px)); /* never overlaps top bar */
+  bottom: calc(var(--safe-bottom) + 12px);
+  width: 186px;
+  max-height: min(46vh, calc(100dvh - 130px));
   overflow-y: auto;
+  border-radius: 18px;
+  padding: 10px 12px;
 }
-#gm-legend h4 { margin: 2px 0 6px; font-size: 12px; color: var(--gm-dim); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-#gm-rampbar { height: 10px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.15); }
-#gm-ramplabels { display: flex; justify-content: space-between; font-size: 11px; color: var(--gm-dim); margin-top: 3px; }
-#gm-legend .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11.5px; color: var(--gm-dim); }
-#gm-legend .swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+#gm-legend h4 { margin: 2px 0 6px; font-size: 10.5px; color: var(--muted); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+#gm-rampbar { height: 8px; border-radius: 4px; border: 0.5px solid var(--glass-stroke); }
+#gm-ramplabels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 3px; }
+#gm-legend .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+#gm-legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
 
+/* Slope tooltip: dark glass card, app hierarchy */
 #gm-tip {
   position: fixed;
   z-index: 20;
   pointer-events: none;
-  background: rgba(10,14,12,0.94);
-  border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 10px;
+  background: rgba(10,14,12,0.92);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 0.5px solid var(--glass-stroke);
+  border-radius: 12px;
   padding: 7px 11px;
   font-size: 12.5px;
   display: none;
   white-space: nowrap;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  box-shadow: var(--glass-shadow);
 }
-/* v1.1.3 prettify: two-line tooltip hierarchy */
-#gm-tip .tip-big { font-size: 14px; font-weight: 600; color: #f2f6f3; }
-#gm-tip .tip-big span { font-weight: 400; color: var(--gm-dim); font-size: 12.5px; }
-#gm-tip .tip-sub { font-size: 11px; color: var(--gm-dim); margin-top: 2px; }
+#gm-tip .tip-big { font-size: 14px; font-weight: 700; color: #f2f6f3; }
+#gm-tip .tip-big span { font-weight: 400; color: var(--muted); font-size: 12px; }
+#gm-tip .tip-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
 @media (max-width: 560px) {
   #gm-legend {
-    width: 150px;
+    width: 148px;
     font-size: 12px;
-    padding: 6px 8px;
-    max-height: min(40vh, calc(100dvh - 130px));
+    padding: 8px 10px;
+    max-height: min(40vh, calc(100dvh - 150px));
   }
-  #gm-legend h4 { font-size: 10.5px; margin: 1px 0 4px; }
-  #gm-rampbar { height: 8px; }
-  #gm-ramplabels { font-size: 9.5px; letter-spacing: -0.02em; gap: 4px; }
+  #gm-legend h4 { font-size: 9.5px; margin: 1px 0 4px; }
+  #gm-rampbar { height: 7px; }
+  #gm-ramplabels { font-size: 9px; letter-spacing: -0.02em; gap: 4px; }
   #gm-legend .row { font-size: 10px; margin-top: 4px; }
-  #gm-legend .swatch { width: 11px; height: 11px; }
+  #gm-legend .swatch { width: 10px; height: 10px; }
   .gm-select { max-width: 130px; }
 }
 
-/* --- 3D view chrome --------------------------------------------------- */
+/* --- 3D view extras ---------------------------------------------------- */
 #gm-exag-wrap {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #dce7de;
-  font-size: 12px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
 }
-#gm-exag { width: 90px; accent-color: #9db3a6; }
+#gm-exag { width: 88px; accent-color: var(--green-2); }
 .gm-view-btn.active {
-  background: #2f4638;
-  border-color: #9db3a6;
+  background: linear-gradient(145deg, var(--green), var(--green-2));
+  border-color: transparent;
+  color: #fff;
+}
+
+/* ---- Fetch/loading card (v1.2.2): animated glass card, app language ---
+   Replaces the bare 'Loading…' status text while Overpass/USGS fetch. */
+#gm-loading {
+  position: fixed;
+  z-index: 15;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 26px 16px;
+  border-radius: 20px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid var(--glass-stroke);
+  box-shadow: var(--glass-shadow);
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+#gm-loading[hidden] { display: none; }
+#gm-loading .gm-load-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--glass-text);
+}
+#gm-loading .gm-load-bar {
+  width: 150px;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.14);
+}
+#gm-loading .gm-load-bar::before {
+  content: '';
+  display: block;
+  height: 100%;
+  width: 45%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--green), var(--green-2));
+  animation: gm-load-sweep 1.15s var(--spring-snappy, ease-in-out) infinite;
+}
+@keyframes gm-load-sweep {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(340%); }
+}
+#gm-loading .gm-load-status {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  max-width: 210px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (prefers-reduced-motion: reduce) {
+  #gm-loading .gm-load-bar::before { animation: none; width: 100%; opacity: 0.5; }
 }
 
 /* ==========================================================================
    Green location editor (greenedit.js) — verify/edit which green is loaded.
-   Styled with the APP's design language (glass chrome, app tokens), not the
-   prototype's dark look. Leaflet attribution hidden while testing.
+   Styled with the APP's design language (glass chrome, app tokens). Leaflet
+   attribution hidden while testing.
    ========================================================================== */
 #gm-editloc-sheet {
   position: fixed;

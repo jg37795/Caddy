@@ -1,7 +1,7 @@
 /* ==========================================================================
-   greenmap.js — standalone Arccos-style green slope map prototype
-   --------------------------------------------------------------------------
-   NOT linked from the Caddy app. Loaded only by greenmap.html.
+   greenmap.js — 3D Green slope view (integral Caddy app view).
+   Launched from the Play tab's "3D Green" pill; loads the current hole's
+   green via ?lat&lng&teelat&teelng.
 
    Layers:
      · Slope heat-map — per-cell color from Horn gradient magnitude
@@ -1205,9 +1205,21 @@
     }
   }
 
+  // v1.2.2: loading card — shown while Overpass/USGS fetch, with a live
+  // status line. Hidden the moment the green renders (or fails).
+  function setLoading(msg) {
+    const card = document.getElementById('gm-loading');
+    const line = document.getElementById('gm-load-status');
+    if (!card) return;
+    if (msg === false) { card.hidden = true; return; }
+    card.hidden = false;
+    if (line && msg) line.textContent = msg;
+  }
+
   async function loadGreen() {
     const status = document.getElementById('gm-status');
     status.textContent = 'Fetching USGS 3DEP elevation…';
+    setLoading('Fetching slope data');
     const halfLat = (SPAN_M / 2) / 111320;
     const halfLng = (SPAN_M / 2) / (111320 * Math.cos(state.lat * Math.PI / 180));
     const bbox = [state.lng - halfLng, state.lat - halfLat,
@@ -1232,9 +1244,11 @@
     }
 
     const polyLL = await fetchGreenPolygon(state.lat, state.lng);
+    setLoading('Reading green shape');
 
     if (!elev || !elev.grid) {
       status.textContent = 'No 3DEP data here — try another location.';
+      setLoading(false);
       return;
     }
     state.bbox = bbox;
@@ -1357,6 +1371,7 @@
         ? 'ellipse fallback' : 'OSM green shape';
     status.textContent = `${SRC_LABEL} · ` +
       `${(sumS / Math.max(1, nValid)).toFixed(1)}% mean slope`;
+    setLoading(false);
     setLocLabel(state.polySource);
     // v1.1.7: remember this green for bare-URL relaunches (Back/PWA resume).
     try {

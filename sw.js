@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.2.1'; // + TRACE YOUR GREEN: unmapped courses (Westwood) — Check location gains outline tracing (tap points around the green on satellite imagery, undo, save); the tool now prefers YOUR traced outline over the ellipse approximation, badge shows 'your traced outline'
+const CACHE_VERSION = 'v1.2.2'; // + APP CHROME for the whole green tool: glass pill toolbar/legend/buttons on app tokens (matches the Play tab), animated 'Reading the green…' loading card with live status (fetch -> shape -> render), de-protoyped file headers
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
