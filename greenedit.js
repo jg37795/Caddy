@@ -72,10 +72,14 @@
     const map = L.map('gelMap', {
       zoomControl: false,
       attributionControl: false,   // hidden while testing (James)
+      maxZoom: 21,                 // v1.3.2: 19 capped the zoom hard on
+                                   // iPhone (tiles upscale past 19 — fine)
+      minZoom: 15,
     }).setView(
       [boot.lat, boot.lng], 17);
     window.__gelMap = map;
-    L.tileLayer(TILES, { attribution: '', maxZoom: 19 }).addTo(map);
+    L.tileLayer(TILES, { attribution: '', maxZoom: 21,
+      maxNativeZoom: 19 }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     // Crosshair = sample point (draggable marker + centre tick).

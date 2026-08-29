@@ -1936,39 +1936,41 @@
   // state.meshArrows no longer match state.mesh (the float-then-snap bug).
   function rebuildMeshArrows() {
     const ds = state.active === 'hole' ? state.datasets.hole : null;
-    const g = ds ? ds.eg : state.grid;
+    // v-fix(arrow-index) v1.3.2: THE v1.3.1 bug — ds.eg is the ElevGrid
+    // OBJECT; indexing it with g[i] gives undefined, Number.isFinite
+    // fails, and EVERY arrow was dropped (James: "3d arrows show
+    // nothing"). Index the RAW array: ds.eg.grid (green view: state.grid
+    // is the ElevGrid object, so its .grid too).
+    const g = ds ? ds.eg.grid : (state.grid && state.grid.grid) || state.grid;
+    const W = ds ? ds.eg.W : state.grid.W;
+    const H = ds ? ds.eg.H : state.grid.H;
+    const cellSizeM = ds ? ds.eg.cellSizeM : state.grid.cellSizeM;
     const field = ds ? ds.field : state.field;
     const mask = ds ? ds.mask : state.mask;
     if (!g || !field || !mask) return;
-    // Downhill arrows on the surface. v2: sparse & bold like 18Birdies —
-    // ~every 8th refined cell (≈40 arrows), uniform bold styling, not fuzz.
     const arr = [];
     const step = ds ? 14 : 11;   // corridor sparser (v1.1.4)
-    for (let y = ds ? 1 : 4; y < g.H - 1; y += step)
-      for (let x = ds ? 1 : 4; x < g.W - 1; x += step) {
-        const i = y * g.W + x;
+    for (let y = ds ? 1 : 4; y < H - 1; y += step)
+      for (let x = ds ? 1 : 4; x < W - 1; x += step) {
+        const i = y * W + x;
         if (!mask[i] || !field.valid[i]) continue;
-        // v-fix(hole-void-parity): a mesh quad whose corner nodes are NaN
-        // (LiDAR void) is dropped at build time, but the ARROW on that cell
-        // still projected — white arrows floating over pure background in
-        // the void stretches. Same rule as the green view's void parity:
-        // no finite corner nodes ⇒ no arrow.
-        if (Number.isFinite(g[i]) && (!ds ||
-            (Number.isFinite(g[i + 1]) && Number.isFinite(g[i + g.W]) &&
-             Number.isFinite(g[i + g.W + 1])))) {
-          const gxv = field.gx[i], gyv = field.gy[i];
-          const mag = Math.hypot(gxv, gyv);
-          if (mag < 1e-5) continue;
-          arr.push({
-            mx: (x + 0.5 - g.W / 2) * g.cellSizeM,
-            my: (g.H / 2 - y - 0.5) * g.cellSizeM,
-            dxm: -gxv / mag, dym: gyv / mag,
-            lenM: 1.6,                       // uniform length — clean flow field
-            slopePct: mag * 100
-          });
-        }
+        // void parity: all four corner nodes finite (row-major, W stride).
+        if (!Number.isFinite(g[i]) || !Number.isFinite(g[i + 1]) ||
+            !Number.isFinite(g[i + W]) || !Number.isFinite(g[i + W + 1]))
+          continue;
+        const gxv = field.gx[i], gyv = field.gy[i];
+        const mag = Math.hypot(gxv, gyv);
+        if (mag < 1e-5) continue;
+        arr.push({
+          mx: (x + 0.5 - W / 2) * cellSizeM,
+          my: (H / 2 - y - 0.5) * cellSizeM,
+          dxm: -gxv / mag, dym: gyv / mag,
+          lenM: 1.6,
+          slopePct: mag * 100
+        });
       }
     state.meshArrows = arr;
+    if (ds) ds.arrows = arr;   // keep the dataset mirror in sync
   }
 
   // Bilinear surface height (exaggerated world z) at local metres.
@@ -3208,7 +3210,12 @@
         surfZ3(state.ball[0], state.ball[1]));
       if (bp && !(dressingOcclusion &&
           dressingOcclusion(bp[0], bp[1], bp[2] + 0.15))) {
-        const br = Math.max(3.5, cam.f / bp[2] * 0.014);
+        // v1.3.2 (READABLE ball): the depth-proportional size was 3-4 px on
+        // a phone — the "prettified" ball was indistinguishable from the
+        // old dot (James: "flag and ball still look the same"). Fixed
+        // floor of 7 CSS px + white outline so it pops on any surface.
+        const br = Math.max(7 * (window.devicePixelRatio || 1),
+          cam.f / bp[2] * 0.014);
         // contact shadow
         ctx.fillStyle = 'rgba(0,0,0,0.30)';
         ctx.beginPath();
@@ -3226,6 +3233,10 @@
         ctx.beginPath();
         ctx.arc(bp[0], bp[1], br, 0, 7);
         ctx.fill();
+        // crisp outline so the sphere reads against green/red
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.lineWidth = Math.max(1, br * 0.14);
+        ctx.stroke();
         // dimple hint: three faint dots
         ctx.fillStyle = 'rgba(120,130,124,0.35)';
         for (const [dx, dy] of [[-0.3, -0.1], [0.15, 0.2], [0.3, -0.25]]) {
@@ -3254,7 +3265,8 @@
         // v1.2.5 prettify: flag reads as a real pin — shaded pole with knob,
         // red-white pennant, cup ring at the base (was: white stick + flat
         // red triangle).
-        const ps = Math.max(1.6, cam.f / top[2] * 0.004);  // pole width
+        const ps = Math.max(2.2 * (window.devicePixelRatio || 1),
+          cam.f / top[2] * 0.004);  // pole width — visible floor (v1.3.2)
         // cup ring at the base
         const cs2 = Math.max(3, cam.f / base[2] * 0.012);
         ctx.strokeStyle = 'rgba(8,12,10,0.55)';
@@ -3279,8 +3291,12 @@
         ctx.fill();
         // pennant: red gradient with a subtle wave (two-segment trailing
         // edge), attached at the pole top
-        const fs = Math.max(4, cam.f / top[2] * 0.09);
-        const fw = fs * 1.35, fh = fs * 0.62;
+        // v1.3.2 (READABLE flag): same story — fs floored at 4 device px
+        // read as the old triangle. Floor 13 CSS px (a pennant you can
+        // actually see at arm's length) + white pole bold enough to read.
+        const fs = Math.max(13 * (window.devicePixelRatio || 1),
+          cam.f / top[2] * 0.09);
+        const fw = fs * 1.45, fh = fs * 0.66;
         const wag = Math.sin(performance.now() / 900) * fs * 0.06;
         const fg = ctx.createLinearGradient(top[0], top[1],
           top[0] + fw, top[1] + fh);
@@ -3691,7 +3707,13 @@
       btn.addEventListener('click', () => setViewMode(btn.dataset.view));
     });
 
-    // Vertical exaggeration slider (3D only) — rebuild mesh, not per frame.
+    // Vertical exaggeration slider (3D only).
+    // v1.3.2 (smooth exag): 'input' fired buildScene per tick — a full mesh
+    // rebuild + arrow rebuild + satellite resample per slider step = the
+    // jerky, "not smooth" drag. Now: the slider updates a live preview
+    // height offset (cheap render-only) and the FULL rebuild is debounced
+    // 140 ms after the last tick.
+    let exagDebounce = null;
     const exagEl = document.getElementById('gm-exag');
     exagEl.addEventListener('input', () => {
       state.v3.exag = parseFloat(exagEl.value);
@@ -3699,6 +3721,11 @@
         state.v3.exag + '×';
       buildScene();
       if (state.viewMode === '3d' || state.viewMode === 'hole') render();
+      clearTimeout(exagDebounce);
+      exagDebounce = setTimeout(() => {
+        buildScene();
+        render();
+      }, 140);
     });
 
     document.getElementById('gm-mode').addEventListener('change', (ev) => {
