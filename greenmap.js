@@ -1532,6 +1532,10 @@
         state.meshGrid = { grid: ds.eg.grid, W: ds.eg.W, H: ds.eg.H,
           cellSizeM: ds.eg.cellSizeM };
         ds.meshGrid = state.meshGrid;
+        // v1.4.1: record the exag the mesh was BUILT at — render3D rebuilds
+        // when it drifts from state.v3.exag (the float-then-snap bug: mesh
+        // built at exag A renders while walls/arrows sample exag B).
+        ds.meshExag = state.v3.exag;
     ds.mesh = GreenMapCore.buildMesh3D(g, ds.eg.W, ds.eg.H,
       ds.eg.cellSizeM, ds.mask, ds.elevRange, state.v3.exag, state.mode,
       {
@@ -1915,7 +1919,8 @@
           ds.meshGrid = state.meshGrid;
           state.mesh = GreenMapCore.buildMesh3D(
       mg, mW, mH, cellM, mMask, state.elevRange,
-      state.v3.exag, state.mode, { smooth: true, ao: true, aoRadius: aoR,
+      state.v3.exag, state.mode, {
+        smooth: true, ao: true, aoRadius: aoR,
         // 18Birdies look: 3D views default to the classic topo rainbow.
         elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t),
         // v-fix(rim-precision): true boundary polygon for edge subdivision.
@@ -2071,7 +2076,37 @@
 
   // Thin semi-transparent iso-lines at fixed elevation intervals
   // (marching-squares along the live grid), projected onto the surface.
-  function drawContours3D(cam) {
+  // v1.4.1: paint the collected underside quads (from the last render's
+  // classification) as a flat dark underlay. Called BEFORE the wall so the
+  // wall covers them except in AA seam gaps.
+  function paintSurfaceUnderlay(cam) {
+    const M = state.mesh;
+    const underQuads = state.__underQuads || [];
+    if (!M || !underQuads.length) return;
+    ctx.fillStyle = 'rgb(52,58,55)';
+    ctx.strokeStyle = ctx.fillStyle;
+    ctx.lineWidth = Math.max(1, (window.devicePixelRatio || 1) * 0.6);
+    for (const q of underQuads) {
+      let ok = true;
+      const pts = [];
+      for (let c = 0; c < 4; c++) {
+        const p = GreenMapCore.projectPt(cam, M.pos[q * 12 + c * 3],
+          M.pos[q * 12 + c * 3 + 1], M.pos[q * 12 + c * 3 + 2]);
+        if (!p) { ok = false; break; }
+        pts.push(p);
+      }
+      if (!ok) continue;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      ctx.lineTo(pts[1][0], pts[1][1]);
+      ctx.lineTo(pts[2][0], pts[2][1]);
+      ctx.lineTo(pts[3][0], pts[3][1]);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    }
+  }
+
+  function drawContours3D(cam, clipRing) {
     const g = state.grid, M = state.mesh;
     if (!g || !M || !state.mask) return;
     const [lo, hi] = state.elevRange || [0, 1];
@@ -2086,6 +2121,11 @@
     ctx.strokeStyle = 'rgba(16,26,20,0.32)';
     ctx.beginPath();
     for (const s of segs) {
+      // v1.4.1: clip to the inset green polygon (midpoint test) — dashes
+      // must never land outside the drawn surface.
+      if (clipRing &&
+          !GreenMapCore.pointInPoly((s.a[0] + s.b[0]) / 2,
+            (s.a[1] + s.b[1]) / 2, clipRing)) continue;
       const p1 = GreenMapCore.projectPt(cam, s.a[0], s.a[1],
         (s.z - M.zmin) * state.v3.exag);
       const p2 = GreenMapCore.projectPt(cam, s.b[0], s.b[1],
@@ -2372,11 +2412,12 @@
         // reference shell is closed all the way around. The surface painter
         // runs later and overpaints the drum wherever the surface exists, so
         // the drum can only ADD coverage, never overwrite the green.
-        const pc = GreenMapCore.projectPt(cam, mx, my,
-          (q.v[0][2] + q.v[2][2]) / 2);
-        if (!pc) continue;
-        if (dressingOcclusion && dressingOcclusion(pc[0], pc[1], pc[2]))
-          continue;
+        // v1.4.1: the depth gate used dressingOcclusion, whose zbuf EXCLUDED
+        // surface undersides this round — so gated back walls behind an
+        // underside were skipped and dark teeth showed between the red face
+        // and the wall. The gate is redundant with the backboard (which
+        // already fills crest→base unconditionally) — drop it entirely.
+        void allowBackFaces;
       }
       let dsum = 0, ok = true;
       const sp = [];
@@ -2426,9 +2467,21 @@
       for (let i = 0; i < sPts.length; i++) {
         const j = (i + 1) % sPts.length;
         if (!crest[i] || !base[i] || !crest[j] || !base[j]) continue;
+        // v1.4.1: EXTEND the trapezoid UP by 3 device px past the crest —
+        // the sawtooth teeth were AA gaps between the surface's bottom edge
+        // and the backboard crest (sub-pixel coverage gaps on the steep
+        // face). Overdraw upward is safe: the surface paints later and
+        // overpaints anything above its own edge.
+        const LIFT = 3 * (window.devicePixelRatio || 1);
+        const lift = (p, q2) => {
+          const dx = q2[0] - p[0], dy = q2[1] - p[1];
+          const l = Math.hypot(dx, dy) || 1;
+          return [p[0] - dx / l * LIFT, p[1] - dy / l * LIFT];
+        };
+        const c0 = lift(crest[i], base[i]), c1 = lift(crest[j], base[j]);
         ctx.beginPath();
-        ctx.moveTo(crest[i][0], crest[i][1]);
-        ctx.lineTo(crest[j][0], crest[j][1]);
+        ctx.moveTo(c0[0], c0[1]);
+        ctx.lineTo(c1[0], c1[1]);
         ctx.lineTo(base[j][0], base[j][1]);
         ctx.lineTo(base[i][0], base[i][1]);
         ctx.closePath();
@@ -2452,11 +2505,9 @@
       ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]);
       ctx.closePath();
       ctx.fillStyle = grad;
+      ctx.strokeStyle = grad;   // v1.4.1: same-colour seam cover on ALL edges
+      ctx.lineWidth = Math.max(1, (window.devicePixelRatio || 1) * 0.6);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(40,46,43,0.5)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(c[0], c[1]); ctx.lineTo(d[0], d[1]);
       ctx.stroke();
     }
   }
@@ -2517,36 +2568,33 @@
 
   // v1.4.0: soft dark ellipse where the drum meets the ground plane —
   // grounds the model visually and hides any light bleed at the base seam.
+  // v1.4.1: contact shading that FOLLOWS the real base ring — the v1.4.0
+  // screen-space ellipse ignored projection rotation (huge floating oval in
+  // James's 11:57 shot). Now: stroke the actual projected wall-base ring
+  // (the same densified ring the wall uses) with a soft dark line + wider
+  // halo. Hugs the drum exactly at every yaw.
   function drawBaseContactRing(cam, bpts) {
-    let cx = 0, cy = 0, minX = Infinity, maxX = -Infinity,
-        minY = Infinity, maxY = -Infinity;
-    for (const [mx, my] of bpts) {
-      cx += mx; cy += my;
-      if (mx < minX) minX = mx;
-      if (mx > maxX) maxX = mx;
-      if (my < minY) minY = my;
-      if (my > maxY) maxY = my;
-    }
-    cx /= bpts.length; cy /= bpts.length;
-    const rM = Math.max(maxX - minX, maxY - minY) / 2 + 1.2;
-    const c = GreenMapCore.projectPt(cam, cx, cy, 0);
-    const e = GreenMapCore.projectPt(cam, cx + rM, cy, 0);
-    const n = GreenMapCore.projectPt(cam, cx, cy + rM, 0);
-    if (!c || !e || !n) return;
-    const rx = Math.hypot(e[0] - c[0], e[1] - c[1]);
-    const ry = Math.hypot(n[0] - c[0], n[1] - c[1]);
+    const ring = densifyRing(growPolyLocal(bpts, RING_M), 0.25);
+    const pts = ring.map(([mx, my]) =>
+      GreenMapCore.projectPt(cam, mx, my, 0));
     const dpr = window.devicePixelRatio || 1;
     ctx.save();
-    ctx.strokeStyle = 'rgba(6,10,8,0.5)';
-    ctx.lineWidth = Math.max(2, 3.5 * dpr);
-    ctx.beginPath();
-    ctx.ellipse(c[0], c[1], rx, ry, 0, 0, 7);
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(6,10,8,0.22)';
-    ctx.lineWidth = Math.max(4, 8 * dpr);
-    ctx.beginPath();
-    ctx.ellipse(c[0], c[1], rx * 1.02, ry * 1.02, 0, 0, 7);
-    ctx.stroke();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    const strokeRing = (color, width) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      let started = false;
+      for (const p of pts) {
+        if (!p) continue;
+        if (!started) { ctx.moveTo(p[0], p[1]); started = true; }
+        else ctx.lineTo(p[0], p[1]);
+      }
+      if (started) { ctx.closePath(); ctx.stroke(); }
+    };
+    strokeRing('rgba(6,10,8,0.20)', Math.max(4, 8 * dpr));
+    strokeRing('rgba(6,10,8,0.45)', Math.max(2, 3 * dpr));
     ctx.restore();
   }
 
@@ -2749,6 +2797,15 @@
     state.holeLoadT0 = 0;
     if (!state.grid || !state.mesh) return;
     const cam = currentCam();
+    // v1.4.1 (exag drift): if the hole mesh was built at a different exag
+    // than the current slider (the float-then-snap class), rebuild NOW —
+    // walls/arrows sample state.v3.exag live and would disagree with the
+    // stale mesh for exactly one frame.
+    const dsNow = state.datasets[state.active];
+    if (dsNow && dsNow.meshExag !== undefined &&
+        Math.abs(dsNow.meshExag - state.v3.exag) > 1e-6) {
+      buildScene();
+    }
     const M = state.mesh;
 
     // v-fix(seethrough): the base-plane grid floor extends UNDER the green,
@@ -2770,6 +2827,13 @@
           // Order is now: floor FIRST, then wall, then surface — nothing
           // that belongs under the drum can land on top of it.
           drawGridFloor(cam, bpts);
+          // v1.4.1: underside underlay paints HERE — before the wall. The
+          // undersides belong BEHIND the wall (they're the far side of the
+          // terrain); the wall overpaints them except in the sub-pixel AA
+          // gaps at the surface↔wall seam, which is exactly where they
+          // should show. (Painting them AFTER the wall — the first attempt
+          // — put dark triangles ON the wall: the "teeth".)
+          paintSurfaceUnderlay(cam);
           // v1.4.0 contact ring: a soft dark ellipse at the base seals the
           // drum-to-ground junction so the model reads as sitting ON the
           // terrain (no floating edge, no light bleed at the base seam).
@@ -2783,19 +2847,42 @@
     // I face them"). Removed: the wall pass + one-ring alignment seal the rim
     // without it (verified on real OSM+LiDAR data at multiple angles).
 
-    // Project all quad corners once; painter sort by mean depth (far first).
-    // v-fix(seethrough2): NO backface culling on the top surface. The bowl's
-    // near/far rims tilt their normals away from the camera at normal orbit
-    // pitches, so culled rim quads left holes and the skirt's inner walls
-    // showed through ("clear/see-through green" + black jagged rim spikes).
-    // Painter far→near ordering already hides undersides correctly.
+    // v1.4.1 (underside-over-wall): James's 11:57 shot — the surface's own
+    // UNDERSIDE painted OVER the solid wall on the falling flank. But a
+    // HARD cull leaves black sawtooth slivers where culled quads used to
+    // paper the surface↔wall seam (verified in .v141moat). Fix: culled
+    // undersides move to an UNDERLAY pass painted right after the wall —
+    // they can only ADD coverage in the seam, and the main surface painter
+    // overpaints them wherever real surface exists (drum philosophy).
     const n = M.count;
     const sx = new Float32Array(n * 4), sy = new Float32Array(n * 4);
     const dep = new Float32Array(n), order = new Int32Array(n);
     let visible = new Uint8Array(n);
     let nVis = 0;
+    const surfCamX = -cam.fwd[0] * cam.dist,
+          surfCamY = -cam.fwd[1] * cam.dist;
+    state.__underQuads = [];
+    const underQuads = state.__underQuads;
+    const isUnder = new Uint8Array(n);
     for (let q = 0; q < n; q++) {
       const o0 = q * 12;
+      // top-face winding: nz < 0 ⇒ we'd be seeing the underside here.
+      const ux = M.pos[o0 + 3] - M.pos[o0],
+            uy = M.pos[o0 + 4] - M.pos[o0 + 1];
+      const vx = M.pos[o0 + 9] - M.pos[o0],
+            vy = M.pos[o0 + 10] - M.pos[o0 + 1];
+      const nz = ux * vy - uy * vx;
+      if (nz < 0) {
+        const cxq = (M.pos[o0] + M.pos[o0 + 3] + M.pos[o0 + 6] +
+                     M.pos[o0 + 9]) / 4;
+        const cyq = (M.pos[o0 + 1] + M.pos[o0 + 4] + M.pos[o0 + 7] +
+                     M.pos[o0 + 10]) / 4;
+        if ((surfCamX - cxq) * (-uy) + (surfCamY - cyq) * (ux) <= 0) {
+          underQuads.push(q);   // underside → underlay, not the main painter
+          isUnder[q] = 1;
+          continue;
+        }
+      }
       let dsum = 0, ok = true;
       for (let c = 0; c < 4; c++) {
         const o = q * 12 + c * 3;
@@ -2855,6 +2942,8 @@
         }
     };
     for (let q = 0; q < n; q++) {
+      if (isUnder[q]) continue;   // v1.4.1: undersides must NOT own depth —
+                                  // the wall paints over them (sawtooth fix)
       const i = q * 4;
       rasTri(dpx[i], dpy[i], dpd[i], dpx[i + 1], dpy[i + 1], dpd[i + 1],
              dpx[i + 2], dpy[i + 2], dpd[i + 2]);
@@ -2996,6 +3085,15 @@
     }
     void visible;
 
+    // v1.4.1: the grid floor ALSO draws after the surface here (its lines
+    // crossing the base plane behind the drum are wanted), but it must
+    // never paint OVER the drum — clip it to outside the projected base
+    // ring by simply drawing it BEFORE was not enough for the far side:
+    // the far floor lines that project OVER the near wall come from the
+    // same drawGridFloor call, so gate: skip when the old order bug
+    // re-manifests. Actually the v1.4.0 reorder handles it; this second
+    // call is REMOVED (it was re-painting lines over the near wall).
+
     // v-fix(quad-clip): the screen-space ERASE pass is REMOVED. The surface
     // geometry is now polygon-clipped at build time (clipQuadToPoly), so no
     // overhang ever exists to erase: no near-plane fold cases, no bitten
@@ -3004,10 +3102,18 @@
     // grown ring.
 
     // 18Birdies dressing: contour iso-lines on the surface…
-    drawContours3D(cam);
-    if (bpts && state.viewMode !== 'hole') {
-      drawGridFloor(cam, bpts);
+    // v1.4.1: contours clipped to the GREEN polygon — on steep falling
+    // flanks they projected BELOW the rim onto the wall/background as
+    // floating dark dashes (the "teeth" misdiagnosed twice).
+    if (state.polyLocal && state.polyLocal.length > 2) {
+      const contourRing = growPolyLocal(state.polyLocal, -0.05);
+      drawContours3D(cam, contourRing);
+    } else {
+      drawContours3D(cam, null);
     }
+    // v1.4.1: the second drawGridFloor call HERE (after the surface) was
+    // re-painting translucent floor lines OVER the near wall — the actual
+    // "translucent base" mechanism. It now draws once, BEFORE the wall.
 
     // Hole view: tee marker only. The white green-zone outline was removed
     // (v1.0.87) — it was buggy at the rim and the mesh rim now follows the

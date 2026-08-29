@@ -97,14 +97,20 @@
           done++; if (done >= total) finish(); else next();
         };
         img.onerror = () => { clearTimeout(to); done++; next(); };
-        // v-fix(node-canvas): node-canvas decodes sync from a Buffer but
-        // fails on a raw ArrayBuffer — browsers take both. Buffer the bytes
-        // (harmless in the browser, fixes the headless harness).
-        fetch(url).then(r => {
-          if (!r.ok) throw 0;
-          return r.arrayBuffer();
-        }).then(buf => { img.src = Buffer.from(buf); })
-          .catch(() => { done++; next(); });
+        // v-fix(sat-browser) v1.4.1: THE device bug — the Node path feeds
+        // the Image a Buffer (node-canvas requirement), but `Buffer` does
+        // not exist in a browser, so every tile threw, the 60% gate tripped
+        // and James's phone always fell back to topo colours. Browser path:
+        // assign the URL directly (Esri sends ACAO:*; crossOrigin is set).
+        if (typeof Buffer !== 'undefined') {
+          fetch(url).then(r => {
+            if (!r.ok) throw 0;
+            return r.arrayBuffer();
+          }).then(buf => { img.src = Buffer.from(buf); })
+            .catch(() => { done++; next(); });
+        } else {
+          img.src = url;
+        }
       };
       for (let i = 0; i < Math.min(CONCURRENCY, total); i++) next();
       if (!total) finish();
