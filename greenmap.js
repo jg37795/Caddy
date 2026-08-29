@@ -1532,6 +1532,9 @@
         fitHoleView();
         setStatus('Whole-hole 3D — drag = orbit · pinch/scroll = zoom · ' +
           'green highlighted, blue flag = tee');
+        // v1.5.0: flyover reveal here too (user was already in Hole view
+        // when the corridor finished loading).
+        if (!ds.seenFlyover) { ds.seenFlyover = true; flyoverStart(); }
         render();
       }
       return ds;
@@ -1765,6 +1768,9 @@
       rafPending = false;
       if (state.viewMode === '3d' || state.viewMode === 'hole') render3D();
       else render2D();
+      // v1.5.0: the putt-read card mirrors the solver result every frame
+      // (cheap DOM write; hidden when no ball / hole view).
+      syncPuttCard();
     });
   }
 
@@ -1934,6 +1940,49 @@
       ? Math.round(Math.abs(r.breakIn)) : Math.abs(r.breakIn).toFixed(1);
     const pace = r.diePace ? 'die it at the cup' : 'firm — take the break out';
     return `Play ~${lb} in of break (${side}) · ${pace}`;
+  }
+
+  // v1.5.0 PUTT-READ CARD — the same solver result, as a glass card.
+  // Shows when a ball is down (green view only); updates on stimp change;
+  // hides on ball removal / view switch to hole. Reads state.puttResult
+  // (already computed by the painter this frame — no extra solver calls).
+  function syncPuttCard() {
+    const card = document.getElementById('gm-puttcard');
+    if (!card) return;
+    const show = state.active === 'green' && state.showPutt &&
+      state.ball && state.puttResult;
+    if (!show) { card.hidden = true; return; }
+    const r = state.puttResult;
+    const bv = document.getElementById('gm-pc-break-val');
+    const bd = document.getElementById('gm-pc-break-dir');
+    const aim = document.getElementById('gm-pc-aim');
+    const pace = document.getElementById('gm-pc-pace');
+    const mk = document.getElementById('gm-pc-makeable');
+    if (!r.ok) {
+      const sb = Math.abs(r.straightBreak) >= 0.5
+        ? Math.round(r.straightBreak) : r.straightBreak.toFixed(1);
+      bv.textContent = sb + '″';
+      bd.textContent = '';
+      aim.textContent = 'No makeable line from here';
+      pace.textContent = 'LAY UP';
+      pace.classList.add('gm-pc-hard');
+      mk.textContent = '';
+      mk.classList.remove('gm-pc-no');
+    } else {
+      const lb = Math.abs(r.breakIn) >= 0.5
+        ? Math.round(Math.abs(r.breakIn)) : Math.abs(r.breakIn).toFixed(1);
+      const side = r.breakIn > 0 ? 'left' : 'right';
+      bv.textContent = lb + '″';
+      bd.textContent = side === 'left' ? '←' : '→';
+      const aimDeg = Math.abs(r.aimIn) >= 0.5
+        ? Math.abs(r.aimIn).toFixed(1) : Math.abs(r.aimIn).toFixed(2);
+      aim.textContent = `Aim ${aimDeg}° ${r.aimIn > 0 ? 'left' : 'right'} of hole`;
+      pace.textContent = r.diePace ? 'DIE' : 'FIRM';
+      pace.classList.toggle('gm-pc-hard', !r.diePace);
+      mk.textContent = '✓ Makeable';
+      mk.classList.remove('gm-pc-no');
+    }
+    card.hidden = false;
   }
 
   function drawScaleBar() {
@@ -3913,6 +3962,83 @@
         state.v3.yaw = 0; state.v3.pitch = 35; state.v3.dist = 62;
       }
     }
+
+    /* ---- v1.5.0 HOLE FLYOVER ----------------------------------------
+       Camera flies tee → green once per hole reveal. 3.2 s, ease-in-out,
+       skippable (any pointer/touch), skipped entirely under reduced
+       motion. Position-based interpolation: the eye arcs up mid-flight
+       then settles into fitHoleView's final orbit. */
+    let flyover = null;   // { t0, from:{yaw,pitch,dist}, raf }
+    const REDUCED_MOTION = () =>
+      window.matchMedia && window.matchMedia(
+        '(prefers-reduced-motion: reduce)').matches;
+
+    function flyoverStart() {
+      // Only once per corridor reveal; skip when the user prefers calm.
+      if (flyover || REDUCED_MOTION()) return;
+      const ds = state.datasets.hole;
+      if (!ds || !ds.mesh || !ds.eg) return;
+      // Eye the tee end: yaw toward the tee's bearing, low pitch, close.
+      // Tee in corridor-local metres:
+      const mLat = 110540;
+      const mLng = 111320 * Math.cos(ds.centerLL[1] * Math.PI / 180);
+      const teeM = state.teeLL ? [
+        (state.teeLL.lng - ds.centerLL[0]) * mLng,
+        (state.teeLL.lat - ds.centerLL[1]) * mLat] : null;
+      const toYaw = state.v3.yaw;      // final view (fitHoleView just ran)
+      const toPitch = state.v3.pitch;
+      const toDist = state.v3.dist;
+      // Start: behind the tee looking down-corridor. If no tee, start
+      // from the corridor's long axis at low altitude.
+      let startYaw = toYaw;
+      if (teeM) startYaw = Math.atan2(teeM[0], teeM[1]) * 180 / Math.PI;
+      else startYaw = toYaw + 180;
+      const from = {
+        yaw: startYaw,
+        pitch: 16,                   // low, at the trees
+        dist: Math.max(120, toDist * 1.45)   // start close-ish, arc out
+      };
+      flyover = { t0: performance.now(), from,
+                  to: { yaw: toYaw, pitch: toPitch, dist: toDist } };
+      const easeInOut = (t) =>
+        t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const DUR = 3200;
+      const step = () => {
+        if (!flyover) return;                    // cancelled
+        const t = Math.min(1, (performance.now() - flyover.t0) / DUR);
+        const k = easeInOut(t);
+        // Gentle arc: dist swells to ~1.18× mid-flight then settles.
+        const arc = 1 + 0.18 * Math.sin(Math.PI * k);
+        state.v3.yaw = flyover.from.yaw +
+          (flyover.to.yaw - flyover.from.yaw) * k;
+        state.v3.pitch = flyover.from.pitch +
+          (flyover.to.pitch - flyover.from.pitch) * k;
+        state.v3.dist = (flyover.from.dist +
+          (flyover.to.dist - flyover.from.dist) * k) * arc;
+        render();
+        if (t < 1) flyover.raf = requestAnimationFrame(step);
+        else { flyover = null;
+               state.v3.yaw = flyoverEnd.yaw;
+               state.v3.pitch = flyoverEnd.pitch;
+               state.v3.dist = flyoverEnd.dist;
+               render(); }
+      };
+      const flyoverEnd = { ...flyover.to };
+      flyover.raf = requestAnimationFrame(step);
+      // Skippable: any pointerdown on the canvas cancels + snaps to end.
+      canvas.addEventListener('pointerdown', flyoverCancel, { once: true });
+    }
+    function flyoverCancel() {
+      if (!flyover) return;
+      if (flyover.raf) cancelAnimationFrame(flyover.raf);
+      const end = flyover.to;
+      flyover = null;
+      state.v3.yaw = end.yaw;
+      state.v3.pitch = end.pitch;
+      state.v3.dist = end.dist;
+      render();
+    }
+    window.__flyoverCancel = flyoverCancel;
     function setViewModeInternal(v) {
       state.viewMode = v === 'hole' ? 'hole' : (v === '3d' ? '3d' : '2d');
       document.querySelectorAll('.gm-view-btn').forEach(b =>
@@ -3927,10 +4053,13 @@
       if (state.viewMode === 'hole') {
         const h = state.datasets.hole;
         if (h && !h.failed && h.mesh) {
+          const firstReveal = !h.seenFlyover;
           activateDataset('hole');
           frameCameraForView('hole');
           setStatus('Whole-hole 3D — drag = orbit · pinch/scroll = zoom · ' +
             'green highlighted, blue flag = tee');
+          // v1.5.0: fly the tee→green reveal once per corridor.
+          if (firstReveal) { h.seenFlyover = true; flyoverStart(); }
         } else if (h && h.failed) {
           // Graceful fallback: green-only 3D with an inline explanation.
           state.viewMode = '3d';

@@ -100,6 +100,15 @@
 
 <div id="gm-tip"></div>
 
+<!-- v1.5.0 putt-read card: springs in when a ball is dropped; summarises
+     the solver read (break / aim / pace / makeable). Lives outside the
+     canvas so it never fights the renderer. -->
+<div id="gm-puttcard" class="gm-chrome" hidden>
+  <div class="gm-pc-break"><span id="gm-pc-break-val">—</span><span id="gm-pc-break-dir"></span></div>
+  <div class="gm-pc-row" id="gm-pc-aim">Aim —</div>
+  <div class="gm-pc-row"><span class="gm-pc-chip" id="gm-pc-pace">—</span><span id="gm-pc-makeable"></span></div>
+</div>
+
 <div id="gm-loading" hidden>
   <div class="gm-load-title">Reading the green…</div>
   <div class="gm-load-bar"></div>

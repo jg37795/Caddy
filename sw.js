@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.4.5'; // ROTATION LAG KILLED: v1.4.4 sampled the photo 5x per quad PER FRAME (~36k getImageData + gradient allocations per orbit frame). The photo does not change with the camera — bake ONCE: satellite colours sampled into M.qPhoto (quad fill) + M.vcol (per-corner) when the mosaic arrives and on every mesh rebuild; render3D now does zero photo work per frame. Same visual quality.
+const CACHE_VERSION = 'v1.5.0'; // PREMIUM FEATURES: (1) HOLE FLYOVER — camera flies tee->green over 3.2s with cubic ease-in-out and a gentle mid-flight arc, once per corridor reveal, skippable by touch (snaps to exact final orbit), skipped under prefers-reduced-motion; (2) PUTT-READ CARD — glass card springs in on ball drop: break in inches + direction, aim degrees, FIRM/DIE pace chip, makeable check; reads the already-computed solver result each frame (no extra solver calls), updates live with Stimp, hides in hole view / on ball removal
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

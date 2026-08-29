@@ -524,3 +524,61 @@ body:not(.dark) #gm-stage {
   #gm-exag { width: 78px; }
   .gm-dock-row { gap: 5px; }
 }
+
+/* v1.5.0 putt-read card — glass, right-centre, spring-in */
+#gm-puttcard {
+  position: fixed;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 172px;
+  border-radius: 18px;
+  padding: 12px 14px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: gm-pc-spring 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#gm-puttcard[hidden] { display: none; }
+@keyframes gm-pc-spring {
+  0% { opacity: 0; transform: translateY(-50%) scale(0.86) translateX(14px); }
+  100% { opacity: 1; transform: translateY(-50%) scale(1) translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #gm-puttcard { animation: none; }
+}
+.gm-pc-break {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+#gm-pc-break-val {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text, #f2f6f3);
+}
+#gm-pc-break-dir { font-size: 17px; font-weight: 700; color: var(--green, #3fbf6f); }
+.gm-pc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted, #9aa89f);
+}
+.gm-pc-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: rgba(63, 191, 111, 0.16);
+  color: #58d68d;
+}
+.gm-pc-chip.gm-pc-hard {
+  background: rgba(255, 159, 67, 0.16);
+  color: #ffb56b;
+}
+#gm-pc-makeable { font-weight: 700; }
+#gm-pc-makeable.gm-pc-no { color: #ff8f7a; }
