@@ -1250,14 +1250,40 @@
     // Feeding the same smooth polygon the OSM path uses lets the v1.0.87 rim
     // subdivision run here too: one boundary pipeline for both paths.
     if (!polyLL) {
-      const rM = SPAN_M * 0.36;
-      const poly = [];
-      for (let a = 0; a < 48; a++) {
-        const th = a / 48 * Math.PI * 2;
-        poly.push([Math.cos(th) * rM, Math.sin(th) * rM]);
+      // v1.2.1: TRACED outline first — if James outlined this green on the
+      // Check-location satellite map, use his real geometry instead of the
+      // ellipse approximation. Keyed by the outline centroid; matches when
+      // the launch point sits within ~100 m of the traced centroid.
+      let traced = null;
+      try {
+        const store = JSON.parse(
+          localStorage.getItem('caddy:greenOutline:v1') || '{}');
+        for (const k of Object.keys(store)) {
+          const o = store[k];
+          if (!o || !Array.isArray(o.vertices) || o.vertices.length < 3)
+            continue;
+          if (Math.hypot(
+                (o.lat - state.lat) * 111320,
+                (o.lng - state.lng) * 111320 * Math.cos(
+                  state.lat * Math.PI / 180)) < 100) { traced = o; break; }
+        }
+      } catch (e) { traced = null; }
+      if (traced) {
+        const mLat = 111320;
+        const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);
+        state.polyLocal = traced.vertices.map(([la, ln]) => [
+          (ln - state.lng) * mLng, (la - state.lat) * mLat ]);
+        state.polySource = 'traced';
+      } else {
+        const rM = SPAN_M * 0.36;
+        const poly = [];
+        for (let a = 0; a < 48; a++) {
+          const th = a / 48 * Math.PI * 2;
+          poly.push([Math.cos(th) * rM, Math.sin(th) * rM]);
+        }
+        state.polyLocal = poly;
+        state.polySource = 'ellipse';
       }
-      state.polyLocal = poly;
-      state.polySource = 'ellipse';
     }
     let mask = null;
     if (polyLL) {
@@ -1326,8 +1352,10 @@
       `valid ${(100 * nValid / mask.length).toFixed(0)}%`,
       `in-mask ${nMasked}`, `mean slope ${(sumS / Math.max(1, nValid)).toFixed(2)}%`,
       `max slope ${maxS.toFixed(1)}%`);
-    status.textContent = `${state.polySource === 'ellipse'
-      ? 'ellipse fallback' : 'OSM green shape'} · ` +
+    const SRC_LABEL = state.polySource === 'traced'
+      ? 'traced outline' : state.polySource === 'ellipse'
+        ? 'ellipse fallback' : 'OSM green shape';
+    status.textContent = `${SRC_LABEL} · ` +
       `${(sumS / Math.max(1, nValid)).toFixed(1)}% mean slope`;
     setLocLabel(state.polySource);
     // v1.1.7: remember this green for bare-URL relaunches (Back/PWA resume).
@@ -3577,9 +3605,11 @@
     const la = state.lat.toFixed(5), ln = state.lng.toFixed(5);
     const src = polySource === 'osm'
       ? '✓ real green outline (OSM)'
-      : polySource === 'ellipse'
-        ? '⚠ approx outline — no OSM green found here'
-        : '…';
+      : polySource === 'traced'
+        ? '✓ your traced outline'
+        : polySource === 'ellipse'
+          ? '⚠ approx outline — trace it via Check location'
+          : '…';
     el.textContent = `${la}, ${ln} · ${src}`;
   }
 

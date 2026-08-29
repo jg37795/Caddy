@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.2.0'; // SEAL: drum backboard rebuilt as per-segment trapezoids — the single crest+base fill self-cancelled under nonzero winding (far base ring projects inside the near one), leaving the wall unpainted below the ribbon on the no-OSM ellipse path (Westwood): drum read see-through/transparent at glancing angles. Verified on real LiDAR both paths (OSM + ellipse) at 15x glancing.
+const CACHE_VERSION = 'v1.2.1'; // + TRACE YOUR GREEN: unmapped courses (Westwood) — Check location gains outline tracing (tap points around the green on satellite imagery, undo, save); the tool now prefers YOUR traced outline over the ellipse approximation, badge shows 'your traced outline'
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

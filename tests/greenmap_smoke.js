@@ -290,6 +290,36 @@ console.log('5c. Makeable-line aim solver (solvePutt)');
     check('solve: steep uphill reports no makeable line', rX.ok === false,
       `ok=${rX.ok}`);
   }
+
+  // (v1.2.1) Traced-outline store: centroid matching + vertex conversion
+  // must produce a usable polygon (same contract the OSM path feeds).
+  {
+    const store = {
+      '41.900,-93.610': {
+        lat: 41.9, lng: -93.61,
+        vertices: [[41.9, -93.61], [41.9, -93.609], [41.901, -93.6095]],
+        updatedAt: 0,
+      },
+    };
+    const launch = { lat: 41.9, lng: -93.61 };
+    let hit = null;
+    for (const k of Object.keys(store)) {
+      const o = store[k];
+      if (Math.hypot((o.lat - launch.lat) * 111320,
+        (o.lng - launch.lng) * 111320 *
+          Math.cos(launch.lat * Math.PI / 180)) < 100) { hit = o; break; }
+    }
+    check('trace: nearby launch matches traced outline', !!hit);
+    const mLat = 111320;
+    const mLng = 111320 * Math.cos(launch.lat * Math.PI / 180);
+    const polyLocal = hit.vertices.map(([la, ln]) => [
+      (ln - launch.lng) * mLng, (la - launch.lat) * mLat ]);
+    const tmask = GM.polyMask(polyLocal, W, H, cs);
+    let inCells = 0;
+    for (let i = 0; i < tmask.length; i++) if (tmask[i]) inCells++;
+    check('trace: converted polygon yields in-mask cells', inCells > 20,
+      `cells=${inCells}`);
+  }
 }
 
 console.log('6. 3D orbit math — camera, projection, mesh');
