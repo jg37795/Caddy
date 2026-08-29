@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.2.3'; // FIXES from James's field test: dark-mode parity (greenmap reads the app's caddy:prefs theme, body.dark set pre-paint, viewport-fit=cover kills the white status-bar bar); TRACED OUTLINE NOW ALWAYS BEATS OSM (his Westwood trace was ignored because Overpass matched a polygon near his launch point); 2D arrows rebuilt bold + big heads + sparser; toolbar row gaps/padding
+const CACHE_VERSION = 'v1.2.4'; // SEAL v2: ONE crest function for every wall layer (skirtRingHeights: ±2-max + nearest-finite carry) — plates, backboard shared it but the 26px ribbon still used its own heights; its pale slivers at silhouette-tangent segments were the stepped flap / 'still see-through base' on Westwood. RIBBON DELETED (redundant after one-crest; layer-bisect proven). Wall = backboard + plates, one height function.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

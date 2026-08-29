@@ -2182,79 +2182,13 @@
   // drawn surface edge and the wall body is wall-grey — never background.
   // This is the final seal for the "black teeth" class: the ribbon exists
   // at EVERY ring point by construction.
-  function drawWallRibbon(cam, bpts) {
-    const M = state.mesh;
-    if (!M) return;
-    const ring = densifyRing(growPolyLocal(bpts, RING_M), 0.25);
-    const front = [];
-    const ringNear = [];
-    const camPx = -cam.fwd[0] * cam.dist, camPy = -cam.fwd[1] * cam.dist;
-    for (const [mx, my] of ring) {
-      // +0.06 m: the ribbon top rides just above the sampled ring line so
-      // that clipped-cell chords (straight 3D segments crossing the curved
-      // surface between nodes) can never pass ABOVE it — the old lip used
-      // the same lift. The surface overpaints it wherever it is in front.
-      const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my) + 0.06);
-      if (p) {
-        ringNear.push(mx * camPx + my * camPy); // >0 = near half
-        front.push(p);
-      }
-    }
-    if (front.length < 2) return;
-    // v-fix(far-lip-envelope): mirror of the skirt far-wall fix — on the FAR
-    // half the ribbon top must reach the LOCAL MAX surface height along the
-    // ring (±1 densified vertex ≈ ±0.25 m, the scale of a rim-tab V-notch),
-    // or the sightline that cleared the wall crest clears the ribbon too.
-    // Local window only — never a camera-direction ray (that couples each
-    // vertex to the green's global max).
-    {
-      // v-fix(lip-envelope-all): apply the crest envelope to EVERY ribbon
-      // vertex, not just the far half. The 15x black sliver sat on a segment
-      // the near/far half-space classified as NEAR: left at exact ring
-      // height, the clipped-cell chord passed ABOVE it (chord sag scales
-      // with exaggeration). The ribbon is a pure underlay — the surface
-      // painter overpaints it wherever surface pixels exist — so raising
-      // its crest to the local ring max can only ADD coverage in the V
-      // notches, never paint over the green. Where it pokes past the
-      // silhouette at a falling notch it reads as the rolled lip.
-      for (let i = 0; i < ring.length; i++) {
-        // v-fix(far-lip-widen): ±2 densified vertices on BOTH sides (the
-        // V-notch pitch is up to a full cell wide; ±1 under-covers).
-        let zMax = -Infinity;
-        for (let d = -2; d <= 2; d++) {
-          const nb = ring[(i + d + ring.length) % ring.length];
-          const z = surfZ3(nb[0], nb[1]);
-          if (Number.isFinite(z) && z > zMax) zMax = z;
-        }
-        if (Number.isFinite(zMax)) {
-          const p2 = GreenMapCore.projectPt(cam, ring[i][0], ring[i][1],
-                                            zMax + 0.06);
-          if (p2) front[i] = p2;
-        }
-      }
-    }
-    // v-fix(ribbon-all): draw EVERY segment unconditionally. On the near
-    // side the surface painter (which runs LATER) overpaints the ribbon
-    // wherever the surface has pixels — no gate needed. On the far side the
-    // ribbon's +6 cm crest peeks above the far silhouette: that is exactly
-    // what a green's rolled lip looks like from behind, and it is ONE
-    // continuous colour (no alternation). Any gate (depth or near/far
-    // half-space) classified wavy-boundary segments inconsistently and
-    // produced the alternating zipper.
-    ctx.fillStyle = 'rgba(150,158,152,0.98)';
-    for (let i = 0; i < front.length; i++) {
-      const j = (i + 1) % front.length;
-      const a = front[i], b = front[j];
-      const drop = 26 * (window.devicePixelRatio || 1);
-      ctx.beginPath();
-      ctx.moveTo(a[0], a[1]);
-      ctx.lineTo(b[0], b[1]);
-      ctx.lineTo(b[0], b[1] + drop);
-      ctx.lineTo(a[0], a[1] + drop);
-      ctx.closePath();
-      ctx.fill();
-    }
-  }
+  // v1.2.4 RIBBON DELETED: the 26px crest band was a pre-one-crest seam
+  // sealer; with plates + backboard sharing skirtRingHeights it is pure
+  // redundancy — and its pale slivers at silhouette-tangent segments were
+  // the "stepped flap / see-through base" on Westwood (layer bisect:
+  // RIBBON_OFF flipped the artifact off). One wall architecture: backboard
+  // + plates, one crest function. (v1.0.95 lesson re-proven: a backstop
+  // kept after its root cause is fixed becomes the next artifact.)
 
   // Solid gray side walls extruding the green boundary down to the base
   // plane (z=0 pre-exaggeration) — gives the model physical thickness.
@@ -2263,15 +2197,47 @@
   // equal it (any excess paints grey over the near face — the v1.0.98
   // strip-max envelope did exactly that; any shortfall opens a slit). One
   // height function, one ring: wall top = lip = surface edge.
+  // v-fix(one-crest) v1.2.4: ONE height function for every wall layer.
+  // Previously plates used exact ring heights (with a `|| 0` fallback that
+  // collapsed LiDAR-void points to zero height) while ribbon + backboard
+  // used a ±2-max crest envelope — two different interpolants = the pale
+  // flap riding above the plates at the silhouette edge (James's Westwood
+  // "base is still see-through" + the vertical seam at the notch boundary).
+  // Now: ±2 crest + nearest-finite carry for EVERYTHING. A max cannot be
+  // undercut; carry cannot notch; all layers share it so none can poke
+  // past another. (+0.06 lip lift applied identically by ribbon/backboard.)
+  function skirtRingHeights(bpts) {
+    const pts = densifyRing(growPolyLocal(bpts, RING_M), 0.25);
+    const n = pts.length;
+    const exact = pts.map(([mx, my]) => surfZ3(mx, my));
+    const heights = exact.map((z, i) => {
+      let m = -Infinity;
+      for (let d = -2; d <= 2; d++) {
+        const zn = exact[(i + d + n) % n];
+        if (Number.isFinite(zn) && zn > m) m = zn;
+      }
+      if (Number.isFinite(m)) return m;
+      // all-NaN window (LiDAR void): carry nearest finite height
+      for (let d = 1; d < n; d++) {
+        const za = exact[(i + d) % n];
+        if (Number.isFinite(za)) return za;
+        const zb = exact[(i - d + n) % n];
+        if (Number.isFinite(zb)) return zb;
+      }
+      return 0;
+    });
+    return { pts, heights };
+  }
+
   function drawSkirt(cam, bpts, allowBackFaces) {
     const exag = state.v3.exag, M = state.mesh;
     // v-fix(wall-profile): DENSIFIED ring (~0.25 m segments) — the wall top
     // follows the surface edge's piecewise-linear height profile instead of
     // chording between polygon vertices.
-    const sPts = densifyRing(growPolyLocal(bpts, RING_M), 0.25);
-    const zAt = ([mx, my]) =>
-      Number.isFinite(surfZ3(mx, my)) ? surfZ3(mx, my) :
-      ((sampleElevRaw(mx, my) - M.zmin) * exag || 0);
+    const { pts: sPts, heights: sHeights } = skirtRingHeights(bpts);
+    const hMap = new Map();
+    sPts.forEach((p, i) => hMap.set(p, sHeights[i]));
+    const zAt = (p) => hMap.get(p) ?? 0;
     const quads = GreenMapCore.buildSkirtQuads(sPts, zAt, 0);
     state.v3.wallTopZ = null;      // lip falls back to ring sampling
     // v-fix(skirtcull): cull wall quads whose OUTWARD face points away from
@@ -2372,17 +2338,12 @@
     // plates (they paint over it with their gradient); wherever the green
     // surface exists the later surface painter overpaints the band top.
     {
+      // v-fix(one-crest): the backboard uses the SHARED heights — it can
+      // never disagree with the plates or ribbon again.
       const crest = [], base = [];
       for (let i = 0; i < sPts.length; i++) {
         const [mx, my] = sPts[i];
-        let zMax = -Infinity;
-        for (let d2 = -2; d2 <= 2; d2++) {
-          const nb = sPts[(i + d2 + sPts.length) % sPts.length];
-          const z = surfZ3(nb[0], nb[1]);
-          if (Number.isFinite(z) && z > zMax) zMax = z;
-        }
-        if (!Number.isFinite(zMax)) { crest.push(null); base.push(null); continue; }
-        crest.push(GreenMapCore.projectPt(cam, mx, my, zMax + 0.06));
+        crest.push(GreenMapCore.projectPt(cam, mx, my, sHeights[i] + 0.06));
         base.push(GreenMapCore.projectPt(cam, mx, my, 0));
       }
       ctx.fillStyle = 'rgb(96,104,100)';
@@ -2708,7 +2669,6 @@
           // background below the 26 px ribbon (black teeth on the red face
           // at glancing angles).
           drawSkirt(cam, bpts, true);
-          drawWallRibbon(cam, bpts);
         }
         if (bpts && state.viewMode !== 'hole') drawGridFloor(cam, bpts);
     // v-fix(curtain-removed): the v1.0.92 unculled rim curtain was a backstop
