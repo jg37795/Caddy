@@ -1464,6 +1464,22 @@
       console.log('[greenmap] corridor ready', `${eg.W}x${eg.H}`,
         `span=${spanM.toFixed(0)}m`,
         'zone cells', zoneMask.reduce((a, b) => a + b, 0));
+      // v1.3.0: satellite texture for hole view — fetch tiles for the
+      // corridor bbox and re-render when ready. Failure is silent: the
+      // topo-colour mesh stays (honest fallback, no broken view).
+      if (window.CaddySat && !ds.failed) {
+        window.CaddySat.load(bb).then((sat) => {
+          if (sat.fail) {
+            console.log('[greenmap] satellite tiles unavailable — topo colours');
+            return;
+          }
+          ds.sat = sat;
+          ds.satSampler = window.CaddySat.makeSampler(sat, bb);
+          console.log('[greenmap] satellite mosaic ready',
+            sat.w + 'x' + sat.h);
+          if (state.viewMode === 'hole' && state.active === 'hole') render();
+        }).catch(() => { /* topo colours stay */ });
+      }
       // If the user is already waiting in Hole view, land them on it now.
       if (state.viewMode === 'hole' && state.active !== 'hole') {
         activateDataset('hole');
@@ -2844,7 +2860,36 @@
       const midCol = `rgb(${M.col[q * 3] | 0},${M.col[q * 3 + 1] | 0},${M.col[q * 3 + 2] | 0})`;
       if (state.layer === 'arrows') {
         fill = 'rgb(24,32,27)';   // near-background green-black
-      } else if (M.vcol) {
+      } else if (state.viewMode === 'hole' && state.active === 'hole' &&
+                 state.datasets.hole && state.datasets.hole.satSampler &&
+                 M.gridRef) {
+        // v1.3.0: SATELLITE TEXTURE — sample the mosaic at the quad centre
+        // (world → lon/lat via the corridor's own gridRef + centerLL) and
+        // mix with the slope tint so the data stays readable on the photo.
+        const dsH = state.datasets.hole;
+        const gr = M.gridRef, cs = gr.cellSizeM;
+        const ix = q % (gr.W - 1), iy = (q / (gr.W - 1)) | 0;
+        const mx = (ix + 1 - gr.W / 2) * cs;
+        const my = (gr.H / 2 - iy - 1) * cs;
+        const mLat = 111320;
+        const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
+        const lon = dsH.centerLL[0] + mx / mLng;
+        const lat = dsH.centerLL[1] + my / mLat;
+        const rgb = dsH.satSampler(lon, lat);
+        if (rgb) {
+          // Slope tint mix: green zone gets the active ramp at ~35% over the
+          // photo; fairway keeps photo ~90% (a hint of relief shading).
+          const tintR = M.col[q * 3], tintG = M.col[q * 3 + 1],
+                tintB = M.col[q * 3 + 2];
+          const inZone = dsH.zoneMask && dsH.zoneMask[
+            Math.min(gr.W * gr.H - 1, iy * gr.W + ix + 1)];
+          const photoShare = inZone ? 0.65 : 0.9;
+          fill = `rgb(${(rgb[0] * photoShare + tintR * (1 - photoShare)) | 0},` +
+            `${(rgb[1] * photoShare + tintG * (1 - photoShare)) | 0},` +
+            `${(rgb[2] * photoShare + tintB * (1 - photoShare)) | 0})`;
+        }
+      }
+      if (!fill && M.vcol) {
         const c0 = q * 12, c2 = q * 12 + 6;
         const dr = Math.abs(M.vcol[c2] - M.vcol[c0]);
         const dg = Math.abs(M.vcol[c2 + 1] - M.vcol[c0 + 1]);
@@ -2858,7 +2903,7 @@
         }
       }
       ctx.fillStyle = fill || midCol;
-      ctx.strokeStyle = midCol;   // same-colour stroke hides seams
+      ctx.strokeStyle = fill || midCol;   // same-colour stroke hides seams
       // v-fix(seam-cover): at grazing angles (steep 8×-exaggerated cliffs
       // seen edge-on) consecutive quad rows leave hairline AA seams that a
       // 1-device-px stroke can't cover — background sliced through as

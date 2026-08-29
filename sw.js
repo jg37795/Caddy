@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.2.5'; // TRACE UX + DOCK: snap-close tracing (tap near the first point closes the ring; live closing edge shown); hole labels (H3/H7) on the Check-location map from OSM golf=hole refs; trace-vs-OSM switcher (tap the loc badge when both exist); ALL controls moved to a bottom dock (top bar = identity only, never covers the green); ball rendered as a shaded sphere with dimples + contact shadow; flag = shaded pole + knob + curved pennant + cup ring
+const CACHE_VERSION = 'v1.3.0'; // SATELLITE HOLE VIEW: the Google Earth look — Esri World_Imagery tiles composited into a mosaic for the corridor bbox (≤36 tiles, auto zoom, ≥60% success gate) and draped onto the hole mesh per-quad (photo 90% on fairway, 65% on the slope-tinted green); honest fallback to topo colours when tiles fail; satview.js precached
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
@@ -23,6 +23,7 @@ const APP_SHELL = [
   './range.js',
   './greenlink.js',
   './greenedit.js',
+  './satview.js',
   './greenmap.html',
   './greenmap.css',
   './greenmap.js',
