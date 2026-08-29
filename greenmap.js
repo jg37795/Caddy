@@ -1459,6 +1459,40 @@
         }
 
       // Dataset record (mesh + arrows built by buildHoleScene below).
+      // v1.4.4 (VOID BRIDGE): steep forested slopes drop LiDAR returns —
+      // void ISLANDS inside the corridor. buildMesh3D drops quads touching
+      // a null corner, so each void = a hole showing background = the black
+      // blocks all over James's 16:34 screenshot. Bridge them: 3 passes of
+      // "any void cell beside valid cells takes their mean" — enough for
+      // return-dropout islands (real no-data regions outside the corridor
+      // rim stay void, they're behind the wall anyway).
+      {
+        const W = eg.W, H = eg.H, gr = eg.grid;
+        let filled = 0;
+        for (let pass = 0; pass < 3; pass++) {
+          const add = [];
+          for (let y = 1; y < H - 1; y++)
+            for (let x = 1; x < W - 1; x++) {
+              const i = y * W + x;
+              if (Number.isFinite(gr[i])) continue;
+              let sum = 0, n2 = 0;
+              const nb = [i - 1, i + 1, i - W, i + W];
+              for (const j of nb)
+                if (Number.isFinite(gr[j])) { sum += gr[j]; n2++; }
+              if (n2) add.push([i, sum / n2]);
+            }
+          for (const [i, v] of add) gr[i] = v;
+          filled += add.length;
+          if (!add.length) break;
+        }
+        // validMask must follow — sampling/masks treat non-finite as void.
+        if (eg.validMask && filled)
+          for (let i = 0; i < gr.length; i++)
+            if (Number.isFinite(gr[i])) eg.validMask[i] = 1;
+        if (filled) console.log('[greenmap] corridor void bridge:', filled,
+          'cells filled over', 3, 'passes');
+      }
+
       const ds = {
         grid: eg, field, mask: maskAll, bbox: bb,
         elevRange: state.elevRange, polyLocal: null,
@@ -3046,6 +3080,7 @@
       // corner shades (from averaged vertex normals + AO) when they differ
       // enough to matter; flat mean-colour otherwise (cheap + seam-free).
       let fill = null;
+      let strokeCol = null;   // v1.4.4: per-quad seam-cover colour
       const midCol = `rgb(${M.col[q * 3] | 0},${M.col[q * 3 + 1] | 0},${M.col[q * 3 + 2] | 0})`;
       if (state.layer === 'arrows') {
         fill = 'rgb(24,32,27)';   // near-background green-black
@@ -3062,20 +3097,55 @@
         const my = (gr.H / 2 - iy - 1) * cs;
         const mLat = 111320;
         const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
-        const lon = dsH.centerLL[0] + mx / mLng;
-        const lat = dsH.centerLL[1] + my / mLat;
-        const rgb = dsH.satSampler(lon, lat);
-        if (rgb) {
-          // Slope tint mix: green zone gets the active ramp at ~35% over the
-          // photo; fairway keeps photo ~90% (a hint of relief shading).
-          const tintR = M.col[q * 3], tintG = M.col[q * 3 + 1],
-                tintB = M.col[q * 3 + 2];
-          const inZone = dsH.zoneMask && dsH.zoneMask[
-            Math.min(gr.W * gr.H - 1, iy * gr.W + ix + 1)];
-          const photoShare = inZone ? 0.65 : 0.9;
-          fill = `rgb(${(rgb[0] * photoShare + tintR * (1 - photoShare)) | 0},` +
-            `${(rgb[1] * photoShare + tintG * (1 - photoShare)) | 0},` +
-            `${(rgb[2] * photoShare + tintB * (1 - photoShare)) | 0})`;
+        // v1.4.4 (PER-CORNER PHOTO GRADIENT): one flat sample per quad made
+        // every quad a hard colour block — the "pixelated" hole view. Now:
+        // sample the photo at all FOUR corners, mix each with the quad tint,
+        // and paint a 2-stop linear gradient across the quad. Adjacent quads
+        // share corner colours → the photo reads continuous across the mesh.
+        const cornerRGB = [];
+        const cornerOff = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+        for (const [ox, oy] of cornerOff) {
+          const lon = dsH.centerLL[0] + (mx + ox * cs) / mLng;
+          const lat = dsH.centerLL[1] + (my + oy * cs) / mLat;
+          cornerRGB.push(dsH.satSampler(lon, lat));
+        }
+        const tintR = M.col[q * 3], tintG = M.col[q * 3 + 1],
+              tintB = M.col[q * 3 + 2];
+        const inZone = dsH.zoneMask && dsH.zoneMask[
+          Math.min(gr.W * gr.H - 1, iy * gr.W + ix + 1)];
+        const photoShare = inZone ? 0.65 : 0.9;
+        // v1.4.4 (READABILITY FLOOR): dense tree canopy in the aerial photo
+        // is near-black; AO + shading multiply it darker. Those quads read
+        // as "black blocks on the terrain" (James's 16:34 shot). Clamp the
+        // mixed colour's brightness so photo-dark quads keep their texture
+        // but never drop below a readable floor (~17% luminance).
+        const mix = (p) => {
+          if (!p) return null;
+          const r0 = (p[0] * photoShare + tintR * (1 - photoShare)) | 0,
+                g0 = (p[1] * photoShare + tintG * (1 - photoShare)) | 0,
+                b0 = (p[2] * photoShare + tintB * (1 - photoShare)) | 0;
+          const lum = 0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0;
+          const FLOOR = 42, k = lum < FLOOR ? FLOOR / Math.max(1, lum) : 1;
+          return [
+            Math.min(255, r0 * k | 0),
+            Math.min(255, g0 * k | 0),
+            Math.min(255, b0 * k | 0)
+          ];
+        };
+        const c0 = mix(cornerRGB[0]), c1 = mix(cornerRGB[1]);
+        const c2m = mix(cornerRGB[2]), c3 = mix(cornerRGB[3]);
+        if (c0 && c1 && c2m && c3) {
+          const grad = ctx.createLinearGradient(
+            sx[q * 4], sy[q * 4], sx[q * 4 + 2], sy[q * 4 + 2]);
+          grad.addColorStop(0, `rgb(${c0[0]},${c0[1]},${c0[2]})`);
+          grad.addColorStop(1, `rgb(${c2m[0]},${c2m[1]},${c2m[2]})`);
+          fill = grad;
+          // stroke uses the centre colour to hide seams without tinting
+          const mid = mix(dsH.satSampler(
+            dsH.centerLL[0] + mx / mLng, dsH.centerLL[1] + my / mLat));
+          if (mid) strokeCol = `rgb(${mid[0]},${mid[1]},${mid[2]})`;
+        } else if (c0) {
+          fill = `rgb(${c0[0]},${c0[1]},${c0[2]})`;
         }
       }
       if (!fill && M.vcol) {
@@ -3092,7 +3162,7 @@
         }
       }
       ctx.fillStyle = fill || midCol;
-      ctx.strokeStyle = fill || midCol;   // same-colour stroke hides seams
+      ctx.strokeStyle = strokeCol || fill || midCol;   // seam cover
       // v-fix(seam-cover): at grazing angles (steep 8×-exaggerated cliffs
       // seen edge-on) consecutive quad rows leave hairline AA seams that a
       // 1-device-px stroke can't cover — background sliced through as

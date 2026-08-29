@@ -23,7 +23,7 @@
 
   const TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/' +
     'World_Imagery/MapServer/tile/{z}/{y}/{x}';
-  const MAX_TILES_PER_SIDE = 6;
+  const MAX_TILES_PER_SIDE = 8;
   const CONCURRENCY = 6;
   const TILE = 256;
 
@@ -130,16 +130,33 @@
     const pxX = state.w / (e - w);
     const pxY = state.h / (n - s);
     const cx2 = state.canvas.getContext('2d', { willReadFrequently: true });
-    let cache = null;
+    // v1.4.4 (BILINEAR): nearest-neighbour sampling made every quad a hard
+    // colour block (James: "hole view is pixelated"). Bilinear interpolation
+    // between the 4 neighbouring mosaic pixels smooths it substantially;
+    // combined with the per-corner vertex gradient in render3D the terrain
+    // reads photo-continuous.
     return (lon, lat) => {
-      const x = Math.floor((lon - w) * pxX);
-      const y = Math.floor((n - lat) * pxY);
-      if (x < 0 || y < 0 || x >= state.w || y >= state.h) return null;
-      if (!cache || cache.x !== x || cache.y !== y) {
-        const d = cx2.getImageData(x, y, 1, 1).data;
-        cache = { x, y, rgb: [d[0], d[1], d[2]] };
-      }
-      return cache.rgb;
+      const x = (lon - w) * pxX - 0.5;
+      const y = (n - lat) * pxY - 0.5;
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      if (x0 < -1 || y0 < -1 || x0 > state.w || y0 > state.h) return null;
+      const fx = x - x0, fy = y - y0;
+      const c = (xx, yy) => {
+        const xc = Math.max(0, Math.min(state.w - 1, xx));
+        const yc = Math.max(0, Math.min(state.h - 1, yy));
+        const d = cx2.getImageData(xc, yc, 1, 1).data;
+        return [d[0], d[1], d[2]];
+      };
+      const p00 = c(x0, y0), p10 = c(x0 + 1, y0);
+      const p01 = c(x0, y0 + 1), p11 = c(x0 + 1, y0 + 1);
+      return [
+        (p00[0] * (1 - fx) + p10[0] * fx) * (1 - fy) +
+          (p01[0] * (1 - fx) + p11[0] * fx) * fy,
+        (p00[1] * (1 - fx) + p10[1] * fx) * (1 - fy) +
+          (p01[1] * (1 - fx) + p11[1] * fx) * fy,
+        (p00[2] * (1 - fx) + p10[2] * fx) * (1 - fy) +
+          (p01[2] * (1 - fx) + p11[2] * fx) * fy
+      ];
     };
   }
 
