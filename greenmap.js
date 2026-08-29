@@ -2864,24 +2864,41 @@
     state.__underQuads = [];
     const underQuads = state.__underQuads;
     const isUnder = new Uint8Array(n);
+    // v1.4.2 (TRUE 3D backface test): the v1.4.1 classifier used HORIZONTAL
+    // winding only — on a domed green at pitch 45 the far side's top faces
+    // tilt away, their horizontal winding flips, and they were misclassi-
+    // fied as undersides → the whole far surface rendered as the dark
+    // underlay wash (James: "I can still see the other side of the
+    // green", 14:37 shot). Fix: real 3D face normal vs camera vector — a
+    // quad is an underside ONLY when its normal points AWAY from the
+    // camera in 3D. Front-facing tops (normal toward camera) are never
+    // culled regardless of horizontal winding.
+    const camPos3 = [
+      -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist];
     for (let q = 0; q < n; q++) {
       const o0 = q * 12;
-      // top-face winding: nz < 0 ⇒ we'd be seeing the underside here.
-      const ux = M.pos[o0 + 3] - M.pos[o0],
-            uy = M.pos[o0 + 4] - M.pos[o0 + 1];
-      const vx = M.pos[o0 + 9] - M.pos[o0],
-            vy = M.pos[o0 + 10] - M.pos[o0 + 1];
-      const nz = ux * vy - uy * vx;
-      if (nz < 0) {
-        const cxq = (M.pos[o0] + M.pos[o0 + 3] + M.pos[o0 + 6] +
-                     M.pos[o0 + 9]) / 4;
-        const cyq = (M.pos[o0 + 1] + M.pos[o0 + 4] + M.pos[o0 + 7] +
-                     M.pos[o0 + 10]) / 4;
-        if ((surfCamX - cxq) * (-uy) + (surfCamY - cyq) * (ux) <= 0) {
-          underQuads.push(q);   // underside → underlay, not the main painter
-          isUnder[q] = 1;
-          continue;
-        }
+      const ax = M.pos[o0 + 3] - M.pos[o0],
+            ay = M.pos[o0 + 4] - M.pos[o0 + 1],
+            az = M.pos[o0 + 5] - M.pos[o0 + 2];
+      const bx = M.pos[o0 + 9] - M.pos[o0],
+            by = M.pos[o0 + 10] - M.pos[o0 + 1],
+            bz = M.pos[o0 + 11] - M.pos[o0 + 2];
+      // 3D face normal = a × b
+      const nx = ay * bz - az * by,
+            ny = az * bx - ax * bz,
+            nz = ax * by - ay * bx;
+      const cxq = (M.pos[o0] + M.pos[o0 + 3] + M.pos[o0 + 6] +
+                   M.pos[o0 + 9]) / 4;
+      const cyq = (M.pos[o0 + 1] + M.pos[o0 + 4] + M.pos[o0 + 7] +
+                   M.pos[o0 + 10]) / 4;
+      const czq = (M.pos[o0 + 2] + M.pos[o0 + 5] + M.pos[o0 + 8] +
+                   M.pos[o0 + 11]) / 4;
+      const vx = camPos3[0] - cxq, vy = camPos3[1] - cyq,
+            vz = camPos3[2] - czq;
+      if (nx * vx + ny * vy + nz * vz <= 0) {
+        underQuads.push(q);   // back face → underlay, not the main painter
+        isUnder[q] = 1;
+        continue;
       }
       let dsum = 0, ok = true;
       for (let c = 0; c < 4; c++) {

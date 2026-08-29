@@ -127,7 +127,7 @@ body:not(.dark) #gm-stage {
 @media (max-width: 560px) {
   #gm-dock { gap: 5px; padding: 7px 8px; }
   .gm-dock-group .gm-btn { padding: 4px 8px; font-size: 11px; }
-  #gm-legend { top: calc(var(--safe-top) + 54px); width: 148px; }
+  #gm-legend { top: calc(var(--safe-top) + 60px); width: 148px; }
 }
 
 #gm-title { font-weight: 800; letter-spacing: -0.01em; margin-right: 2px; }
@@ -166,13 +166,13 @@ body:not(.dark) #gm-stage {
   max-width: 220px;
 }
 
-/* Legend: glass card TOP-LEFT under the title bar (v1.4.0 — the bottom
-   corner is the dock's; top-left is always empty and never covers the
-   green centre on any phone width). Title text follows the mode. */
+/* Legend: glass card TOP-RIGHT under the title bar (v1.4.2 — top-left
+   clashed with the topbar's left corner radius + Back button per
+   James's 14:37 shot; top-right is clear on every width). */
 #gm-legend {
-  left: 10px;
-  right: auto;
-  top: calc(var(--safe-top) + 58px);
+  right: 10px;
+  left: auto;
+  top: calc(var(--safe-top) + 64px);
   bottom: auto;
   width: 164px;
   max-height: 38vh;
