@@ -54,11 +54,20 @@
 
     document.body.appendChild(sheet);
 
+    // v-fix(gel-dead-buttons): the sheet must be in the DOM AND laid out
+    // before L.map measures it — created in the same tick, Leaflet got a
+    // 0x0 container (controls dead, taps dead). Invalidate after layout.
+    requestAnimationFrame(() => {
+      const m = window.__gelMap;
+      if (m) m.invalidateSize();
+    });
+
     const map = L.map('gelMap', {
       zoomControl: false,
       attributionControl: false,   // hidden while testing (James)
     }).setView(
       [boot.lat, boot.lng], 17);
+    window.__gelMap = map;
     L.tileLayer(TILES, { attribution: '', maxZoom: 19 }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -85,7 +94,7 @@
       readout.textContent =
         `Sample point: ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
     };
-    setReadout(boot.lat, boot.lng);
+    setReadout(pin.getLatLng());
     map.on('click', (e) => { pin.setLatLng(e.latlng); setReadout(e.latlng); });
     pin.on('drag', (e) => setReadout(e.target.getLatLng()));
 

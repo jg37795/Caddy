@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.1.8'; // + Check-location map styled with the app design language (glass chrome, app tokens, safe areas); Leaflet attribution hidden while testing; app.css imported so tokens resolve
+const CACHE_VERSION = 'v1.1.9'; // HOTFIX: Check-location sheet dead buttons (Cancel/Load/zoom) — Leaflet initialises before the sheet is laid out, gets a 0x0 container; invalidateSize after first layout frame + readout crash fixed
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
