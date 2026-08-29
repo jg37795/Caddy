@@ -2335,24 +2335,27 @@
         base.push(GreenMapCore.projectPt(cam, mx, my, 0));
       }
       ctx.fillStyle = 'rgb(96,104,100)';
-      let run = [];
-      const flushRun = () => {
-        if (run.length > 1) {
-          ctx.beginPath();
-          run.forEach((i, k) => k ? ctx.lineTo(crest[i][0], crest[i][1])
-                                  : ctx.moveTo(crest[i][0], crest[i][1]));
-          for (let k = run.length - 1; k >= 0; k--) {
-            const i = run[k];
-            ctx.lineTo(base[i][0], base[i][1]);
-          }
-          ctx.closePath();
-          ctx.fill();
-        }
-        run = [];
-      };
-      for (let i = 0; i < sPts.length; i++)
-        if (crest[i] && base[i]) run.push(i); else flushRun();
-      flushRun();
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.lineWidth = Math.max(1, (window.devicePixelRatio || 1) * 0.6);
+      // v-fix(bb-trapezoids): the single crest+base run SELF-CANCELS — the
+      // far half of the base ring projects INSIDE the near half's ellipse
+      // with opposite winding, so nonzero-fill carved the band's middle back
+      // out (Westwood ellipse path, glancing 15x: wall ended mid-air, the
+      // drum read see-through below the ribbon; [bb] logged fills=1 yet the
+      // fill's lower region was unpainted). Per-adjacent-point trapezoids
+      // are individually simple — nothing to cancel — and the same-colour
+      // stroke seals their hairline seams (seam-cover trick).
+      for (let i = 0; i < sPts.length; i++) {
+        const j = (i + 1) % sPts.length;
+        if (!crest[i] || !base[i] || !crest[j] || !base[j]) continue;
+        ctx.beginPath();
+        ctx.moveTo(crest[i][0], crest[i][1]);
+        ctx.lineTo(crest[j][0], crest[j][1]);
+        ctx.lineTo(base[j][0], base[j][1]);
+        ctx.lineTo(base[i][0], base[i][1]);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      }
     }
     // v-fix(wall-no-stroke): the per-quad dark stroke drew a near-black line
     // along the wall TOP — visible in James's screenshots as a persistent
