@@ -42,40 +42,45 @@
   <span id="gm-status">Loading…</span>
 </div>
 
-<!-- v1.2.5: bottom dock — all controls off the top bar so nothing ever
-     covers the green. One row, thumb-reachable, segmented groups. -->
+<!-- v1.4.0 dock redesign: 3 contextual rows. Row 1 = view segment (+exag
+     in 3D/Hole). Row 2 = data layers (2D gets Shading/Arrows; 3D+ always
+     draws both tastefully). Row 3 = actions: ONE ball toggle, Stimp chip
+     only while a ball is down, Check location, Fit. -->
 <div id="gm-dock" class="gm-chrome">
-  <div class="gm-dock-group" role="radiogroup" aria-label="View">
-    <button class="gm-btn gm-view-btn active" data-view="2d" title="Top-down 2D map">2D</button>
-    <button class="gm-btn gm-view-btn" data-view="3d" title="3D green view">3D</button>
-    <button class="gm-btn gm-view-btn" data-view="hole" title="Whole-hole tee→green flyover">Hole</button>
+  <div class="gm-dock-row">
+    <div class="gm-dock-group" role="radiogroup" aria-label="View">
+      <button class="gm-btn gm-view-btn active" data-view="2d">2D</button>
+      <button class="gm-btn gm-view-btn" data-view="3d">3D</button>
+      <button class="gm-btn gm-view-btn" data-view="hole">Hole</button>
+    </div>
+    <span id="gm-exag-wrap" style="display:none" title="Vertical exaggeration">
+      <label for="gm-exag">Exag</label>
+      <input type="range" id="gm-exag" min="1" max="15" step="0.5" value="8">
+      <span id="gm-exag-val">8×</span>
+    </span>
   </div>
-  <span id="gm-exag-wrap" style="display:none" title="Vertical exaggeration">
-    <label for="gm-exag">Exag</label>
-    <input type="range" id="gm-exag" min="1" max="15" step="0.5" value="8">
-    <span id="gm-exag-val">8×</span>
-  </span>
-  <div class="gm-dock-group" role="radiogroup" aria-label="Layers">
-    <button class="gm-btn gm-layer-btn active" data-layer="both">Both</button>
-    <button class="gm-btn gm-layer-btn" data-layer="shading">Shading</button>
-    <button class="gm-btn gm-layer-btn" data-layer="arrows">Arrows</button>
+  <div class="gm-dock-row" id="gm-data-row">
+    <div class="gm-dock-group" role="radiogroup" aria-label="Data">
+      <button class="gm-btn gm-mode-btn active" data-mode="slope">Slope</button>
+      <button class="gm-btn gm-mode-btn" data-mode="elev">Elev</button>
+    </div>
+    <div class="gm-dock-group" id="gm-layer-group" role="radiogroup" aria-label="Layers">
+      <button class="gm-btn gm-layer-btn active" data-layer="both">Both</button>
+      <button class="gm-btn gm-layer-btn" data-layer="shading">Shading</button>
+      <button class="gm-btn gm-layer-btn" data-layer="arrows">Arrows</button>
+    </div>
   </div>
-  <div class="gm-dock-group" role="radiogroup" aria-label="Colour mode">
-    <select id="gm-mode" class="gm-select" title="Color mode">
-      <option value="slope">Slope</option>
-      <option value="elev">Elev</option>
-    </select>
-    <select id="gm-stimp" class="gm-select" title="Green speed (Stimpmeter) for the putt preview">
-      <option value="8">Stimp 8</option>
-      <option value="10" selected>Stimp 10</option>
-      <option value="12">Stimp 12</option>
-    </select>
-  </div>
-  <div class="gm-dock-group">
-    <button class="gm-btn" id="gm-ball" title="Then tap the green to drop a ball for the putt preview">Ball</button>
-    <button class="gm-btn" id="gm-clear-ball">Clear ball</button>
-    <button class="gm-btn" id="gm-editloc" title="Verify / adjust which green is loaded">Check location</button>
-    <button class="gm-btn" id="gm-recenter">⤢ Fit</button>
+  <div class="gm-dock-row">
+    <div class="gm-dock-group">
+      <button class="gm-btn" id="gm-ball">Drop ball</button>
+      <select id="gm-stimp" class="gm-select" title="Green speed (Stimpmeter)" style="display:none">
+        <option value="8">Stimp 8</option>
+        <option value="10" selected>Stimp 10</option>
+        <option value="12">Stimp 12</option>
+      </select>
+      <button class="gm-btn" id="gm-editloc" title="Verify / adjust which green is loaded">Check location</button>
+      <button class="gm-btn" id="gm-recenter">Fit</button>
+    </div>
   </div>
 </div>
 

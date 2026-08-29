@@ -127,7 +127,7 @@ body:not(.dark) #gm-stage {
 @media (max-width: 560px) {
   #gm-dock { gap: 5px; padding: 7px 8px; }
   .gm-dock-group .gm-btn { padding: 4px 8px; font-size: 11px; }
-  #gm-legend { bottom: calc(var(--safe-bottom) + 96px); width: 156px; }
+  #gm-legend { top: calc(var(--safe-top) + 54px); width: 148px; }
 }
 
 #gm-title { font-weight: 800; letter-spacing: -0.01em; margin-right: 2px; }
@@ -166,18 +166,19 @@ body:not(.dark) #gm-stage {
   max-width: 220px;
 }
 
-/* Legend: glass card LEFT side, lifted clear of the dock (v1.3.1 — it
-   overlapped the dock's right groups on iPhone widths; left keeps it
-   beside the dock's first rows, above safe area, never on top). */
+/* Legend: glass card TOP-LEFT under the title bar (v1.4.0 — the bottom
+   corner is the dock's; top-left is always empty and never covers the
+   green centre on any phone width). Title text follows the mode. */
 #gm-legend {
   left: 10px;
   right: auto;
-  bottom: calc(var(--safe-bottom) + 92px);
-  width: 172px;
-  max-height: min(42vh, calc(100dvh - 170px));
+  top: calc(var(--safe-top) + 58px);
+  bottom: auto;
+  width: 164px;
+  max-height: 38vh;
   overflow-y: auto;
   border-radius: 18px;
-  padding: 10px 12px;
+  padding: 9px 11px;
 }
 #gm-legend h4 { margin: 2px 0 6px; font-size: 10.5px; color: var(--muted); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 #gm-rampbar { height: 8px; border-radius: 4px; border: 0.5px solid var(--glass-stroke); }
@@ -501,4 +502,25 @@ body:not(.dark) #gm-stage {
 }
 @media (prefers-reduced-motion: reduce) {
   .gel-snaphandle-ring { animation: none; }
+}
+
+/* v1.4.0 dock: 3 contextual rows */
+#gm-dock {
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+}
+.gm-dock-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+}
+.gm-dock-row .gm-dock-group { flex: none; }
+#gm-exag-wrap { display: inline-flex; align-items: center; }
+#gm-exag { width: 96px; }
+@media (max-width: 560px) {
+  #gm-exag { width: 78px; }
+  .gm-dock-row { gap: 5px; }
 }

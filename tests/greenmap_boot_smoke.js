@@ -25,9 +25,13 @@ function el(id) {
   };
 }
 const els = {};
+// v1.4.0: gm-preset/gm-clear-ball/gm-mode(select) removed from the DOM —
+// smoke stubs keep them (harmless extra keys); gm-stimp now required.
 ['gm-canvas','gm-status','gm-preset','gm-mode','gm-exag-wrap','gm-exag',
  'gm-exag-val','gm-ball','gm-clear-ball','gm-recenter','gm-legend-title',
- 'gm-rampbar','gm-ramplabels','gm-tip','gm-quality'].forEach(id => els[id] = el(id));
+ 'gm-rampbar','gm-ramplabels','gm-tip','gm-quality','gm-stimp',
+ 'gm-loc','gm-loading','gm-load-status','gm-back','gm-editloc'
+ ].forEach(id => els[id] = el(id));
 els['gm-canvas'].width = 400; els['gm-canvas'].height = 400;
 
 let fails = 0;

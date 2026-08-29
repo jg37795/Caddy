@@ -2515,6 +2515,41 @@
       seg([cx - R, gy], [cx + R, gy]);
   }
 
+  // v1.4.0: soft dark ellipse where the drum meets the ground plane —
+  // grounds the model visually and hides any light bleed at the base seam.
+  function drawBaseContactRing(cam, bpts) {
+    let cx = 0, cy = 0, minX = Infinity, maxX = -Infinity,
+        minY = Infinity, maxY = -Infinity;
+    for (const [mx, my] of bpts) {
+      cx += mx; cy += my;
+      if (mx < minX) minX = mx;
+      if (mx > maxX) maxX = mx;
+      if (my < minY) minY = my;
+      if (my > maxY) maxY = my;
+    }
+    cx /= bpts.length; cy /= bpts.length;
+    const rM = Math.max(maxX - minX, maxY - minY) / 2 + 1.2;
+    const c = GreenMapCore.projectPt(cam, cx, cy, 0);
+    const e = GreenMapCore.projectPt(cam, cx + rM, cy, 0);
+    const n = GreenMapCore.projectPt(cam, cx, cy + rM, 0);
+    if (!c || !e || !n) return;
+    const rx = Math.hypot(e[0] - c[0], e[1] - c[1]);
+    const ry = Math.hypot(n[0] - c[0], n[1] - c[1]);
+    const dpr = window.devicePixelRatio || 1;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(6,10,8,0.5)';
+    ctx.lineWidth = Math.max(2, 3.5 * dpr);
+    ctx.beginPath();
+    ctx.ellipse(c[0], c[1], rx, ry, 0, 0, 7);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(6,10,8,0.22)';
+    ctx.lineWidth = Math.max(4, 8 * dpr);
+    ctx.beginPath();
+    ctx.ellipse(c[0], c[1], rx * 1.02, ry * 1.02, 0, 0, 7);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Front/Back labels at the green's short-axis edges (green view), or
   // Tee/Green labels (hole view).
   function drawEdgeLabels(cam, bpts) {
@@ -2728,15 +2763,19 @@
         // square floating in space under the pillar. Zone colour on the surface
         // is the whole story here.
         if (bpts && state.viewMode !== 'hole') {
-          // v-fix(wall-underlay-stack): the full wall body (ring heights →
-          // z=0) paints FIRST, then the ribbon seals the top 26 px seam
-          // region, then the surface paints over everything it covers.
-          // Without the body, the surface's lower stretches hung over raw
-          // background below the 26 px ribbon (black teeth on the red face
-          // at glancing angles).
+          // v1.4.0 (SOLID DRUM): the grid floor painted AFTER the wall —
+          // from high cameras its translucent lines + pale disc projected
+          // over the near wall and read as a translucent/see-through base
+          // (James's screenshot: grid lines visibly ON the drum wall).
+          // Order is now: floor FIRST, then wall, then surface — nothing
+          // that belongs under the drum can land on top of it.
+          drawGridFloor(cam, bpts);
+          // v1.4.0 contact ring: a soft dark ellipse at the base seals the
+          // drum-to-ground junction so the model reads as sitting ON the
+          // terrain (no floating edge, no light bleed at the base seam).
+          drawBaseContactRing(cam, bpts);
           drawSkirt(cam, bpts, true);
         }
-        if (bpts && state.viewMode !== 'hole') drawGridFloor(cam, bpts);
     // v-fix(curtain-removed): the v1.0.92 unculled rim curtain was a backstop
     // for the wall-top slit that the v1.0.94 ONE-RING alignment closed for
     // good. Unculled, it drew on BOTH sides — its top ring crested above the
@@ -3597,7 +3636,8 @@
       state.ball = [mx, my];
       state.showPutt = true;
       armBallNext = false;
-      setStatus('Putt preview ON — tap "Clear ball" to remove');
+      setStatus('Putt preview ON — the ball button now removes it');
+      if (window.__syncBallBtn) window.__syncBallBtn();   // v1.4.0
     }
     render();
   }
@@ -3616,8 +3656,11 @@
     elev:  { title: 'Elevation', labels: ['low', '', 'high'] }
   };
   function updateLegend() {
+    // v1.4.0: title also reflects 2D vs 3D ramp ("3D" uses the rainbow).
     const cfg = LEGEND_TEXT[state.mode] || LEGEND_TEXT.slope;
-    document.getElementById('gm-legend-title').textContent = cfg.title;
+    const title = state.viewMode !== '2d'
+      ? cfg.title + ' · 3D' : cfg.title;
+    document.getElementById('gm-legend-title').textContent = title;
     const spans = document.querySelectorAll('#gm-ramplabels span');
     spans.forEach((el, k) => { el.textContent = cfg.labels[k] || ''; });
     // Paint the ramp bar from the active color function so it never drifts.
@@ -3665,6 +3708,10 @@
         b.classList.toggle('active', b.dataset.view === state.viewMode));
       document.getElementById('gm-exag-wrap').style.display =
         state.viewMode === '2d' ? 'none' : 'inline-flex';
+      // v1.4.0 (contextual dock): layer group is a 2D concept — 3D/Hole
+      // always draw shading + arrows tastefully. Hide the row in 3D/Hole.
+      const lg = document.getElementById('gm-layer-group');
+      if (lg) lg.style.display = state.viewMode === '2d' ? '' : 'none';
       if (state.viewMode === 'hole') {
         const h = state.datasets.hole;
         if (h && !h.failed && h.mesh) {
@@ -3728,20 +3775,31 @@
       }, 140);
     });
 
-    document.getElementById('gm-mode').addEventListener('change', (ev) => {
-      state.mode = ev.target.value === 'elev' ? 'elev' : 'slope';
-      buildHeatImage();
-      if (state.viewMode !== '2d') buildScene();   // v-fix: recolor 3D/hole mesh too
-      updateLegend();
-      render();
-      setStatus(state.mode === 'elev' ? 'Elevation ramp — low=blue → high=red'
-                                      : 'Slope mode — flat=sage → steep=red');
+    // v1.4.0: Slope/Elev as a segmented BUTTON group (was a dropdown —
+    // hidden state; James: buttons must "make sense"). Same state.mode.
+    document.querySelectorAll('.gm-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.mode = btn.dataset.mode === 'elev' ? 'elev' : 'slope';
+        document.querySelectorAll('.gm-mode-btn').forEach(b =>
+          b.classList.toggle('active', b === btn));
+        buildHeatImage();
+        if (state.viewMode !== '2d') buildScene();   // recolor 3D/hole mesh too
+        updateLegend();
+        render();
+        setStatus(state.mode === 'elev' ? 'Elevation ramp — low=blue → high=red'
+                                        : 'Slope mode — flat=sage → steep=red');
+      });
     });
     updateLegend();
 
     // Stimpmeter selector for the physics putt preview (8 / 10 / 12,
-    // persisted in localStorage).
+    // persisted in localStorage). v1.4.0: visible ONLY while a ball is
+    // placed — the chip is meaningless otherwise (edge case from the plan).
     const stimpEl = document.getElementById('gm-stimp');
+    const syncStimpVis = () => {
+      if (stimpEl) stimpEl.style.display =
+        state.ball && state.showPutt ? '' : 'none';
+    };
     if (stimpEl) {
       stimpEl.value = String(state.stimp);
       stimpEl.addEventListener('change', () => {
@@ -3752,15 +3810,24 @@
       });
     }
 
-    document.getElementById('gm-ball').addEventListener('click', () => {
-      armBallNext = true;
-      setStatus('Tap a spot on the green to drop the ball…');
+    // v1.4.0: ONE ball button that toggles Drop ↔ Remove (the plan's
+    // "one way to do the thing" — no separate Clear ball button).
+    const ballBtn = document.getElementById('gm-ball');
+    const syncBallBtn = () => {
+      ballBtn.textContent = state.ball ? 'Remove ball' : 'Drop ball';
+      syncStimpVis();
+    };
+    ballBtn.addEventListener('click', () => {
+      if (state.ball) {
+        state.ball = null; state.showPutt = false; armBallNext = false;
+        setStatus('');
+        render(); syncBallBtn();
+      } else {
+        armBallNext = true;
+        setStatus('Tap a spot on the green to drop the ball…');
+      }
     });
-    document.getElementById('gm-clear-ball').addEventListener('click', () => {
-      state.ball = null; state.showPutt = false; armBallNext = false;
-      setStatus('');
-      render();
-    });
+    window.__syncBallBtn = syncBallBtn;   // drop-tap handler calls this
     document.getElementById('gm-recenter').addEventListener('click', () => {
       if (state.viewMode === 'hole') {
         frameCameraForView('hole');
