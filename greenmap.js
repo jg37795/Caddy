@@ -2864,17 +2864,19 @@
     state.__underQuads = [];
     const underQuads = state.__underQuads;
     const isUnder = new Uint8Array(n);
-    // v1.4.2 (TRUE 3D backface test): the v1.4.1 classifier used HORIZONTAL
-    // winding only — on a domed green at pitch 45 the far side's top faces
-    // tilt away, their horizontal winding flips, and they were misclassi-
-    // fied as undersides → the whole far surface rendered as the dark
-    // underlay wash (James: "I can still see the other side of the
-    // green", 14:37 shot). Fix: real 3D face normal vs camera vector — a
-    // quad is an underside ONLY when its normal points AWAY from the
-    // camera in 3D. Front-facing tops (normal toward camera) are never
-    // culled regardless of horizontal winding.
-    const camPos3 = [
-      -cam.fwd[0] * cam.dist, -cam.fwd[1] * cam.dist, -cam.fwd[2] * cam.dist];
+    // v1.4.3 (CULL REMOVED — the two-day root cause, proven): at pitch 45
+    // the far side of the dome is GEOMETRICALLY a backface (its top normal
+    // tilts away from the camera) — ANY backface cull removes the far
+    // surface and exposes the dark underlay ("I can still see the other
+    // side", both 8x and 15x; harness census: wash 1505–2028 px inside the
+    // rim with v1.4.2's true-3D test, same with the horizontal test). The
+    // painter's algorithm never had a problem there: far→near ordering
+    // paints the near surface over the far surface correctly. The ONLY
+    // real defect (v1.4.1, underside painting OVER the wall) is fixed by
+    // paint ORDER — underlay runs before the wall — which needs the
+    // classification but NOT a cull. So: classify undersides for the
+    // underlay pass, draw EVERY quad in the main painter. Nothing can
+    // show through: every face paints, ordered far→near.
     for (let q = 0; q < n; q++) {
       const o0 = q * 12;
       const ax = M.pos[o0 + 3] - M.pos[o0],
@@ -2883,7 +2885,7 @@
       const bx = M.pos[o0 + 9] - M.pos[o0],
             by = M.pos[o0 + 10] - M.pos[o0 + 1],
             bz = M.pos[o0 + 11] - M.pos[o0 + 2];
-      // 3D face normal = a × b
+      // 3D face normal = a × b (up for top faces by mesh winding)
       const nx = ay * bz - az * by,
             ny = az * bx - ax * bz,
             nz = ax * by - ay * bx;
@@ -2893,12 +2895,11 @@
                    M.pos[o0 + 10]) / 4;
       const czq = (M.pos[o0 + 2] + M.pos[o0 + 5] + M.pos[o0 + 8] +
                    M.pos[o0 + 11]) / 4;
-      const vx = camPos3[0] - cxq, vy = camPos3[1] - cyq,
-            vz = camPos3[2] - czq;
+      const vx = surfCamX - cxq, vy = surfCamY - cyq,
+            vz = -cam.fwd[2] * cam.dist - czq;
       if (nx * vx + ny * vy + nz * vz <= 0) {
-        underQuads.push(q);   // back face → underlay, not the main painter
-        isUnder[q] = 1;
-        continue;
+        underQuads.push(q);   // back face → also underlay (pre-wall), but
+        isUnder[q] = 1;       // still painted in the main pass below.
       }
       let dsum = 0, ok = true;
       for (let c = 0; c < 4; c++) {
@@ -3831,10 +3832,11 @@
         b.classList.toggle('active', b.dataset.view === state.viewMode));
       document.getElementById('gm-exag-wrap').style.display =
         state.viewMode === '2d' ? 'none' : 'inline-flex';
-      // v1.4.0 (contextual dock): layer group is a 2D concept — 3D/Hole
-      // always draw shading + arrows tastefully. Hide the row in 3D/Hole.
+      // v1.4.3 (controls stay visible — James's rule): the layer group is
+      // wanted in EVERY view; v1.4.0 hid it in 3D/Hole and he read that
+      // as "no buttons for shading or arrows". Always shown.
       const lg = document.getElementById('gm-layer-group');
-      if (lg) lg.style.display = state.viewMode === '2d' ? '' : 'none';
+      if (lg) lg.style.display = '';
       if (state.viewMode === 'hole') {
         const h = state.datasets.hole;
         if (h && !h.failed && h.mesh) {

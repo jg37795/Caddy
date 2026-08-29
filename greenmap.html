@@ -14,11 +14,32 @@
 <link rel="stylesheet" href="leaflet.css">
 </head>
 <body>
+<!-- v1.4.3: topbar + legend in one flex column wrapper — the legend is a
+     layout child, not an overlay, so it can never overlap the bar. -->
+<div id="gm-topstack" style="position:fixed; top:0; left:0; right:0; z-index:30; display:flex; flex-direction:column; pointer-events:none;">
+<div id="gm-topbar" class="gm-chrome" style="pointer-events:auto;">
+  <button class="gm-btn" id="gm-back" title="Back to the Caddy app" style="display:none">‹ Back</button>
+  <span id="gm-title">⛳ 3D Green</span>
+  <span id="gm-loc" title="The green this view loaded"></span>
+  <span id="gm-status">Loading…</span>
+</div>
+
+<!-- v1.4.3: legend lives INSIDE the topbar block as a second row — it
+     can never clash with the bar again (the bar wraps, the legend sits
+     under its full width, measured by layout not magic numbers). -->
+<div id="gm-legend" class="gm-chrome" style="pointer-events:auto; position:static; margin: 8px 10px 0; width:auto; max-width:none; align-self:flex-end;">
+  <h4 id="gm-legend-title">Slope %</h4>
+  <div id="gm-rampbar"></div>
+  <div id="gm-ramplabels"><span>0%</span><span>5%</span><span>10%+</span></div>
+  <div class="row">↘ arrows point downhill · tap = slope readout</div>
+  <div class="row" id="gm-quality" style="opacity:0.65;font-size:10px"></div>
+</div>
+</div>
 <script>
 /* Theme parity with the app (v1.2.3): greenmap.html is its own page, so
-   nobody was setting body.dark here and the tool always rendered LIGHT
-   chrome. Read the same caddy:prefs key the app publishes; 'auto' follows
-   the OS. Runs before first paint — no flash. */
+    nobody was setting body.dark here and the tool always rendered LIGHT
+    chrome. Read the same caddy:prefs key the app publishes; 'auto' follows
+    the OS. Runs before first paint — no flash. */
 (function () {
   try {
     var prefs = JSON.parse(localStorage.getItem('caddy:prefs') || '{}');
@@ -33,13 +54,6 @@
 
 <div id="gm-stage">
   <canvas id="gm-canvas"></canvas>
-</div>
-
-<div id="gm-topbar" class="gm-chrome">
-  <button class="gm-btn" id="gm-back" title="Back to the Caddy app" style="display:none">‹ Back</button>
-  <span id="gm-title">⛳ 3D Green</span>
-  <span id="gm-loc" title="The green this view loaded"></span>
-  <span id="gm-status">Loading…</span>
 </div>
 
 <!-- v1.4.0 dock redesign: 3 contextual rows. Row 1 = view segment (+exag
@@ -82,14 +96,6 @@
       <button class="gm-btn" id="gm-recenter">Fit</button>
     </div>
   </div>
-</div>
-
-<div id="gm-legend" class="gm-chrome">
-  <h4 id="gm-legend-title">Slope %</h4>
-  <div id="gm-rampbar"></div>
-  <div id="gm-ramplabels"><span>0%</span><span>5%</span><span>10%+</span></div>
-  <div class="row">↘ arrows point downhill · tap = slope readout</div>
-  <div class="row" id="gm-quality" style="opacity:0.65;font-size:10px"></div>
 </div>
 
 <div id="gm-tip"></div>

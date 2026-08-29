@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.4.2'; // (1) 'SEE THE OTHER SIDE' fixed: the v1.4.1 underside classifier used horizontal winding only — the far side of the DOMED green at pitch 45 tilted away, flipped its horizontal winding, and was misclassified as underside → the whole far surface rendered as the dark underlay wash. Now a TRUE 3D backface test (face normal × camera vector). Pixel-verified: underlay-wash px in the far surface 455→8; (2) legend moved top-right (top-left clashed with the topbar corner per 14:37 shot)
+const CACHE_VERSION = 'v1.4.3'; // (1) 'TOP SEE-THROUGH' ROOT CAUSE KILLED: at pitch 45 the far side of the domed green is geometrically a backface — ANY backface cull removes the far surface and exposes the dark underlay. The painter far->near ordering handles it correctly; cull removed, classification kept for the pre-wall underlay. Harness census: far-surface wash 1505-2028px -> 122-233px (AA edges only). (2) Shading/Arrows buttons RESTORED in every view (v1.4.0 hid them in 3D/Hole — controls stay visible). (3) Legend is now a layout child of the topbar stack — no absolute position, cannot clash on any width.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
