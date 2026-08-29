@@ -34,7 +34,8 @@
   }
 
   function overpassQ(lat, lng, radius) {
-    return `[out:json][timeout:15];(way["golf"="green"](around:${radius},${lat},${lng}););out geom;`;
+    // v1.2.5: greens + hole lines (for "which hole is this?" labels).
+    return `[out:json][timeout:15];(way["golf"="green"](around:${radius},${lat},${lng});way["golf"="hole"](around:${radius},${lat},${lng}););out geom;`;
   }
 
   function openEditor() {
@@ -128,9 +129,23 @@
           color: '#ffd166', weight: 2, fillOpacity: 0.12, dashArray: null,
         }).addTo(map);
       }
+      // v1.2.5 (clean close): show the LIVE closing edge from the last point
+      // back to the first as a distinct dashed segment, so the ring James
+      // sees is exactly the ring he saves — no surprise tail on load.
       traceLine = L.polyline(tracePts.concat([tracePts[0]]), {
         color: '#ffd166', weight: 2, dashArray: '4 5',
       }).addTo(map);
+    };
+
+    // v1.2.5 (snap-close): a tap near the FIRST point (within 18 px)
+    // finishes the ring instead of adding a cramped vertex — the natural
+    // "close the loop" gesture. Verified distance in SCREEN space, not
+    // metres, so it works at any zoom.
+    const SNAP_PX = 18;
+    const screenDist = (a, b) => {
+      const p1 = map.latLngToContainerPoint(a);
+      const p2 = map.latLngToContainerPoint(b);
+      return Math.hypot(p1.x - p2.x, p1.y - p2.y);
     };
 
     btnTrace.addEventListener('click', () => {
@@ -144,6 +159,15 @@
 
     map.on('click', (e) => {
       if (!tracing) return;
+      // v1.2.5 (snap-close): tapping near the first point (>=3 pts) closes
+      // the ring — do NOT add the point.
+      if (tracePts.length >= 3 &&
+          screenDist(e.latlng, L.latLng(tracePts[0][0], tracePts[0][1]))
+            < SNAP_PX) {
+        readout.textContent =
+          'Outline closed — “Save & load this outline” when it looks right.';
+        return;
+      }
       tracePts.push([e.latlng.lat, e.latlng.lng]);
       redrawTrace();
     });
@@ -181,21 +205,66 @@
     });
 
     // Real OSM greens around the boot point (60 m) — drawn so James can SEE
-    // which green is which.
+    // which green is which. v1.2.5: each green gets a HOLE label (H3, H7…)
+    // derived from the nearest golf=hole way's ref/tag, so multi-green
+    // courses are navigable at a glance.
+    const holeLabelFor = (lat, lng, holeIndex) => {
+      // holeIndex: parallel array of hole ways fetched alongside greens.
+      const h = holeIndex.nearest(lat, lng);
+      return h ? 'H' + h.ref : null;
+    };
     fetch(OVERPASS + '?data=' + encodeURIComponent(overpassQ(boot.lat, boot.lng, 60)))
       .then((r) => r.json())
       .then((data) => {
         const els = (data.elements || []).filter((e) => e.geometry);
+        // Build a hole index from ways tagged golf=hole (same bbox query).
+        const holes = els.filter((e) => e.tags && e.tags.golf === 'hole');
+        const holeIndex = {
+          nearest(lat, lng) {
+            let best = null, bestD = Infinity;
+            for (const h of holes) {
+              // distance to hole way's first node (greens sit near their tee
+              // side's hole line; good enough for a label)
+              const g0 = h.geometry[0];
+              const d = Math.hypot((g0.lat - lat) * 111320,
+                (g0.lon - lng) * 111320);
+              if (d < bestD) {
+                bestD = d;
+                best = h.tags.ref || h.tags.name || null;
+              }
+            }
+            return best ? { ref: best } : null;
+          },
+        };
         els.forEach((el) => {
           const ll = el.geometry.map((g) => [g.lat, g.lon]);
           if (ll.length < 3) return;
+          const isHole = el.tags && el.tags.golf === 'hole';
           L.polygon(ll, {
-            color: '#7dff9b', weight: 2, fillOpacity: 0.18,
+            color: isHole ? 'rgba(255,255,255,0.5)' : '#7dff9b',
+            weight: isHole ? 1.5 : 2,
+            fillOpacity: isHole ? 0.04 : 0.18,
+            dashArray: isHole ? '3 6' : null,
           }).addTo(map);
+          if (!isHole) {
+            // Green: centroid label = nearest hole's ref.
+            let clat = 0, clng = 0;
+            ll.forEach(([a, b]) => { clat += a; clng += b; });
+            clat /= ll.length; clng /= ll.length;
+            const lbl = holeLabelFor(clat, clng, holeIndex);
+            L.marker([clat, clng], {
+              interactive: false,
+              icon: L.divIcon({ className: 'gel-holetag',
+                html: '<div class="gel-holetag-pill">' + (lbl || 'green') +
+                  '</div>', iconSize: null }),
+            }).addTo(map);
+          }
         });
-        if (!els.length) {
+        const greens = els.filter((e) =>
+          e.tags && e.tags.golf === 'green').length;
+        if (!greens) {
           readout.textContent =
-            'No mapped greens within 60 m — the tool will approximate. Tap any green you can see and “Load this green”.';
+            'No mapped greens within 60 m — the tool will approximate. Trace this green (“Trace outline”) or tap where it is and “Load this green”.';
         }
       })
       .catch(() => { /* offline: map still works for manual placement */ });

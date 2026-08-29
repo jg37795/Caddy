@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.2.4'; // SEAL v2: ONE crest function for every wall layer (skirtRingHeights: ±2-max + nearest-finite carry) — plates, backboard shared it but the 26px ribbon still used its own heights; its pale slivers at silhouette-tangent segments were the stepped flap / 'still see-through base' on Westwood. RIBBON DELETED (redundant after one-crest; layer-bisect proven). Wall = backboard + plates, one height function.
+const CACHE_VERSION = 'v1.2.5'; // TRACE UX + DOCK: snap-close tracing (tap near the first point closes the ring; live closing edge shown); hole labels (H3/H7) on the Check-location map from OSM golf=hole refs; trace-vs-OSM switcher (tap the loc badge when both exist); ALL controls moved to a bottom dock (top bar = identity only, never covers the green); ball rendered as a shaded sphere with dimples + contact shadow; flag = shaded pole + knob + curved pennant + cup ring
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

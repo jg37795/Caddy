@@ -1287,7 +1287,14 @@
       } catch (e) { /* no store */ }
       return null;
     })();
-    if (tracedHit) {
+    // v1.2.5 (source choice): ?src=osm|traced overrides the default order
+    // (trace first) — set by tapping the loc badge when both exist.
+    const srcPref = qs.get('src');
+    const useTrace = tracedHit && srcPref !== 'osm';
+    const useOsm = polyLL && !useTrace && srcPref !== 'traced';
+    state.__altOsm = !!(tracedHit && polyLL);   // both available → badge offers switch
+    state.__altTrace = state.__altOsm;
+    if (useTrace) {
       const mLat = 111320;
       const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);
       state.polyLocal = tracedHit.vertices.map(([la, ln]) => [
@@ -1295,7 +1302,7 @@
       state.polySource = 'traced';
       mask = GreenMapCore.polyMask(state.polyLocal,
         elev.W, elev.H, elev.cellSizeM);
-    } else if (polyLL) {
+    } else if (useOsm) {
       const polyLocal = polyLL.map(([lon, la]) => [
         (lon - state.lng) * 111320 * Math.cos(state.lat * Math.PI / 180),
         (la - state.lat) * 111320
@@ -3098,6 +3105,39 @@
       ctx.lineWidth = Math.max(1.5, dpr * 1.1);
       ctx.stroke();
       ctx.setLineDash([]);
+      // v1.2.5 prettify: the BALL as a proper golf ball — white sphere with
+      // a dark contact shadow + dimple hint, sized by depth, occluded like
+      // all dressing (was: flat white dot).
+      const bp = GreenMapCore.projectPt(cam, state.ball[0], state.ball[1],
+        surfZ3(state.ball[0], state.ball[1]));
+      if (bp && !(dressingOcclusion &&
+          dressingOcclusion(bp[0], bp[1], bp[2] + 0.15))) {
+        const br = Math.max(3.5, cam.f / bp[2] * 0.014);
+        // contact shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.30)';
+        ctx.beginPath();
+        ctx.ellipse(bp[0], bp[1] + br * 0.75, br * 1.05, br * 0.42,
+          0, 0, 7);
+        ctx.fill();
+        // sphere: radial gradient white → grey
+        const bg = ctx.createRadialGradient(
+          bp[0] - br * 0.35, bp[1] - br * 0.4, br * 0.15,
+          bp[0], bp[1], br);
+        bg.addColorStop(0, '#ffffff');
+        bg.addColorStop(0.65, '#eef2ef');
+        bg.addColorStop(1, '#b9c2bc');
+        ctx.fillStyle = bg;
+        ctx.beginPath();
+        ctx.arc(bp[0], bp[1], br, 0, 7);
+        ctx.fill();
+        // dimple hint: three faint dots
+        ctx.fillStyle = 'rgba(120,130,124,0.35)';
+        for (const [dx, dy] of [[-0.3, -0.1], [0.15, 0.2], [0.3, -0.25]]) {
+          ctx.beginPath();
+          ctx.arc(bp[0] + br * dx, bp[1] + br * dy, br * 0.13, 0, 7);
+          ctx.fill();
+        }
+      }
       setStatus(puttStatusText(r));
     }
 
@@ -3115,17 +3155,50 @@
       const pinHidden = mid && dressingOcclusion &&
         dressingOcclusion(mid[0], mid[1], mid[2]);
       if (base && top && !pinHidden) {
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = Math.max(1.5, dpr * 1.0);
+        // v1.2.5 prettify: flag reads as a real pin — shaded pole with knob,
+        // red-white pennant, cup ring at the base (was: white stick + flat
+        // red triangle).
+        const ps = Math.max(1.6, cam.f / top[2] * 0.004);  // pole width
+        // cup ring at the base
+        const cs2 = Math.max(3, cam.f / base[2] * 0.012);
+        ctx.strokeStyle = 'rgba(8,12,10,0.55)';
+        ctx.lineWidth = Math.max(1.2, dpr * 0.9);
+        ctx.beginPath();
+        ctx.ellipse(base[0], base[1], cs2, cs2 * 0.42, 0, 0, 7);
+        ctx.stroke();
+        // pole: two-tone (light face + dark edge) for a cylindrical read
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(235,240,236,0.98)';
+        ctx.lineWidth = ps * 1.6;
         ctx.beginPath(); ctx.moveTo(base[0], base[1]);
         ctx.lineTo(top[0], top[1]); ctx.stroke();
+        ctx.strokeStyle = 'rgba(150,158,152,0.9)';
+        ctx.lineWidth = ps * 0.7;
+        ctx.beginPath(); ctx.moveTo(base[0], base[1]);
+        ctx.lineTo(top[0], top[1]); ctx.stroke();
+        // knob
+        ctx.fillStyle = '#f4f7f4';
+        ctx.beginPath();
+        ctx.arc(top[0], top[1], ps * 1.5, 0, 7);
+        ctx.fill();
+        // pennant: red gradient with a subtle wave (two-segment trailing
+        // edge), attached at the pole top
         const fs = Math.max(4, cam.f / top[2] * 0.09);
-        ctx.fillStyle = '#e04444';
+        const fw = fs * 1.35, fh = fs * 0.62;
+        const wag = Math.sin(performance.now() / 900) * fs * 0.06;
+        const fg = ctx.createLinearGradient(top[0], top[1],
+          top[0] + fw, top[1] + fh);
+        fg.addColorStop(0, '#e8564f');
+        fg.addColorStop(1, '#c33a34');
+        ctx.fillStyle = fg;
         ctx.beginPath();
         ctx.moveTo(top[0], top[1]);
-        ctx.lineTo(top[0] + fs, top[1] + fs * 0.28);
-        ctx.lineTo(top[0], top[1] + fs * 0.56);
-        ctx.closePath(); ctx.fill();
+        ctx.quadraticCurveTo(top[0] + fw * 0.55, top[1] + fh * 0.18 + wag,
+          top[0] + fw, top[1] + fh * 0.52);
+        ctx.quadraticCurveTo(top[0] + fw * 0.55, top[1] + fh * 0.62 + wag,
+          top[0], top[1] + fh);
+        ctx.closePath();
+        ctx.fill();
       }
     }
 
@@ -3594,6 +3667,33 @@
           ? '⚠ approx outline — trace it via Check location'
           : '…';
     el.textContent = `${la}, ${ln} · ${src}`;
+    // v1.2.5 (source choice): when BOTH a trace and an OSM polygon match,
+    // the badge invites switching — one tap cycles the outline source with
+    // a full reload (no fake partial re-render). The preferred order is
+    // traced first (ground truth); this only adds the option to compare.
+    const hasTrace = polySource === 'traced' || !!state.__altOsm;
+    const hasOsm = polySource === 'osm' || !!state.__altTrace;
+    if (polySource === 'traced' && state.__altOsm) {
+      el.textContent += ' · tap to switch to OSM';
+      el.style.cursor = 'pointer';
+      el.onclick = () => {
+        const qs2 = new URLSearchParams(location.search);
+        qs2.set('src', 'osm');
+        location.search = qs2.toString();
+      };
+    } else if (polySource === 'osm' && state.__altTrace) {
+      el.textContent += ' · tap to switch to your trace';
+      el.style.cursor = 'pointer';
+      el.onclick = () => {
+        const qs2 = new URLSearchParams(location.search);
+        qs2.set('src', 'traced');
+        location.search = qs2.toString();
+      };
+    } else {
+      el.style.cursor = '';
+      el.onclick = null;
+    }
+    void hasTrace; void hasOsm;   // (labels above carry the actual state)
   }
 
   function wireLocationTools() {
