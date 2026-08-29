@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.3.0'; // SATELLITE HOLE VIEW: the Google Earth look — Esri World_Imagery tiles composited into a mosaic for the corridor bbox (≤36 tiles, auto zoom, ≥60% success gate) and draped onto the hole mesh per-quad (photo 90% on fairway, 65% on the slope-tinted green); honest fallback to topo colours when tiles fail; satview.js precached
+const CACHE_VERSION = 'v1.3.1'; // FIELD-TEST FIXES: (1) tooltip lifted clear of the dock + moved left; (2) backboard crest flush with the rim (the +0.06 lip lift was the 'see-through' grey band from high cameras); (3) snap-close 34px + pulsing first-point handle (18px was unhittable); (4) hole labels use nearest hole SEGMENT (Sugar Creek H8-vs-H1); (5) ONE green primary per sheet (Check-location buttons); (6) trace/OSM switch offer now requires OSM-confirmed; (7) arrows never float — rebuilt on mesh change; (8) location.replace everywhere — no Back pile-up, one back = the app
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

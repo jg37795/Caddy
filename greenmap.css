@@ -127,7 +127,7 @@ body:not(.dark) #gm-stage {
 @media (max-width: 560px) {
   #gm-dock { gap: 5px; padding: 7px 8px; }
   .gm-dock-group .gm-btn { padding: 4px 8px; font-size: 11px; }
-  #gm-legend { bottom: calc(var(--safe-bottom) + 74px); }  /* clear the dock */
+  #gm-legend { bottom: calc(var(--safe-bottom) + 96px); width: 156px; }
 }
 
 #gm-title { font-weight: 800; letter-spacing: -0.01em; margin-right: 2px; }
@@ -166,12 +166,15 @@ body:not(.dark) #gm-stage {
   max-width: 220px;
 }
 
-/* Legend: glass card bottom-right */
+/* Legend: glass card LEFT side, lifted clear of the dock (v1.3.1 — it
+   overlapped the dock's right groups on iPhone widths; left keeps it
+   beside the dock's first rows, above safe area, never on top). */
 #gm-legend {
-  right: 10px;
-  bottom: calc(var(--safe-bottom) + 12px);
-  width: 186px;
-  max-height: min(46vh, calc(100dvh - 130px));
+  left: 10px;
+  right: auto;
+  bottom: calc(var(--safe-bottom) + 92px);
+  width: 172px;
+  max-height: min(42vh, calc(100dvh - 170px));
   overflow-y: auto;
   border-radius: 18px;
   padding: 10px 12px;
@@ -348,7 +351,16 @@ body:not(.dark) #gm-stage {
   transform: scale(0.96);
 }
 
+/* v1.3.1: ONE primary per sheet — "Load this green" (and, while tracing,
+   "Save & load this outline"). Everything else is neutral glass. Trace
+   toggles to filled while active so the state is unambiguous. */
 .gel-btn.gel-primary {
+  background: linear-gradient(145deg, var(--green), var(--green-2));
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.gel-btn.gel-active {
   background: linear-gradient(145deg, var(--green), var(--green-2));
   border-color: transparent;
   color: #ffffff;
@@ -466,4 +478,27 @@ body:not(.dark) #gm-stage {
   letter-spacing: 0.02em;
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* Pulsing first-point snap handle (v1.3.1) — the tap target to CLOSE a
+   traced ring. Gold ring, expanding pulse, impossible to miss. */
+.gel-snaphandle {
+  pointer-events: none;
+}
+.gel-snaphandle-ring {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid #ffd166;
+  background: rgba(255, 209, 102, 0.25);
+  box-shadow: 0 0 0 rgba(255, 209, 102, 0.6);
+  animation: gelSnapPulse 1.4s ease-out infinite;
+}
+@keyframes gelSnapPulse {
+  0% { transform: scale(0.75); box-shadow: 0 0 0 0 rgba(255,209,102,0.55); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 14px rgba(255,209,102,0); }
+  100% { transform: scale(0.75); box-shadow: 0 0 0 0 rgba(255,209,102,0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gel-snaphandle-ring { animation: none; }
 }

@@ -49,7 +49,7 @@
       '  <button class="gel-btn" id="gelCancel">‹ Cancel</button>' +
       '  <div class="gel-title">Verify green location</div>' +
       '  <button class="gel-btn" id="gelTrace">Trace outline</button>' +
-      '  <button class="gel-btn gel-primary" id="gelLoad">Load this green</button>' +
+      '  <button class="gel-btn" id="gelLoad">Load this green</button>' +
       '</div>' +
       '<div class="gel-map" id="gelMap"></div>' +
       '<div class="gel-hint">Tap to move the sample point · green outlines are the real mapped greens (OSM)</div>' +
@@ -114,6 +114,7 @@
     let tracePts = [];
     let traceLine = null;
     let traceFill = null;
+    let snapMarker = null;   // v1.3.1: pulsing first-point handle
 
     const traceBar = sheet.querySelector('#gelTraceBar');
     const traceCount = sheet.querySelector('#gelTraceCount');
@@ -141,7 +142,10 @@
     // finishes the ring instead of adding a cramped vertex — the natural
     // "close the loop" gesture. Verified distance in SCREEN space, not
     // metres, so it works at any zoom.
-    const SNAP_PX = 18;
+    // v1.3.1 (snap-close v2): 18 px was too tight on a 3× phone — James
+    // could never hit it ("still doesn't snap, I keep adding points").
+    // 34 px + a pulsing first-point handle so the target is VISIBLE.
+    const SNAP_PX = 34;
     const screenDist = (a, b) => {
       const p1 = map.latLngToContainerPoint(a);
       const p2 = map.latLngToContainerPoint(b);
@@ -152,8 +156,11 @@
       tracing = !tracing;
       btnTrace.classList.toggle('gel-active', tracing);
       traceBar.hidden = !tracing;
+      if (!tracing && snapMarker) {
+        map.removeLayer(snapMarker); snapMarker = null;   // v1.3.1
+      }
       readout.textContent = tracing
-        ? 'Trace mode — tap points AROUND the green edge, then Save & load.'
+        ? 'Trace mode — tap points AROUND the green edge; tap the pulsing ring to close.'
         : 'Tap to move the sample point.';
     });
 
@@ -169,6 +176,17 @@
         return;
       }
       tracePts.push([e.latlng.lat, e.latlng.lng]);
+      // v1.3.1: first-point handle appears once the ring can close (>=3
+      // pts) — a pulsing gold circle marks the tap target; removes it when
+      // tracing turns off.
+      if (tracePts.length >= 3 && !snapMarker) {
+        snapMarker = L.marker(tracePts[0], {
+          interactive: false,
+          icon: L.divIcon({ className: 'gel-snaphandle',
+            html: '<div class="gel-snaphandle-ring"></div>',
+            iconSize: [44, 44], iconAnchor: [22, 22] }),
+        }).addTo(map);
+      }
       redrawTrace();
     });
 
@@ -201,7 +219,7 @@
       const qs2 = new URLSearchParams(location.search);
       qs2.set('lat', clat.toFixed(6));
       qs2.set('lng', clng.toFixed(6));
-      location.search = qs2.toString();
+      location.replace('?r=' + Date.now() + '&' + qs2.toString());
     });
 
     // Real OSM greens around the boot point (60 m) — drawn so James can SEE
@@ -218,19 +236,33 @@
       .then((data) => {
         const els = (data.elements || []).filter((e) => e.geometry);
         // Build a hole index from ways tagged golf=hole (same bbox query).
+        // v1.3.1: distance to the nearest SEGMENT of the hole line (not the
+        // first node) — Sugar Creek's holes 1 and 8 share a boundary area
+        // and first-node distance picked the wrong one ("hole8 vs hole1").
+        const segDist = (lat, lng, a, b) => {
+          const ax = a.lng, ay = a.lat, bx = b.lng, by = b.lat;
+          const px = lng, py = lat;
+          const dx = bx - ax, dy = by - ay;
+          const l2 = dx * dx + dy * dy;
+          let t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+          t = Math.max(0, Math.min(1, t));
+          // scale lng by cos(lat) so the geometry is ~metre-ish
+          const k = Math.cos(lat * Math.PI / 180);
+          const ex = (ax + t * dx - px) * 111320 * k;
+          const ey = (ay + t * dy - py) * 111320;
+          return Math.hypot(ex, ey);
+        };
         const holes = els.filter((e) => e.tags && e.tags.golf === 'hole');
         const holeIndex = {
           nearest(lat, lng) {
             let best = null, bestD = Infinity;
             for (const h of holes) {
-              // distance to hole way's first node (greens sit near their tee
-              // side's hole line; good enough for a label)
-              const g0 = h.geometry[0];
-              const d = Math.hypot((g0.lat - lat) * 111320,
-                (g0.lon - lng) * 111320);
-              if (d < bestD) {
-                bestD = d;
-                best = h.tags.ref || h.tags.name || null;
+              for (let i = 0; i < h.geometry.length - 1; i++) {
+                const d = segDist(lat, lng, h.geometry[i], h.geometry[i + 1]);
+                if (d < bestD) {
+                  bestD = d;
+                  best = h.tags.ref || h.tags.name || null;
+                }
               }
             }
             return best ? { ref: best } : null;
@@ -281,7 +313,7 @@
       qs2.set('lat', ll.lat.toFixed(6));
       qs2.set('lng', ll.lng.toFixed(6));
       if (!qs2.get('teelat')) { /* keep any existing tee params */ }
-      location.search = qs2.toString();   // full re-boot at the new green
+      location.replace('?r=' + Date.now() + '&' + qs2.toString());   // full re-boot at the new green
     });
   }
 

@@ -1177,13 +1177,17 @@
     state.grid = ds.grid; state.field = ds.field; state.mask = ds.mask;
     state.bbox = ds.bbox; state.elevRange = ds.elevRange;
     state.polyLocal = ds.polyLocal;
-        state.polySource = ds.polySource || state.polySource;
-        // v-fix(single-elev-source): each dataset carries the grid its mesh was
-        // built from; surfZ3 must follow the ACTIVE dataset.
-        if (ds.meshGrid) state.meshGrid = ds.meshGrid;
-    state.mesh = ds.mesh; state.meshArrows = ds.arrows || [];
+    state.polySource = ds.polySource || state.polySource;
+    // v-fix(single-elev-source): each dataset carries the grid its mesh was
+    // built from; surfZ3 must follow the ACTIVE dataset.
+    if (ds.meshGrid) state.meshGrid = ds.meshGrid;
+    state.mesh = ds.mesh;
+    // v1.3.1: arrows come from the dataset when fresh, else rebuild —
+    // never draw arrows that belong to a DIFFERENT mesh (float bug).
+    state.meshArrows = ds.arrows || [];
+    if (!state.meshArrows.length && state.mesh) rebuildMeshArrows();
     return true;
-  }
+    }
 
   async function fetchGreenPolygon(lat, lng, signal) {
     try {
@@ -1196,11 +1200,16 @@
         { signal });
       if (!res.ok) throw new Error('overpass ' + res.status);
       const data = await res.json();
+      // v1.3.1: remember whether OSM had ANY green near the launch point —
+      // the loc badge uses it to offer "switch to OSM" when a trace wins.
+      const anyGreen = !!(data.elements && data.elements.length);
+      window.__osmGreenNearby = anyGreen;
       const el = data.elements && data.elements[0];
       if (!el || !el.geometry) return null;
       return el.geometry.map(g => [g.lon, g.lat]);
     } catch (e) {
       console.warn('[greenmap] no OSM green polygon:', e.message);
+      window.__osmGreenNearby = false;
       return null;
     }
   }
@@ -1849,8 +1858,14 @@
     saveActive();
     const ds = state.datasets[state.active];
     const isHole = state.active === 'hole';
-    if (isHole) { buildHoleScene(); state.mesh = ds.mesh;
-      state.meshArrows = ds.arrows || []; return; }
+    if (isHole) {
+      buildHoleScene();
+      state.mesh = ds.mesh;
+      // v1.3.1: rebuildHoleScene already rebuilt arrows via rebuildMeshArrows
+      // (ds.arrows mirrors state.meshArrows — keep them in sync).
+      ds.arrows = state.meshArrows;
+      return;
+    }
     // Green mesh: 2× bilinear refinement (128-class internal grid when the
     // 64-cell fetch allows) → visibly smoother shading at no data cost.
     let mg = g.grid, mW = g.W, mH = g.H, mMask = state.mask, aoR = 3,
@@ -1913,24 +1928,45 @@
           : null });
     if (state.mesh) state.mesh.gridRef = state.meshGrid;
     ds.mesh = state.mesh;
+    rebuildMeshArrows();
+  }
+
+  // v1.3.1: arrow rebuild extracted — buildHoleScene and the exag-rebuild
+  // path both need it, and render3D needs to know when the current
+  // state.meshArrows no longer match state.mesh (the float-then-snap bug).
+  function rebuildMeshArrows() {
+    const ds = state.active === 'hole' ? state.datasets.hole : null;
+    const g = ds ? ds.eg : state.grid;
+    const field = ds ? ds.field : state.field;
+    const mask = ds ? ds.mask : state.mask;
+    if (!g || !field || !mask) return;
     // Downhill arrows on the surface. v2: sparse & bold like 18Birdies —
     // ~every 8th refined cell (≈40 arrows), uniform bold styling, not fuzz.
     const arr = [];
-    const step = 11;                    // v1.1.3: sparser — uniform arrows read calmer
-    for (let y = 4; y < g.H - 1; y += step)
-      for (let x = 4; x < g.W - 1; x += step) {
+    const step = ds ? 14 : 11;   // corridor sparser (v1.1.4)
+    for (let y = ds ? 1 : 4; y < g.H - 1; y += step)
+      for (let x = ds ? 1 : 4; x < g.W - 1; x += step) {
         const i = y * g.W + x;
-        if (!state.mask[i] || !state.field.valid[i]) continue;
-        const gxv = state.field.gx[i], gyv = state.field.gy[i];
-        const mag = Math.hypot(gxv, gyv);
-        if (mag < 1e-5) continue;
-        arr.push({
-          mx: (x + 0.5 - g.W / 2) * g.cellSizeM,
-          my: (g.H / 2 - y - 0.5) * g.cellSizeM,
-          dxm: -gxv / mag, dym: gyv / mag,
-          lenM: 1.6,                       // uniform length — clean flow field
-          slopePct: mag * 100
-        });
+        if (!mask[i] || !field.valid[i]) continue;
+        // v-fix(hole-void-parity): a mesh quad whose corner nodes are NaN
+        // (LiDAR void) is dropped at build time, but the ARROW on that cell
+        // still projected — white arrows floating over pure background in
+        // the void stretches. Same rule as the green view's void parity:
+        // no finite corner nodes ⇒ no arrow.
+        if (Number.isFinite(g[i]) && (!ds ||
+            (Number.isFinite(g[i + 1]) && Number.isFinite(g[i + g.W]) &&
+             Number.isFinite(g[i + g.W + 1])))) {
+          const gxv = field.gx[i], gyv = field.gy[i];
+          const mag = Math.hypot(gxv, gyv);
+          if (mag < 1e-5) continue;
+          arr.push({
+            mx: (x + 0.5 - g.W / 2) * g.cellSizeM,
+            my: (g.H / 2 - y - 0.5) * g.cellSizeM,
+            dxm: -gxv / mag, dym: gyv / mag,
+            lenM: 1.6,                       // uniform length — clean flow field
+            slopePct: mag * 100
+          });
+        }
       }
     state.meshArrows = arr;
   }
@@ -2366,7 +2402,12 @@
       const crest = [], base = [];
       for (let i = 0; i < sPts.length; i++) {
         const [mx, my] = sPts[i];
-        crest.push(GreenMapCore.projectPt(cam, mx, my, sHeights[i] + 0.06));
+        // v1.3.1: crest EXACTLY at the shared heights — the old +0.06 lift
+        // (inherited from the deleted ribbon) poked the backboard above the
+        // far rim from high-pitch cameras: James's "still see through to
+        // the other side" grey band (screenshot 06:48). Plates already sit
+        // at heights; the surface edge is the same one-ring — nothing to lift.
+        crest.push(GreenMapCore.projectPt(cam, mx, my, sHeights[i]));
         base.push(GreenMapCore.projectPt(cam, mx, my, 0));
       }
       ctx.fillStyle = 'rgb(96,104,100)';
@@ -3029,7 +3070,17 @@
 
     // Surface break arrows (downhill), drawn on top of the mesh.
     // v2 fix: arrows show in 'both' and 'arrows' modes; 'shading' hides them.
+    // v1.3.1 (float-then-snap): the FIRST render after the corridor lands
+    // drew arrows for the PREVIOUS dataset (or none) — state.meshArrows was
+    // rebuilt only in buildHoleScene; the mesh was rebuilt by the exag
+    // handler with fresh arrows, so the first frame floated and the slider
+    // "snapped" them. Rebuild arrows right here when the mesh was rebuilt
+    // after them (cheap: ~90 arrows), or draw nothing — never stale floats.
     if (state.layer !== 'shading') {
+      if (state.__arrowsStale) {
+        state.__arrowsStale = false;
+        rebuildMeshArrows();
+      }
       const dpr = window.devicePixelRatio || 1;
     ctx.lineCap = 'round';
     for (const a of state.meshArrows) {
@@ -3716,15 +3767,13 @@
     // the badge invites switching — one tap cycles the outline source with
     // a full reload (no fake partial re-render). The preferred order is
     // traced first (ground truth); this only adds the option to compare.
-    const hasTrace = polySource === 'traced' || !!state.__altOsm;
-    const hasOsm = polySource === 'osm' || !!state.__altTrace;
     if (polySource === 'traced' && state.__altOsm) {
       el.textContent += ' · tap to switch to OSM';
       el.style.cursor = 'pointer';
       el.onclick = () => {
         const qs2 = new URLSearchParams(location.search);
         qs2.set('src', 'osm');
-        location.search = qs2.toString();
+        location.replace('?r=' + Date.now() + '&' + qs2.toString());
       };
     } else if (polySource === 'osm' && state.__altTrace) {
       el.textContent += ' · tap to switch to your trace';
@@ -3732,13 +3781,12 @@
       el.onclick = () => {
         const qs2 = new URLSearchParams(location.search);
         qs2.set('src', 'traced');
-        location.search = qs2.toString();
+        location.replace('?r=' + Date.now() + '&' + qs2.toString());
       };
     } else {
       el.style.cursor = '';
       el.onclick = null;
     }
-    void hasTrace; void hasOsm;   // (labels above carry the actual state)
   }
 
   function wireLocationTools() {
@@ -3753,8 +3801,13 @@
         back.style.display = '';
         back.addEventListener('click', () => {
           try { window.close(); } catch (e) {}
+          // v1.3.1 (no tab pile-up): greenmap only ever replaces itself in
+          // this tab (loadGreen reloads + Check-location launches are all
+          // same-page), so ONE step back = the app. history.length counts
+          // the whole tab's past, not this page's — old logic backed out
+          // through every prior green and made Back feel broken.
           if (hasHistory && window.history.length > 1) window.history.back();
-          else location.href = './index.html';
+          else location.replace('./index.html');
         });
       }
     }
