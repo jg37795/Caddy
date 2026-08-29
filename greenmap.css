@@ -11,11 +11,34 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--gm-bg);
-  color: var(--gm-text);
+  /* v1.2.3: dark-mode parity — follow the app's body.dark class. Default
+     dark (the tool is a satellite-style data view; matches the app default). */
+  background: var(--gm-bg, #0e1411);
+  color: var(--gm-text, #e8efe9);
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter,
     'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   overflow: hidden;
+}
+
+/* Light-mode support (body without .dark): app light tokens */
+body:not(.dark) {
+  --gm-bg: #f5f7f4;
+  --gm-panel: rgba(255, 255, 255, 0.86);
+  --gm-text: #132018;
+  --gm-dim: #66736b;
+}
+body.dark {
+  --gm-bg: #0e1411;
+  --gm-panel: rgba(16, 22, 19, 0.9);
+  --gm-text: #e8efe9;
+  --gm-dim: #9db3a6;
+}
+
+/* Toolbar/legend use APP glass tokens, which flip with body.dark (from
+   app.css). Canvas stage stays dark in both themes (the render is drawn
+   for a dark stage), but page bg + chrome follow the theme. */
+body:not(.dark) #gm-stage {
+  background: #0e1411;   /* canvas draw colour assumption stays dark */
 }
 
 #gm-stage {
@@ -51,10 +74,11 @@ html, body {
   right: 10px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px 7px;          /* v1.2.3: row-gap + column-gap — wrapping rows no longer touch */
   flex-wrap: wrap;
   border-radius: 22px;
-  padding: 8px 12px;
+  padding: 10px 14px;
+  row-gap: 8px;
 }
 
 #gm-title { font-weight: 800; letter-spacing: -0.01em; margin-right: 2px; }

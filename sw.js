@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.2.2'; // + APP CHROME for the whole green tool: glass pill toolbar/legend/buttons on app tokens (matches the Play tab), animated 'Reading the green…' loading card with live status (fetch -> shape -> render), de-protoyped file headers
+const CACHE_VERSION = 'v1.2.3'; // FIXES from James's field test: dark-mode parity (greenmap reads the app's caddy:prefs theme, body.dark set pre-paint, viewport-fit=cover kills the white status-bar bar); TRACED OUTLINE NOW ALWAYS BEATS OSM (his Westwood trace was ignored because Overpass matched a polygon near his launch point); 2D arrows rebuilt bold + big heads + sparser; toolbar row gaps/padding
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

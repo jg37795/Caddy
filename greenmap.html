@@ -7,13 +7,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>3D Green — Caddy</title>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="greenmap.css">
 <link rel="stylesheet" href="leaflet.css">
 </head>
 <body>
+<script>
+/* Theme parity with the app (v1.2.3): greenmap.html is its own page, so
+   nobody was setting body.dark here and the tool always rendered LIGHT
+   chrome. Read the same caddy:prefs key the app publishes; 'auto' follows
+   the OS. Runs before first paint — no flash. */
+(function () {
+  try {
+    var prefs = JSON.parse(localStorage.getItem('caddy:prefs') || '{}');
+    var t = prefs.theme || 'dark';
+    var dark = t === 'auto'
+      ? !(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)
+      : t === 'dark';
+    document.body.className = dark ? 'dark' : '';
+  } catch (e) { document.body.className = 'dark'; }
+})();
+</script>
 
 <div id="gm-stage">
   <canvas id="gm-canvas"></canvas>

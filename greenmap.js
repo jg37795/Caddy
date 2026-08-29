@@ -1263,12 +1263,15 @@
     // rim was a grid staircase — sawtooth jaggies at glancing orbit angles.
     // Feeding the same smooth polygon the OSM path uses lets the v1.0.87 rim
     // subdivision run here too: one boundary pipeline for both paths.
-    if (!polyLL) {
-      // v1.2.1: TRACED outline first — if James outlined this green on the
-      // Check-location satellite map, use his real geometry instead of the
-      // ellipse approximation. Keyed by the outline centroid; matches when
-      // the launch point sits within ~100 m of the traced centroid.
-      let traced = null;
+    // v-fix(trace-priority) v1.2.3: a TRACED outline ALWAYS beats OSM.
+    // James traced Westwood's green, but his launch point was ~11 m off the
+    // green centre and Overpass still matched a golf polygon near it —
+    // badge said "✓ real green outline (OSM)" and his trace was ignored
+    // ("when I try load my own green it doesn't load anything"). The trace
+    // is ground truth (he drew THIS green on the satellite image); OSM is
+    // the fallback when no trace exists.
+    let mask = null;
+    const tracedHit = (() => {
       try {
         const store = JSON.parse(
           localStorage.getItem('caddy:greenOutline:v1') || '{}');
@@ -1279,28 +1282,20 @@
           if (Math.hypot(
                 (o.lat - state.lat) * 111320,
                 (o.lng - state.lng) * 111320 * Math.cos(
-                  state.lat * Math.PI / 180)) < 100) { traced = o; break; }
+                  state.lat * Math.PI / 180)) < 100) return o;
         }
-      } catch (e) { traced = null; }
-      if (traced) {
-        const mLat = 111320;
-        const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);
-        state.polyLocal = traced.vertices.map(([la, ln]) => [
-          (ln - state.lng) * mLng, (la - state.lat) * mLat ]);
-        state.polySource = 'traced';
-      } else {
-        const rM = SPAN_M * 0.36;
-        const poly = [];
-        for (let a = 0; a < 48; a++) {
-          const th = a / 48 * Math.PI * 2;
-          poly.push([Math.cos(th) * rM, Math.sin(th) * rM]);
-        }
-        state.polyLocal = poly;
-        state.polySource = 'ellipse';
-      }
-    }
-    let mask = null;
-    if (polyLL) {
+      } catch (e) { /* no store */ }
+      return null;
+    })();
+    if (tracedHit) {
+      const mLat = 111320;
+      const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);
+      state.polyLocal = tracedHit.vertices.map(([la, ln]) => [
+        (ln - state.lng) * mLng, (la - state.lat) * mLat ]);
+      state.polySource = 'traced';
+      mask = GreenMapCore.polyMask(state.polyLocal,
+        elev.W, elev.H, elev.cellSizeM);
+    } else if (polyLL) {
       const polyLocal = polyLL.map(([lon, la]) => [
         (lon - state.lng) * 111320 * Math.cos(state.lat * Math.PI / 180),
         (la - state.lat) * 111320
@@ -1309,6 +1304,14 @@
       state.polySource = 'osm';
       mask = GreenMapCore.polyMask(polyLocal, elev.W, elev.H, elev.cellSizeM);
     } else {
+      const rM = SPAN_M * 0.36;
+      const poly = [];
+      for (let a = 0; a < 48; a++) {
+        const th = a / 48 * Math.PI * 2;
+        poly.push([Math.cos(th) * rM, Math.sin(th) * rM]);
+      }
+      state.polyLocal = poly;
+      state.polySource = 'ellipse';
       mask = GreenMapCore.polyMask(state.polyLocal,
         elev.W, elev.H, elev.cellSizeM);
     }
@@ -1646,7 +1649,7 @@
 
     // --- flow arrows ---
     if (state.layer !== 'shading') {
-      const step = 3;                       // subsample every 3rd cell
+      const step = 4;   // v1.2.3: sparser to pay for bolder strokes (readable)
       for (let y = 1; y < g.H - 1; y += step) {
         for (let x = 1; x < g.W - 1; x += step) {
           const i = y * g.W + x;
@@ -1705,27 +1708,32 @@
     const [x1, y1] = toScreen(mx - dxm * lenM / 2, my - dym * lenM / 2);
     const [x2, y2] = toScreen(mx + dxm * lenM / 2, my + dym * lenM / 2);
     const ang = Math.atan2(y2 - y1, x2 - x1);
-    const hs = Math.max(2.6, state.view.scale * 0.055);
+    const dpr = window.devicePixelRatio || 1;
+    // v1.2.3 (readable arrows): James — "the arrows are so thin it's hard
+    // to tell which way they're pointing". Bolder shaft + BIGGER head with
+    // a steeper sweep; density reduced (step 3→4 below) so bolder arrows
+    // don't turn into a thicket.
+    const hs = Math.max(4.2, state.view.scale * 0.085);
     ctx.lineCap = 'round';
     // shaft: dark halo underneath, light stroke on top — legible on any fill
     ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-    ctx.strokeStyle = 'rgba(12,18,15,0.85)';
-    ctx.lineWidth = Math.max(3.0, state.view.scale * 0.05);
+    ctx.strokeStyle = 'rgba(12,18,15,0.9)';
+    ctx.lineWidth = Math.max(4.0, state.view.scale * 0.065);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(246,251,247,0.95)';
-    ctx.lineWidth = Math.max(1.4, state.view.scale * 0.022);
+    ctx.strokeStyle = 'rgba(246,251,247,0.98)';
+    ctx.lineWidth = Math.max(2.0, state.view.scale * 0.032);
     ctx.stroke();
     // head: dark halo triangle slightly larger, then light on top
     const drawHead = (size, color) => {
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.moveTo(x2, y2);
-      ctx.lineTo(x2 - size * Math.cos(ang - 0.42), y2 - size * Math.sin(ang - 0.42));
-      ctx.lineTo(x2 - size * Math.cos(ang + 0.42), y2 - size * Math.sin(ang + 0.42));
+      ctx.lineTo(x2 - size * Math.cos(ang - 0.55), y2 - size * Math.sin(ang - 0.55));
+      ctx.lineTo(x2 - size * Math.cos(ang + 0.55), y2 - size * Math.sin(ang + 0.55));
       ctx.closePath(); ctx.fill();
     };
-    drawHead(hs * 1.45, 'rgba(12,18,15,0.85)');
-    drawHead(hs, 'rgba(246,251,247,0.95)');
+    drawHead(hs * 1.45, 'rgba(12,18,15,0.9)');
+    drawHead(hs, 'rgba(246,251,247,0.98)');
   }
 
   function drawPin() {
