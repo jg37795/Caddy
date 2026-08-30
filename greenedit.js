@@ -101,12 +101,21 @@
 
     // Live crosshair readout.
     const readout = sheet.querySelector('.gel-hint');
+    // v-fix(trace-pin) v1.5.2 (Grok audit #10): `tracing` declared BEFORE
+    // the click handler below so the trace-mode guard can see it.
+    let tracing = false;
     const setReadout = (ll) => {
       readout.textContent =
         `Sample point: ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
     };
     setReadout(pin.getLatLng());
-    map.on('click', (e) => { pin.setLatLng(e.latlng); setReadout(e.latlng); });
+    // v-fix(trace-pin) v1.5.2 (Grok audit #10): in trace mode this handler
+    // must not move the pin / overwrite the trace instruction. `tracing`
+    // is declared below; the guard reads it lazily via the shared scope.
+    map.on('click', (e) => {
+      if (typeof tracing !== 'undefined' && tracing) return;
+      pin.setLatLng(e.latlng); setReadout(e.latlng);
+    });
     pin.on('drag', (e) => setReadout(e.target.getLatLng()));
 
     /* ---- Outline tracing (unmapped greens — e.g. Westwood) --------------
@@ -114,7 +123,6 @@
        is saved on this device and the green tool uses it instead of the
        ellipse approximation. */
     const OUTLINE_KEY = 'caddy:greenOutline:v1';
-    let tracing = false;
     let tracePts = [];
     let traceLine = null;
     let traceFill = null;

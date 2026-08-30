@@ -1107,6 +1107,13 @@
 
   const qs = new URLSearchParams(
     (typeof location !== 'undefined' && location.search) || '');
+  // v1.5.2 (stale-cache tell): the running version lives in the top bar.
+  // If it doesn't match the latest release after an update, the service
+  // worker served a stale shell — kill + reopen the app.
+  {
+    const verEl = document.getElementById('gm-ver');
+    if (verEl) verEl.textContent = 'v' + (window.CADDY_VERSION || '?');
+  }
   // v1.1.7: remember the last-launched green so a bare greenmap.html (Back
   // re-entry, PWA relaunch) still shows YOUR green, not a test preset.
   const LAST_GREEN_KEY = 'caddy:greenmap:lastGreen';
@@ -1204,9 +1211,25 @@
       // the loc badge uses it to offer "switch to OSM" when a trace wins.
       const anyGreen = !!(data.elements && data.elements.length);
       window.__osmGreenNearby = anyGreen;
-      const el = data.elements && data.elements[0];
-      if (!el || !el.geometry) return null;
-      return el.geometry.map(g => [g.lon, g.lat]);
+      // v-fix(nearest-green) v1.5.2: elements[0] is whatever order Overpass
+      // feels like — at Sugar Creek the pin sits between two greens (64 m
+      // and 132 m) and James got the WRONG one when the order flipped.
+      // Pick the green whose centroid is nearest the launch point.
+      let best = null, bestD = Infinity;
+      for (const el of (data.elements || [])) {
+        if (!el || !el.geometry || !el.geometry.length) continue;
+        let cLat = 0, cLng = 0;
+        for (const p of el.geometry) { cLat += p.lat; cLng += p.lon; }
+        cLat /= el.geometry.length; cLng /= el.geometry.length;
+        const d = Math.hypot(
+          (cLat - state.lat) * 111320,
+          (cLng - state.lng) * 111320 * Math.cos(state.lat * Math.PI / 180));
+        if (d < bestD) { bestD = d; best = el; }
+      }
+      if (bestD <= 120) window.__osmGreenDistM = Math.round(bestD);
+      else window.__osmGreenDistM = null;
+      if (!best || !best.geometry) return null;
+      return best.geometry.map(g => [g.lon, g.lat]);
     } catch (e) {
       console.warn('[greenmap] no OSM green polygon:', e.message);
       window.__osmGreenNearby = false;
@@ -1966,8 +1989,10 @@
       aim.textContent = 'No makeable line from here';
       pace.textContent = 'LAY UP';
       pace.classList.add('gm-pc-hard');
-      mk.textContent = '';
-      mk.classList.remove('gm-pc-no');
+      // v-fix(unmakeable-chip) v1.5.2 (audit #15): the slot was left blank
+      // while the .gm-pc-no warning style sat unused.
+      mk.textContent = '✗ Not makeable';
+      mk.classList.add('gm-pc-no');
     } else {
       const lb = Math.abs(r.breakIn) >= 0.5
         ? Math.round(Math.abs(r.breakIn)) : Math.abs(r.breakIn).toFixed(1);
@@ -2355,52 +2380,6 @@
       out[i] = [ax + d1x * t, ay + d1y * t];
     }
     return out;
-  }
-
-  // v-fix(wall-envelope): the skirt wall top must never sit BELOW the drawn
-  // surface edge. The rim trim keeps sub-quads up to one sub-quad inside the
-  // ring, and on terrain that rises inward the drawn edge is HIGHER than the
-  // surface sampled AT the ring — the old ring-sampled wall top left a strip
-  // between edge and wall top covered by neither (black, gap widens with
-  // exaggeration: James 21:38/21:40/21:44 shots). Envelope: per wall-top
-  // vertex, take the MAX finite surface height sampled along the bare→ring
-  // segment — by construction ≥ every drawn rim quad corner in the strip,
-  // at ANY exaggeration. Returns { quads, topZ } — quads in the exact shape
-  // buildSkirtQuads produced, topZ aligned to the grown-ring vertices (the
-  // rim lip reuses it so the lip hugs the true wall top).
-  function wallQuadsWithEnvelope(bpts) {
-    const sPts = growPolyLocal(bpts, RING_M);
-    const M = state.mesh;
-    const quads = [];
-    const topZ = new Array(sPts.length);
-    for (let i = 0; i < sPts.length; i++) {
-      const p2 = sPts[i];
-      const p1 = bpts[i % bpts.length];   // bare vertex (same ring order)
-      let zTop = -Infinity;
-      // 7 samples (t step 1/6): surfZ3 along an arbitrary line is quadratic
-      // (bilinear), so the continuous max can sit between samples — 7 points
-      // bounds the underestimate to <1 mm of z at any real gradient.
-      // v-fix(precise): was 4 samples.
-      for (const t of [0, 1 / 6, 1 / 3, 1 / 2, 2 / 3, 5 / 6, 1]) {
-        const mx = p1[0] + (p2[0] - p1[0]) * t;
-        const my = p1[1] + (p2[1] - p1[1]) * t;
-        const z = surfZ3(mx, my);
-        if (Number.isFinite(z) && z > zTop) zTop = z;
-      }
-      if (!Number.isFinite(zTop))
-        zTop = ((sampleElevRaw(p2[0], p2[1]) - M.zmin) * state.v3.exag) || 0;
-      topZ[i] = zTop;
-    }
-    for (let i = 0; i < sPts.length; i++) {
-      const j = (i + 1) % sPts.length;
-      const a = sPts[i], b = sPts[j];
-      if (!Number.isFinite(topZ[i]) || !Number.isFinite(topZ[j])) continue;
-      quads.push({
-        v: [[a[0], a[1], topZ[i]], [b[0], b[1], topZ[j]],
-            [b[0], b[1], 0], [a[0], a[1], 0]]
-      });
-    }
-    return { quads, topZ, sPts };
   }
 
   // v-fix(wall-profile): densify the boundary ring — every polygon edge is
@@ -2902,8 +2881,10 @@
       // spinner, never a broken or silent UI.
       // v-fix: keep re-rendering so the spinner actually animates (it was
       // painted once and frozen — looked like a hang).
-      setTimeout(() => { if (state.viewMode === 'hole' &&
-        (!state.grid || !state.mesh || state.active !== 'hole')) render(); }, 90);
+      // v-fix(spin-loop) v1.5.2 (Grok audit #3): the setTimeout + rAF pair
+      // compounded 2^n pending callbacks per frame (~1000+ queued within
+      // ~10 frames while the corridor fetched). The rAF loop alone
+      // animates the spinner — the setTimeout is gone.
       const failed = state.datasets.hole && state.datasets.hole.failed;
       const msg = failed ? state.datasets.hole.msg : 'Preparing hole flyover…';
       const cw = canvas.width, ch = canvas.height;
@@ -3734,7 +3715,11 @@
        Math.abs(eventPos(ev)[1] - lastPt[1]) > 4);
     dragging = false; lastPt = null;
     cancelLongPress();
-    if (!wasDrag && activePtrs === 0) handleTap(eventPos(ev), ev.clientX, ev.clientY);
+    // v-fix(pinch-tap) v1.5.2 (audit #8): a pinch's second finger-up has
+    // wasDrag=false; `pinched` gates the spurious tap that dropped balls
+    // or popped tooltips after every pinch.
+    if (!wasDrag && !pinched && activePtrs === 0) handleTap(eventPos(ev), ev.clientX, ev.clientY);
+    if (ptrs.size === 0) pinched = false;
   });
   canvas.addEventListener('pointercancel', (ev) => {
     activePtrs = Math.max(0, activePtrs - 1);
@@ -3746,6 +3731,7 @@
      iOS Safari: setPointerCapture routes moves away from touch handlers).
      Tracks both active pointers by id; zoom = ratio against gesture start. */
   const ptrs = new Map();          // pointerId -> [x, y]
+  let pinched = false;             // v-fix(pinch-tap) v1.5.2 (audit #8)
   let pinchStartDist = 0;
   let pinchStartDist3D = 0;
   let pinchStartScale2D = 0;       // v-fix: 2D anchor — no compounding
@@ -3755,6 +3741,7 @@
     if (ptrs.size === 2) {
       // pinch begins: cancel pan/long-press, capture references
       dragging = false; lastPt = null; clearTimeout(longPressTimer);
+      pinched = true;   // v-fix(pinch-tap) v1.5.2 (audit #8): suppress the tap
       const pts = [...ptrs.values()];
       pinchStartDist = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
       pinchStartDist3D =
@@ -4041,6 +4028,15 @@
     window.__flyoverCancel = flyoverCancel;
     function setViewModeInternal(v) {
       state.viewMode = v === 'hole' ? 'hole' : (v === '3d' ? '3d' : '2d');
+      // v-fix(arm-sweep) v1.5.2 (Grok audit #9): an armed "Drop ball"
+      // survives view switches, so a tap minutes later (status long gone)
+      // silently dropped the ball. Disarm on every view change; the button
+      // label is re-synced so it never lies.
+      if (armBallNext) {
+        armBallNext = false;
+        setStatus('');
+        if (window.__syncBallBtn) window.__syncBallBtn();
+      }
       document.querySelectorAll('.gm-view-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.view === state.viewMode));
       document.getElementById('gm-exag-wrap').style.display =
@@ -4101,13 +4097,16 @@
     // jerky, "not smooth" drag. Now: the slider updates a live preview
     // height offset (cheap render-only) and the FULL rebuild is debounced
     // 140 ms after the last tick.
+    // v-fix(exag-preview) v1.5.2 (Grok audit #4): the "cheap preview" was
+    // never implemented — every input tick ran a FULL buildScene() and then
+    // the debounce ran a second one. Preview = render-only now; the mesh
+    // rebuild happens once, 140 ms after the drag settles.
     let exagDebounce = null;
     const exagEl = document.getElementById('gm-exag');
     exagEl.addEventListener('input', () => {
       state.v3.exag = parseFloat(exagEl.value);
       document.getElementById('gm-exag-val').textContent =
         state.v3.exag + '×';
-      buildScene();
       if (state.viewMode === '3d' || state.viewMode === 'hole') render();
       clearTimeout(exagDebounce);
       exagDebounce = setTimeout(() => {
@@ -4197,7 +4196,11 @@
         : polySource === 'ellipse'
           ? '⚠ approx outline — trace it via Check location'
           : '…';
-    el.textContent = `${la}, ${ln} · ${src}`;
+    el.textContent = `${la}, ${ln} · ${src}` +
+      // v-fix(dist-badge) v1.5.2 (audit #12): surface the centroid distance
+      // so "✓ real green outline (OSM)" proves HOW near the mapped green is.
+      (polySource === 'osm' && window.__osmGreenDistM != null
+        ? ` · ${window.__osmGreenDistM} m to green centre` : '');
     // v1.2.5 (source choice): when BOTH a trace and an OSM polygon match,
     // the badge invites switching — one tap cycles the outline source with
     // a full reload (no fake partial re-render). The preferred order is

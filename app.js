@@ -1164,7 +1164,11 @@
         if (state.sheet) state.sheet.measure();
       }, 400);
       if (state.prefs.gpsEnabled && !state.gpsRunning) startGPS(true);
-    } else if (tab !== 'round') {
+    } else if (tab !== 'round' && roundStatus() === 'idle') {
+      // v-fix(gps-round) v1.5.2 (Grok audit #7): only stop GPS when no
+      // round is live — visibilitychange keeps GPS during a round, the
+      // tab-switch path must agree, or a pending shot loses its fix when
+      // the user glances at Bag/Stats mid-hole.
       stopGPS();
     } else if (state.prefs.gpsEnabled && !state.gpsRunning) {
       // Keep GPS active in Round so nearby course recognition and
@@ -1433,15 +1437,11 @@
     updateLine();
   }
 
-  let ignoreNextClick = false;
-
   function handleMapTap(latlng) {
     initMap();
     closeWindPop();
-    if (ignoreNextClick) {
-      ignoreNextClick = false;
-      return;
-    }
+    // v-fix(dead-ignore) v1.5.2 (audit #16): ignoreNextClick removed — it
+    // was never set true anywhere, a dead branch masking a no-op.
     if (state.placeMode && state.loc) {
       if (state.placeMode === 'front') {
         state.frontPt = latlng;
@@ -1942,7 +1942,31 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       save(fullKey, { ts: now, data });
-      return { data, offline: false, ts: now };
+      // v-fix(api-cache-evict) v1.5.2 (audit #5): these keys had no
+      // eviction — every ~1 km-weather / ~110 m-elev grid point saved a
+      // fresh localStorage entry forever. On quota error, sweep the oldest
+      // caddy:api:* entries (this write included) and retry once.
+      try {
+        return { data, offline: false, ts: now };
+      } catch (quotaErr) {
+        try {
+          const entries = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.indexOf('caddy:api:') === 0) {
+              let ts = 0;
+              try { ts = (JSON.parse(localStorage.getItem(k)) || {}).ts || 0; }
+              catch (e2) { ts = 0; }
+              entries.push([k, ts]);
+            }
+          }
+          entries.sort((a, b) => a[1] - b[1]);
+          for (const [k] of entries.slice(0, Math.ceil(entries.length / 3)))
+            localStorage.removeItem(k);
+          save(fullKey, { ts: now, data });
+          return { data, offline: false, ts: now };
+        } catch (e3) { throw quotaErr; }
+      }
     } catch (e) {
       if (cached) return { data: cached.data, offline: true, ts: cached.ts };
       throw e;
@@ -5747,7 +5771,7 @@ out geom;`;
     const r = course && course.importReport;
     if (!r) return 'No mapped scorecard was found; add pars and yardages manually.';
 
-    const parts = [`${r.holesMapped}/18 holes mapped`];
+    const parts = [`${r.holesMapped}/${(course.holes || []).length || 18} holes mapped`];   // v-fix(holes-18) v1.5.2 (audit #6)
 
     if (r.parsImported || r.parsInferred) {
       const bits = [];
@@ -5868,11 +5892,10 @@ out geom;`;
         ? `Selected ${course.name}. ${describeImport(course)}. Review flagged holes before starting.`
         : `Selected ${course.name}. No mapped scorecard was found; add pars and yardages manually.`;
 
-      flashMappingSuccess(
-        r && r.holesMapped
-          ? `${(course.holes || []).length} holes mapped ✓`
-          : 'No OSM scorecard found — manual entry'
-      );
+      // v-fix(flash-arg) v1.5.2 (audit #17): flashMappingSuccess() takes no
+      // parameters (v1.0.73 removed the surface that displayed one); the
+      // message already surfaces via nearbyCourseStatus above.
+      flashMappingSuccess();
     } catch (error) {
       console.warn('Auto scorecard lookup failed:', error);
 
@@ -8173,11 +8196,17 @@ out geom;`;
     }
     const aboutEl = $('aboutVersion');
     if (aboutEl) {
+      // v-fix(about-merge) v1.5.2 (audit #19): one version line, not two
+      // competing schemes. APP_VERSION = build/features; window.CADDY_VERSION
+      // = the release train (matches sw.js CACHE_VERSION).
       aboutEl.textContent =
-        'Caddy ' +
-        APP_VERSION +
+        'Caddy ' + APP_VERSION +
         ' · every calculation runs on-device; nothing leaves your phone but weather & elevation.';
     }
+    const relEl = $('aboutRelease');
+    if (relEl)
+      relEl.textContent = 'Release ' + (window.CADDY_VERSION || '?') +
+        ' (build ' + APP_VERSION + ')';
 
     // Pre-warm the trajectory model. referenceLaunchFamily() integrates the
     // entire baseline launch table on first use (hundreds of RK4 solves),
@@ -11661,7 +11690,7 @@ out geom;`;
     const roundLen = getCourseHoleCount();
 
     const rows = [
-      ['Holes entered', `${s.played} / 18`],
+      ['Holes entered', `${s.played} / ${roundLen}`],   // v-fix(holes-18) v1.5.2 (audit #6)
       ['Avg score / hole', avgScore === null ? '—' : fmt(avgScore, 2)],
       ['Score SD / hole', s.scoreSd === null ? '—' : fmt(s.scoreSd, 2)],
       [`Projected ${roundLen}`, s.projected18 === null ? '—'

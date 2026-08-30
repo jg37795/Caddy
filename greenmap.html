@@ -9,6 +9,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>3D Green — Caddy</title>
+<script>window.CADDY_VERSION = 'v1.5.2';</script>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="greenmap.css">
 <link rel="stylesheet" href="leaflet.css">
@@ -22,6 +23,7 @@
   <span id="gm-title">⛳ 3D Green</span>
   <span id="gm-loc" title="The green this view loaded"></span>
   <span id="gm-status">Loading…</span>
+  <span id="gm-ver" title="App version — if this is old after an update, the service worker is stale: kill the app and reopen" style="color:var(--muted,#9db3a6); font-size:10px; font-weight:700; opacity:0.85; flex:none;"></span>
 </div>
 
 <!-- v1.4.3: legend lives INSIDE the topbar block as a second row — it

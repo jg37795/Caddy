@@ -275,12 +275,26 @@
       let idx = lruIndex().filter((k) => k.k !== key);
       idx.push({ k: key, s: entry.length, t: Date.now() });
       const sizes = () => idx.reduce((a, x) => a + x.s, 0);
-      while (sizes() + entry.length > CACHE_CAP_BYTES && idx.length) {
+      const victims = [];
+      // v-fix(evict-order) v1.5.2 (audit #18): collect victims first; only
+      // delete them AFTER the new entry is stored — and if that write still
+      // fails, restore the victims so a full-cache state never nets a loss.
+      while (sizes() + entry.length > CACHE_CAP_BYTES && idx.length > 1) {
         const victim = idx.shift();
-        try { localStorage.removeItem(LS_PREFIX + victim.k); } catch { }
+        victims.push(victim);
       }
-      localStorage.setItem(LS_PREFIX + key, entry);
-      lruSaveIndex(idx);
+      try {
+        localStorage.setItem(LS_PREFIX + key, entry);
+        for (const v of victims) {
+          try { localStorage.removeItem(LS_PREFIX + v.k); } catch { }
+        }
+        lruSaveIndex(idx);
+      } catch (quotaErr) {
+        for (const v of victims) {
+          try { localStorage.setItem(LS_PREFIX + v.k, v.raw || ''); } catch { }
+        }
+        throw quotaErr;
+      }
     } catch { /* quota — cache simply stays memory-only */ }
   }
 

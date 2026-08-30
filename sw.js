@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.5.1'; // CHROME POLISH: (1) topstack gains padding-top var(--safe-top) — the legend card sat under the status bar in the PWA (22:14 screenshot); (2) dock redesigned as an instrument bar: column layout, 26px radius, inset segmented groups (dark wells, 11px inner radius, active green with shadow), quieter command group for actions; (3) putt-read card upgraded — 34px numerals, PLAY label, tiered hierarchy, larger glass
+const CACHE_VERSION = 'v1.5.2'; // GROK AUDIT FIXES: (1) HIGH sw lockstep with CADDY_VERSION; (2) handleNavigation caches each page under its OWN url (greenmap.html no longer overwrites the app shell offline); (11) mapload.css in APP_SHELL. Plus my Sugar Creek fix: nearest-green selection (elements[0] was whatever order Overpass returned — two greens 64m/132m from the pin); version badge gm-ver + About Release line; exag slider render-only preview (full rebuild debounced); corridor spinner single rAF loop; GPS kept during live round on tab switch; pinch no longer fires spurious tap; armBallNext cleared on view switch; trace mode no longer moves pin; unmakeable putt chip shows styled warning; holes-count labels use course hole count; About versions merged; localStorage api-cache eviction on quota; caddy-elev cachePutLS write-before-evict
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
@@ -29,6 +29,7 @@ const APP_SHELL = [
   './greenmap.js',
   './leaflet.css',
   './leaflet.js',
+  './mapload.css',   // v-fix(shell) v1.5.2 (audit #11): offline styling for the mapping-loader card
 ];
 
 const isTile = (url) =>
@@ -131,14 +132,26 @@ async function handleNavigation(request) {
     // serves stale app.js/app.css against fresh HTML after an update.
     const response = await fetch(request, { cache: 'reload' });
 
+    // v-fix(nav-cache) v1.5.2 (Grok audit #2): cache the response under its
+    // OWN url — the old code always put it under ./index.html, so loading
+    // greenmap.html while online overwrote the cached app shell and an
+    // offline relaunch of / served the 3D Green tool as the app.
     if (cacheable(response)) {
-      await cache.put(shellRequest, response.clone());
+      const url = new URL(request.url);
+      if (url.pathname.endsWith('/') || url.pathname.endsWith('/index.html')) {
+        await cache.put(shellRequest, response.clone());
+      } else {
+        await cache.put(new Request(request.url), response.clone());
+      }
     }
 
     return response;
   } catch {
+    const url = new URL(request.url);
     const cached =
-      (await cache.match(shellRequest)) ||
+      (url.pathname.endsWith('/') || url.pathname.endsWith('/index.html')
+        ? await cache.match(shellRequest)
+        : await cache.match(request)) ||
       (await cache.match('./')) ||
       (await caches.match(request));
 
