@@ -16,7 +16,7 @@
 <body>
 <!-- v1.4.3: topbar + legend in one flex column wrapper — the legend is a
      layout child, not an overlay, so it can never overlap the bar. -->
-<div id="gm-topstack" style="position:fixed; top:0; left:0; right:0; z-index:30; display:flex; flex-direction:column; pointer-events:none;">
+<div id="gm-topstack" style="position:fixed; top:0; left:0; right:0; z-index:30; display:flex; flex-direction:column; pointer-events:none; padding-top: var(--safe-top, 0px);">
 <div id="gm-topbar" class="gm-chrome" style="pointer-events:auto;">
   <button class="gm-btn" id="gm-back" title="Back to the Caddy app" style="display:none">‹ Back</button>
   <span id="gm-title">⛳ 3D Green</span>
@@ -85,7 +85,7 @@
     </div>
   </div>
   <div class="gm-dock-row">
-    <div class="gm-dock-group">
+    <div class="gm-dock-group" id="gm-action-group">
       <button class="gm-btn" id="gm-ball">Drop ball</button>
       <select id="gm-stimp" class="gm-select" title="Green speed (Stimpmeter)" style="display:none">
         <option value="8">Stimp 8</option>
@@ -104,7 +104,10 @@
      the solver read (break / aim / pace / makeable). Lives outside the
      canvas so it never fights the renderer. -->
 <div id="gm-puttcard" class="gm-chrome" hidden>
-  <div class="gm-pc-break"><span id="gm-pc-break-val">—</span><span id="gm-pc-break-dir"></span></div>
+  <div>
+    <div class="gm-pc-label">Play</div>
+    <div class="gm-pc-break"><span id="gm-pc-break-val">—</span><span id="gm-pc-break-dir"></span></div>
+  </div>
   <div class="gm-pc-row" id="gm-pc-aim">Aim —</div>
   <div class="gm-pc-row"><span class="gm-pc-chip" id="gm-pc-pace">—</span><span id="gm-pc-makeable"></span></div>
 </div>

@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.5.0'; // PREMIUM FEATURES: (1) HOLE FLYOVER — camera flies tee->green over 3.2s with cubic ease-in-out and a gentle mid-flight arc, once per corridor reveal, skippable by touch (snaps to exact final orbit), skipped under prefers-reduced-motion; (2) PUTT-READ CARD — glass card springs in on ball drop: break in inches + direction, aim degrees, FIRM/DIE pace chip, makeable check; reads the already-computed solver result each frame (no extra solver calls), updates live with Stimp, hides in hole view / on ball removal
+const CACHE_VERSION = 'v1.5.1'; // CHROME POLISH: (1) topstack gains padding-top var(--safe-top) — the legend card sat under the status bar in the PWA (22:14 screenshot); (2) dock redesigned as an instrument bar: column layout, 26px radius, inset segmented groups (dark wells, 11px inner radius, active green with shadow), quieter command group for actions; (3) putt-read card upgraded — 34px numerals, PLAY label, tiered hierarchy, larger glass
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
