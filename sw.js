@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.5.2'; // GROK AUDIT FIXES: (1) HIGH sw lockstep with CADDY_VERSION; (2) handleNavigation caches each page under its OWN url (greenmap.html no longer overwrites the app shell offline); (11) mapload.css in APP_SHELL. Plus my Sugar Creek fix: nearest-green selection (elements[0] was whatever order Overpass returned — two greens 64m/132m from the pin); version badge gm-ver + About Release line; exag slider render-only preview (full rebuild debounced); corridor spinner single rAF loop; GPS kept during live round on tab switch; pinch no longer fires spurious tap; armBallNext cleared on view switch; trace mode no longer moves pin; unmakeable putt chip shows styled warning; holes-count labels use course hole count; About versions merged; localStorage api-cache eviction on quota; caddy-elev cachePutLS write-before-evict
+const CACHE_VERSION = 'v1.5.3'; // AUDIT #20 (prep perf): solve() memoized on full input signature (LRU 64) — renderStrategy's duplicate tee-solve deduped; recompute throttled to 1 run/120ms during slider drags + settles once after. Prep tab wind/temp drags no longer run 4 full physics solves per pixel-step
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

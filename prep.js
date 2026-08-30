@@ -661,9 +661,29 @@
   }
 
   // One full physics solve under the CURRENT panel conditions.
+  // v-fix(solve-memo) v1.5.3 (audit #20): renderStrategy calls solve() up to
+  // 4x per recompute — the tee-yardage solve runs TWICE — and each solve is
+  // a full playsLike (6-12 RK4 integrations + attributions). Memoized on the
+  // complete input signature; entries can never go stale because every
+  // input that affects the result is in the key (a changed value just
+  // misses and recomputes). LRU 64.
+  const _solveMemo = new Map();   // key -> result (LRU, oldest evicted)
   function solve(yd) {
     const w = api.weather();
-    return api.playsLike({
+    const key = [
+      Math.round(yd * 2), currentBearing(),
+      Math.round(num(cond.elevFt, 0)), Math.round(num(cond.altFt, 0) / 25),
+      Math.round(num(cond.tempF, 70)), Math.round(num(cond.windMph, 0) * 2),
+      Math.round(norm360(num(cond.windFromDeg, 0)) / 3),
+      cond.surface,
+      Math.round(num(liePenalty(), 0) * 10),
+      Math.round(num(w.rh, 50) / 5), Math.round(num(w.pressureHpa, 0)),
+      Math.round(num(w.shearAlpha, 0.143) * 100),
+      Math.round(num(w.gustMph, 0) * 2), Math.round(num(api.locLat(), 40))
+    ].join('|');
+    const hit = _solveMemo.get(key);
+    if (hit) return hit;
+    const out = api.playsLike({
       horizontalYd: yd,
       bearingDeg: currentBearing(),
       elevDiffFt: cond.elevFt,
@@ -679,6 +699,11 @@
       lieYd: liePenalty(),
       firmness: cond.surface,
     });
+    _solveMemo.set(key, out);
+    if (_solveMemo.size > 64) {
+      _solveMemo.delete(_solveMemo.keys().next().value);
+    }
+    return out;
   }
 
   // Designed curvature of an intentional shape at landing, in yards
@@ -1003,8 +1028,11 @@
     );
 
     // Off-the-tee recommendation under current conditions
+    // v-fix(dedupe-tee-solve) v1.5.3 (audit #20): the tee solve ran here AND
+    // again in the water-danger check below; one call, reused.
+    let teeCalc = null;
     if (h.yards) {
-      const teeCalc = solve(Math.round(h.yards));
+      teeCalc = solve(Math.round(h.yards));
       const teeRec = api.recommendClub(teeCalc.playsLikeYd);
       const eff = effortInfo(teeRec.main);
       const delta = Math.round(teeCalc.playsLikeYd - Math.round(h.yards));
@@ -1077,7 +1105,6 @@
 
     // Carry danger callout: water near the required carry line.
     if (h.yards && cond.windMph >= 1) {
-      const teeCalc = solve(Math.round(h.yards));
       const danger = haz.find(
         (hz) =>
           hz.type === 'water' &&
@@ -1097,7 +1124,21 @@
   /* ======================================================================
      MAIN PIPELINE
      ====================================================================== */
+  // v-fix(recompute-debounce) v1.5.3 (audit #20): wind/temp sliders fire
+  // recompute per pixel-step; each recompute runs up to 4 full playsLike
+  // solves. During a drag we throttle to one pipeline run per 120 ms and
+  // always settle exactly once after the last tick.
+  let _rcThrottle = null, _rcSettle = null;
   function recompute({ pulse = false } = {}) {
+    clearTimeout(_rcSettle);
+    if (_rcThrottle) {
+      _rcSettle = setTimeout(() => { _rcThrottle = null; recompute({ pulse: false }); }, 140);
+      return;
+    }
+    _rcThrottle = setTimeout(() => { _rcThrottle = null; }, 120);
+    recomputeNow({ pulse });
+  }
+  function recomputeNow({ pulse = false } = {}) {
     const yd = currentTargetYd();
     if (!yd) {
       $('prepRecMain').textContent = 'Set a target';
