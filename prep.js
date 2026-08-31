@@ -1304,6 +1304,9 @@
     if (t && Number.isFinite(t.lat) && Number.isFinite(t.lng)) {
       href += `&teelat=${t.lat.toFixed(6)}&teelng=${t.lng.toFixed(6)}`;
     }
+    // v1.11.0: carry the course id so the 3D hole view can show its own
+    // tee switcher chips (course registry lookup inside greenmap.js).
+    if (h.courseId) href += `&course=${encodeURIComponent(h.courseId)}`;
     return `<a class="primary-btn prep-3d-btn" id="prep3dGreenBtn" href="${href}">` +
       '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">' +
       '<path d="M3 17c3-2.6 6-2.6 9 0s6 2.6 9 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +

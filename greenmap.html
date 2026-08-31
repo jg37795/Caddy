@@ -9,7 +9,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>3D Green — Caddy</title>
-<script>window.CADDY_VERSION = 'v1.10.0';</script>
+<script>window.CADDY_VERSION = 'v1.11.0';</script>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="greenmap.css">
 <link rel="stylesheet" href="leaflet.css">
@@ -97,6 +97,10 @@
       <button class="gm-btn" id="gm-editloc" title="Verify / adjust which green is loaded">Check location</button>
       <button class="gm-btn" id="gm-recenter">Fit</button>
     </div>
+    <!-- v1.11.0 tee switcher (hole view only): switch tee sets from the
+         saved course without leaving the 3D view. Populated by
+         greenmap.js when a course is resolvable from the launch URL. -->
+    <div class="gm-dock-group" id="gm-tee-group" role="radiogroup" aria-label="Tees" hidden></div>
   </div>
 </div>
 

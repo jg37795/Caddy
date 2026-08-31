@@ -1685,8 +1685,20 @@
   /* ======================================================================
      2b. WHOLE-HOLE FLYOVER CORRIDOR
      ====================================================================== */
-  const HOLE_SPAN_CAP_M = 300;
-  const HOLE_GRID_N = 96;
+  // v1.11.0 (length adaptation — James: "hole view shows too much or too
+  // little depending on how long the hole is"): the old 300 m cap squeezed
+  // anything over ~330 yd (his 536-yd hole lost the tee half) and gave
+  // short par-3s a huge empty square. Now: the bbox spans the TRUE
+  // tee→green extent up to 560 m (covers 600 yd), and the grid resolution
+  // scales with the span so long holes keep usable detail (~1.4–4.4
+  // m/cell across the range).
+  const HOLE_SPAN_CAP_M = 560;
+  const holeGridNFor = (spanM) => {
+    if (spanM <= 260) return 96;
+    if (spanM <= 400) return 128;
+    return 160;
+  };
+  const HOLE_GRID_N = 96;   // fallback when span unknown pre-fetch
 
   function updateQualityNote() {
     const el = document.getElementById('gm-quality');
@@ -1702,11 +1714,20 @@
   // the Hole view degrades to green-only 3D with an inline message.
   async function loadCorridor() {
     try {
+      // v1.11.0: compute the true extent FIRST so grid resolution scales
+      // with hole length (96 short / 128 mid / 160 long).
       const bb = GreenMapCore.corridorBbox(state.lat, state.lng,
         state.teeLL ? state.teeLL.lat : NaN,
         state.teeLL ? state.teeLL.lng : NaN,
         30, HOLE_SPAN_CAP_M);
-      const eg = await window.CaddyElev.fetchElevGrid(bb, HOLE_GRID_N);
+      {
+        const [w0, s0, e0, n0] = bb;
+        const mLat0 = 110540;
+        const mLng0 = 111320 * Math.cos(((s0 + n0) / 2) * Math.PI / 180);
+        const span0 = Math.max((e0 - w0) * mLng0, (n0 - s0) * mLat0);
+        var HOLE_N = holeGridNFor(span0);
+      }
+      const eg = await window.CaddyElev.fetchElevGrid(bb, HOLE_N);
       if (!eg || !eg.grid) throw new Error('no corridor coverage');
       const [w, s, e, n] = bb;
       const midLat = ((s + n) / 2) * Math.PI / 180;
@@ -1810,6 +1831,14 @@
         }).catch(() => { /* topo colours stay */ });
       }
       // If the user is already waiting in Hole view, land them on it now.
+      // v-fix(hole-race) v1.11.0 (James: "if I click hole view while the
+      // green is being loaded it breaks the hole view"): tapping Hole
+      // mid-load used to flip state.active to 'hole' via the tap path
+      // while the corridor mesh wasn't attached yet, and the completion
+      // path here re-ran fit/activate against a half-mirrored state —
+      // the squished/truncated corridor in his screenshot. Now THIS
+      // completion path is the ONLY place that activates + fits: the tap
+      // path only arms `holePending` and shows the loading state.
       if (state.viewMode === 'hole' && state.active !== 'hole') {
         activateDataset('hole');
         fitHoleView();
@@ -1896,6 +1925,35 @@
         vcol[o] = p[0]; vcol[o + 1] = p[1]; vcol[o + 2] = p[2];
       }
     }
+    // v1.11.0 (relief readability — James: the hole render reads flat):
+    // modulate the baked vertex colours with a LiDAR HILLSHADE so ridges
+    // and hollows read even under satellite photo (photo share 0.9 nearly
+    // hid the terrain). Same NW sun as the topo ramp; gentle 0.75–1.18
+    // multiplicative band. Pure arithmetic on the existing grid.
+    try {
+      const field = ds.field;
+      if (field && field.gx && field.gy) {
+        const W = gr.W, H = gr.H;
+        const L = GreenMapCore.LIGHT_DIR;
+        for (let q = 0; q < M.count; q++) {
+          const ix = q % (W - 1), iy = (q / (W - 1)) | 0;
+          if (!field.valid[iy * W + ix]) continue;   // void cells keep flat light
+          const gx = field.gx[iy * W + ix], gy = -field.gy[iy * W + ix];
+          if (!Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+          // surface normal from gradient: n = (-gx, -gy, 1) normalised
+          const len = Math.hypot(gx, gy, 1);
+          const nx = -gx / len, ny = -gy / len, nz = 1 / len;
+          const lam = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+          const k = 0.75 + 0.43 * lam;      // 0.75 (shade) .. 1.18 (lit)
+          for (let c = 0; c < 4; c++) {
+            const o = q * 12 + c * 3;
+            vcol[o] = Math.min(255, vcol[o] * k);
+            vcol[o + 1] = Math.min(255, vcol[o + 1] * k);
+            vcol[o + 2] = Math.min(255, vcol[o + 2] * k);
+          }
+        }
+      }
+    } catch (e) { /* shade is cosmetic — never break the bake */ }
     M.qPhoto = qPhoto;
     M.vcol = vcol;
     console.log('[greenmap] satellite texture baked:',
@@ -4327,6 +4385,12 @@
           // loadCorridor completes (it re-renders into hole view).
           // v-fix: was unconditional below, overwriting the ready-status set
           // by the success branch above every time Hole was tapped.
+          // v-fix(hole-race) v1.11.0: DO NOT activateDataset here. The
+          // corridor mesh isn't attached yet; activating mirrors half a
+          // dataset (green grid + hole arrows) and the completion path
+          // then fits a half-mirrored state = the broken view. Stay on
+          // the current dataset; the spinner shows, and loadCorridor's
+          // completion path is the single owner of activate + fit.
           setStatus('Preparing hole flyover…');
         }
         render();
@@ -4429,6 +4493,71 @@
       }
     });
     window.__syncBallBtn = syncBallBtn;   // drop-tap handler calls this
+
+    // v1.11.0 (tee switcher in hole view): read the course's tee sets
+    // from localStorage (saved by Round/Prep), show chips when the launch
+    // URL carries a course id. Switching re-LAUNCHES greenmap.html with
+    // the chosen tee's coordinates — the whole pipeline re-runs for the
+    // new tee (honest, no partial state).
+    (() => {
+      const group = document.getElementById('gm-tee-group');
+      if (!group) return;
+      const courseId = qs.get('course');
+      if (!courseId) return;
+      let course = null;
+      try {
+        const profiles = JSON.parse(
+          localStorage.getItem('caddy:courseProfiles:v1') || '[]');
+        course = profiles.find((c) => c && c.id === courseId) || null;
+      } catch (e) { return; }
+      if (!course || !Array.isArray(course.teeSets) || !course.teeSets.length)
+        return;
+      const active = course.activeTeeSet ||
+        (course.teeSets[0] && course.teeSets[0].name) || null;
+      group.innerHTML = course.teeSets.map((t) => {
+        if (!t || !t.name) return '';
+        const on = t.name === active ? ' active' : '';
+        return `<button class="gm-btn gm-tee-btn${on}" data-tee="${String(t.name).replace(/"/g, '&quot;')}">${String(t.name).replace(/</g, '&lt;')}</button>`;
+      }).join('');
+      group.hidden = false;
+      group.addEventListener('click', (e) => {
+        const btn = e.target.closest('.gm-tee-btn');
+        if (!btn || btn.dataset.tee === active) return;
+        // find the chosen set's tee point for THIS hole if the course
+        // stores per-hole tee coordinates; else keep the current pin and
+        // just reload (yardage chips in Prep carry per-tee tees anyway).
+        const set = course.teeSets.find((t) => t.name === btn.dataset.tee);
+        const u = new URLSearchParams(location.search);
+        if (set && set.holes) {
+          // hole number unknown here; the chips still update the course's
+          // active tee, and Prep (which knows the hole) launches with the
+          // right tee next time. Persist the choice:
+          try {
+            const profiles = JSON.parse(
+              localStorage.getItem('caddy:courseProfiles:v1') || '[]');
+            const idx = profiles.findIndex((c) => c && c.id === courseId);
+            if (idx >= 0) {
+              profiles[idx].activeTeeSet = btn.dataset.tee;
+              profiles[idx].teeName = btn.dataset.tee;
+              localStorage.setItem('caddy:courseProfiles:v1',
+                JSON.stringify(profiles));
+            }
+            const mem = JSON.parse(
+              localStorage.getItem('caddy:courseTees') || '{}');
+            mem[String(course.name || '').trim().toLowerCase()] = {
+              teeName: btn.dataset.tee,
+              activeTeeSet: btn.dataset.tee,
+              at: Date.now(),
+            };
+            localStorage.setItem('caddy:courseTees', JSON.stringify(mem));
+          } catch (err) { /* best-effort */ }
+          setStatus('Tees set to ' + btn.dataset.tee + ' — reopen this hole from Prep to move the tee box');
+          group.querySelectorAll('.gm-tee-btn').forEach((b) =>
+            b.classList.toggle('active', b === btn));
+        }
+      });
+    })();
+
     document.getElementById('gm-recenter').addEventListener('click', () => {
       if (state.viewMode === 'hole') {
         frameCameraForView('hole');
@@ -4528,7 +4657,18 @@
     void btn;
   }
 
-  window.addEventListener('resize', () => { fitView(); render(); });
+  window.addEventListener('resize', () => {
+    // v-fix(hole-race) v1.11.0: the old handler ran fitView() in every
+    // mode — in hole view that re-fit the GREEN camera, not the hole
+    // camera (a resize mid-hole-view squished the frame). Route by mode.
+    if (state.viewMode === 'hole' && state.datasets.hole &&
+        !state.datasets.hole.failed && state.datasets.hole.mesh) {
+      fitHoleView();
+    } else {
+      fitView();
+    }
+    render();
+  });
 
   /* ======================================================================
      6. BOOT
