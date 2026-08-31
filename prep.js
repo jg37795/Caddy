@@ -541,6 +541,31 @@
       persist();
       renderStrategy();       // re-paint tiles (chosen state) + feed line
       recompute({ pulse: true });
+      return;
+    });
+
+    // v1.10.0 (tee fairness): tee-set chips switch the stored tee set
+    // (Round agrees — same applyTeeSet path); the ± nudge shifts the
+    // effective tee along the hole, persisted per course.
+    $('prepStratBody').addEventListener('click', (e) => {
+      const chip = e.target.closest('.prep-tee-chip');
+      if (chip && chip.dataset.tee) {
+        const updated = api.setTeeSet(chip.dataset.tee);
+        if (updated) {
+          haptic(6);
+          rebindAfterTeeChange();
+        }
+        return;
+      }
+      const step = e.target.closest('.prep-tee-nudge .prep-step-btn');
+      if (step && boundHole && boundHole.courseId) {
+        const cur = teeNudgeLoad(boundHole.courseId);
+        const next = clamp(cur + Number(step.dataset.nd || 0), -60, 60);
+        teeNudgeSave(boundHole.courseId, next);
+        haptic(4);
+        renderStrategy();
+        recompute({ pulse: true });
+      }
     });
 
     $('prepLieRow').addEventListener('click', (e) => {
@@ -610,9 +635,12 @@
     const pt = shot.greenPoint === 'front' ? g.front
       : shot.greenPoint === 'back' ? g.back
         : g.center;
-    if (pt != null) return pt;
-    if (boundHole.yards) return Math.round(boundHole.yards);
-    return null;
+    // v1.10.0: the tee nudge shifts every carry uniformly (tee moves
+    // along the hole), so the effective target shifts with it.
+    const base = pt != null ? pt
+      : (boundHole.yards ? Math.round(boundHole.yards) : null);
+    if (base == null || !boundHole.courseId) return base;
+    return Math.max(40, base + teeNudgeLoad(boundHole.courseId));
   }
 
   // One full physics solve under the CURRENT panel conditions.
@@ -1033,6 +1061,16 @@
     return names;
   }
 
+  // v1.10.0 (real-shape maps): the map draws the hole's TRUE geometry
+  // when the course was imported after this shipped — pathPts (the OSM
+  // hole way, simplified) + greenRingPts (the OSM green outline).
+  // Everything is projected into a local EN plane, rotated so the tee→
+  // green axis runs left→right, then fitted to the viewBox. Hazards are
+  // placed by their real lat/lng projected the same way when available,
+  // else along/cross off the line (old behaviour). Shot segments follow
+  // the path: each club's segment starts where the previous ended by
+  // CUMULATIVE PATH DISTANCE, so a dogleg shows the bend. Courses saved
+  // before v1.10 (and manual holes) keep the honest generic corridor.
   function holeMapSvg(h, names) {
     const yards = Number(h && h.yards);
     if (!(yards > 40)) return '';
@@ -1042,20 +1080,161 @@
     const yMid = (padT + (H - padB)) / 2;
     const spanX = x1 - x0;
     const xAt = (alongYd) => x0 + spanX * clamp(alongYd / yards, 0, 1);
-
-    const fairW = 28;
+    const effYd = Math.round(nudgedYards(h));
     const parts = [];
+
+    // ---- Projection helpers (shared by both modes) ----
+    let P = null;   // {toXY(latlngOrAlongCross)} when real geometry exists
+    if (Array.isArray(h.pathPts) && h.pathPts.length >= 3 &&
+        h.teeLatLng && h.greenLatLng) {
+      // Local EN plane anchored at the ACTIVE tee point (it moves with
+      // tee sets), yards, rotated so tee→green is +X.
+      const mLat = 111320, mLng = 111320 * Math.cos(h.teeLatLng.lat * Math.PI / 180);
+      const en = (ll) => ({
+        x: ((ll.lng - h.teeLatLng.lng) * mLng) / 0.9144,
+        y: ((ll.lat - h.teeLatLng.lat) * mLat) / 0.9144,
+      });
+      const tgt = en(h.greenLatLng);
+      const L = Math.hypot(tgt.x, tgt.y) || 1e-9;
+      const ux = tgt.x / L, uy = tgt.y / L;        // unit toward green
+      const px = -uy, py = ux;                      // perpendicular (right)
+      const toXY = (ll) => {
+        const p = en(ll);
+        const along = p.x * ux + p.y * uy;
+        const cross = p.x * px + p.y * py;
+        return { along, cross };
+      };
+      // Fit: along 0..(dist tee→green scaled to nudged length), cross
+      // clipped to a band. Scale = spanX / nudgeLen so the map stretches
+      // with the tee nudge (tee is anchor at origin).
+      const fitLen = Math.max(120, effYd);
+      const X = (along) => x0 + spanX * clamp(along / fitLen, -0.06, 1.04);
+      const Y = (cross) => yMid - clamp(cross / (fitLen * 0.22), -1.15, 1.15) * (H * 0.30);
+      P = { toXY, X, Y };
+    }
+
+    if (P) {
+      // ---- REAL SHAPE MODE ----
+      // Fairway = the actual path.
+      const d = h.pathPts.map((ll, i) => {
+        const { along, cross } = P.toXY(ll);
+        return (i ? 'L' : 'M') + ` ${P.X(along).toFixed(1)} ${P.Y(cross).toFixed(1)}`;
+      }).join(' ');
+      parts.push(`<path class="prep-hm-fairway" d="${d}" fill="none" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`);
+
+      // Green: the real outline when stored, else an ellipse at the end.
+      if (Array.isArray(h.greenRingPts) && h.greenRingPts.length >= 3) {
+        const gd = h.greenRingPts.map((ll, i) => {
+          const { along, cross } = P.toXY(ll);
+          return (i ? 'L' : 'M') + ` ${P.X(along).toFixed(1)} ${P.Y(cross).toFixed(1)}`;
+        }).join(' ') + ' Z';
+        parts.push(`<path class="prep-hm-green" d="${gd}" fill="none" stroke-width="2"/>`);
+        // tint the interior
+        parts.push(`<path class="prep-hm-greenfill" d="${gd}"/>`);
+      } else {
+        const end = P.toXY(h.greenLatLng);
+        parts.push(
+          `<ellipse class="prep-hm-green" cx="${P.X(end.along).toFixed(1)}" cy="${P.Y(end.cross).toFixed(1)}" rx="16" ry="11"/>`
+        );
+      }
+
+      // Hazards: project real positions when lat/lng present.
+      const haz = Array.isArray(h.hazards) ? h.hazards : [];
+      for (const hz of haz) {
+        let ax = null, ay = null;
+        if (Number.isFinite(hz.lat) && Number.isFinite(hz.lng) && h.teeLatLng) {
+          const pr = P.toXY(hz);
+          ax = P.X(pr.along); ay = P.Y(pr.cross);
+        } else {
+          const along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
+          if (along == null || along <= 0 || along >= effYd) continue;
+          const cross = Number.isFinite(hz.cross) ? hz.cross : 0;
+          ax = P.X(along); ay = P.Y(cross);
+        }
+        if (hz.type === 'water') {
+          parts.push(`<ellipse class="prep-hm-hz water" cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" rx="9" ry="6"/>`);
+        } else {
+          parts.push(`<ellipse class="prep-hm-hz bunker" cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" rx="8" ry="5"/>`);
+        }
+      }
+
+      // Shot segments ALONG the path by cumulative distance.
+      const clubs = names.length ? names : ['Shot'];
+      const n = clubs.length;
+      const ydPerPath = (() => {
+        // total path length in yards for even division of the sequence
+        let tot = 0;
+        for (let i = 1; i < h.pathPts.length; i++) {
+          const a = P.toXY(h.pathPts[i - 1]);
+          const b = P.toXY(h.pathPts[i]);
+          tot += Math.hypot(b.along - a.along, b.cross - a.cross);
+        }
+        return tot || effYd;
+      })();
+      const ptAlong = (yd) => {
+        // walk the path until cumulative distance covers yd
+        let acc = 0;
+        for (let i = 1; i < h.pathPts.length; i++) {
+          const a = P.toXY(h.pathPts[i - 1]);
+          const b = P.toXY(h.pathPts[i]);
+          const seg = Math.hypot(b.along - a.along, b.cross - a.cross);
+          if (acc + seg >= yd) {
+            const t = seg > 0 ? (yd - acc) / seg : 0;
+            return { along: a.along + (b.along - a.along) * t,
+                     cross: a.cross + (b.cross - a.cross) * t };
+          }
+          acc += seg;
+        }
+        const e = P.toXY(h.pathPts[h.pathPts.length - 1]);
+        return e;
+      };
+      const effShare = Math.min(1, effYd / ydPerPath);   // nudge shortens shots
+      for (let i = 0; i < n; i++) {
+        const d0 = (ydPerPath * i) / n * (effYd / ydPerPath);
+        const d1 = (ydPerPath * (i + 1)) / n * Math.min(1, effYd / ydPerPath);
+        const s0 = ptAlong(d0), s1 = ptAlong(Math.min(d1, ydPerPath * effShare));
+        const p0 = { x: P.X(s0.along), y: P.Y(s0.cross) };
+        const p1 = { x: P.X(s1.along), y: P.Y(s1.cross) };
+        const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+        parts.push(
+          `<path class="prep-hm-shot s${i % 4}" d="M ${p0.x.toFixed(1)} ${p0.y.toFixed(1)} L ${p1.x.toFixed(1)} ${p1.y.toFixed(1)}"/>`
+        );
+        parts.push(
+          `<text class="prep-hm-club" x="${mx.toFixed(1)}" y="${(my + (i % 2 === 0 ? -8 : 14)).toFixed(1)}" text-anchor="middle">${escapeHtml(clubs[i])}</text>`
+        );
+      }
+
+      // Tee + flag at the path's real ends.
+      const teeP = P.toXY(h.teeLatLng);
+      const teeXY = { x: P.X(teeP.along), y: P.Y(teeP.cross) };
+      parts.push(`<circle class="prep-hm-tee" cx="${teeXY.x.toFixed(1)}" cy="${teeXY.y.toFixed(1)}" r="5.5"/>`);
+      const gEnd = P.toXY(h.greenLatLng);
+      const gXY = { x: P.X(gEnd.along), y: P.Y(gEnd.cross) };
+      parts.push(
+        `<line x1="${gXY.x.toFixed(1)}" y1="${(gXY.y - 22).toFixed(1)}" x2="${gXY.x.toFixed(1)}" y2="${gXY.y.toFixed(1)}" stroke="rgba(255,255,255,0.7)" stroke-width="1.4"/>` +
+        `<path class="prep-hm-flag" d="M ${gXY.x.toFixed(1)} ${gXY.y - 22} l 9 3.5 l -9 3.5 Z"/>`
+      );
+      parts.push(
+        `<text class="prep-hm-club" x="${teeXY.x.toFixed(1)}" y="${H - 4}" text-anchor="start">Tee</text>` +
+        `<text class="prep-hm-club" x="${(W - padR).toFixed(1)}" y="${H - 4}" text-anchor="end">${effYd} yd</text>`
+      );
+      return `<svg class="prep-holemap" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hole ${h.number} map, ${effYd} yards">${parts.join('')}</svg>`;
+    }
+
+    // ---- GENERIC CORRIDOR (pre-v1.10 courses / manual holes) ----
+    const yMid2 = yMid;
+    const fairW = 28;
     parts.push(
-      `<rect class="prep-hm-fairway" x="${x0}" y="${(yMid - fairW / 2).toFixed(1)}" width="${spanX.toFixed(1)}" height="${fairW}" rx="14"/>`
+      `<rect class="prep-hm-fairway" x="${x0}" y="${(yMid2 - fairW / 2).toFixed(1)}" width="${spanX.toFixed(1)}" height="${fairW}" rx="14"/>`
     );
 
     const haz = Array.isArray(h.hazards) ? h.hazards : [];
     for (const hz of haz) {
       let along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
-      if (along == null || along <= 0 || along >= yards) continue;
+      if (along == null || along <= 0 || along >= effYd) continue;
       const cross = Number.isFinite(hz.cross) ? hz.cross : 0;
       const hx = xAt(along);
-      const hy = yMid + clamp(cross / 28, -1, 1) * 22;
+      const hy = yMid2 + clamp(cross / 28, -1, 1) * 22;
       if (hz.type === 'water') {
         parts.push(
           `<ellipse class="prep-hm-hz water" cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" rx="9" ry="6"/>`
@@ -1076,34 +1255,34 @@
       const a = xs[i], b = xs[i + 1];
       const bump = (i % 2 === 0 ? -1 : 1) * 7;
       const cpx = (a + b) / 2;
-      const cpy = yMid + bump;
+      const cpy = yMid2 + bump;
       parts.push(
-        `<path class="prep-hm-shot s${i % 4}" d="M ${a.toFixed(1)} ${yMid.toFixed(1)} Q ${cpx.toFixed(1)} ${cpy.toFixed(1)} ${b.toFixed(1)} ${yMid.toFixed(1)}"/>`
+        `<path class="prep-hm-shot s${i % 4}" d="M ${a.toFixed(1)} ${yMid2.toFixed(1)} Q ${cpx.toFixed(1)} ${cpy.toFixed(1)} ${b.toFixed(1)} ${yMid2.toFixed(1)}"/>`
       );
       const lx = (a + b) / 2;
-      const ly = yMid + bump - (bump > 0 ? -12 : 12);
+      const ly = yMid2 + bump - (bump > 0 ? -12 : 12);
       parts.push(
         `<text class="prep-hm-club" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle">${escapeHtml(clubs[i])}</text>`
       );
     }
 
-    parts.push(`<circle class="prep-hm-tee" cx="${x0}" cy="${yMid}" r="5.5"/>`);
+    parts.push(`<circle class="prep-hm-tee" cx="${x0}" cy="${yMid2}" r="5.5"/>`);
     const g = h.green || {};
     const depthYd = Number.isFinite(g.depth) ? g.depth : 18;
-    const gw = clamp((depthYd / yards) * spanX * 4.2, 18, 36);
+    const gw = clamp((depthYd / effYd) * spanX * 4.2, 18, 36);
     parts.push(
-      `<ellipse class="prep-hm-green" cx="${x1}" cy="${yMid}" rx="${(gw / 2).toFixed(1)}" ry="11"/>`
+      `<ellipse class="prep-hm-green" cx="${x1}" cy="${yMid2}" rx="${(gw / 2).toFixed(1)}" ry="11"/>`
     );
     parts.push(
-      `<line x1="${x1}" y1="${(yMid - 22).toFixed(1)}" x2="${x1}" y2="${yMid}" stroke="rgba(255,255,255,0.7)" stroke-width="1.4"/>` +
-      `<path class="prep-hm-flag" d="M ${x1} ${yMid - 22} l 9 3.5 l -9 3.5 Z"/>`
+      `<line x1="${x1}" y1="${(yMid2 - 22).toFixed(1)}" x2="${x1}" y2="${yMid2}" stroke="rgba(255,255,255,0.7)" stroke-width="1.4"/>` +
+      `<path class="prep-hm-flag" d="M ${x1} ${yMid2 - 22} l 9 3.5 l -9 3.5 Z"/>`
     );
     parts.push(
       `<text class="prep-hm-club" x="${x0}" y="${H - 4}" text-anchor="start">Tee</text>` +
-      `<text class="prep-hm-club" x="${x1}" y="${H - 4}" text-anchor="end">${Math.round(yards)} yd</text>`
+      `<text class="prep-hm-club" x="${x1}" y="${H - 4}" text-anchor="end">${effYd} yd</text>`
     );
 
-    return `<svg class="prep-holemap" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hole ${h.number} map, ${Math.round(yards)} yards">${parts.join('')}</svg>`;
+    return `<svg class="prep-holemap" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hole ${h.number} map, ${effYd} yards">${parts.join('')}</svg>`;
   }
 
   function seqChipsHtml(names) {
@@ -1164,13 +1343,18 @@
 
     const metaBits = [
       h.par ? `Par ${h.par}` : null,
-      h.yards ? `${Math.round(h.yards)} yd` : null,
+      h.yards ? `${Math.round(nudgedYards(h))} yd` : null,
       h.strokeIndex ? `SI ${h.strokeIndex}` : null,
       currentBearing() ? `${compass16(currentBearing())} off the tee` : null,
     ].filter(Boolean);
     body.push(
       `<div class="prep-strat-meta">${metaBits.map((b) => `<span class="prep-strat-chip">${escapeHtml(b)}</span>`).join('')}</div>`
     );
+
+    // v1.10.0 (tee fairness): tee-set chips + nudge stepper, right under
+    // the meta chips. Tapping a chip or ± re-solves the whole brief.
+    const teeRow = teePickerHtml(h);
+    if (teeRow) body.push(teeRow);
 
     const names = seqNames(h);
     const map = holeMapSvg(h, names);
@@ -1195,20 +1379,22 @@
     // Off-the-tee recommendation under current conditions
     // v-fix(dedupe-tee-solve) v1.5.3 (audit #20): the tee solve ran here AND
     // again in the water-danger check below; one call, reused.
+    // v1.10.0: solves the NUDGED yardage (tee set + nudge), not card length.
     let teeCalc = null;
-    if (h.yards) {
-      teeCalc = solve(Math.round(h.yards));
+    const effYd = Math.round(nudgedYards(h));
+    if (effYd) {
+      teeCalc = solve(effYd);
       const teeRec = api.recommendClub(teeCalc.playsLikeYd);
       const eff = effortInfo(teeRec.main);
-      const delta = Math.round(teeCalc.playsLikeYd - Math.round(h.yards));
+      const delta = Math.round(teeCalc.playsLikeYd - effYd);
       const why = Math.abs(delta) >= 2
-        ? `${delta >= 0 ? '+' : ''}${delta} yd vs the card length`
-        : 'plays true to the card';
+        ? `${delta >= 0 ? '+' : ''}${delta} yd vs the ${effYd} yd you're playing`
+        : 'plays true to the number';
       body.push(`
         <div class="prep-tee-box">
           <div class="prep-mini-label">Suggested off the tee</div>
           <div class="prep-tee-main">${escapeHtml(clubShort(teeRec.main))}</div>
-          <div class="prep-tee-sub">Plays ${fmt(teeCalc.playsLikeYd)} of ${Math.round(h.yards)} — ${why}. ${eff.note ? escapeHtml(eff.note.charAt(0).toUpperCase() + eff.note.slice(1)) + '.' : ''}</div>
+          <div class="prep-tee-sub">Plays ${fmt(teeCalc.playsLikeYd)} of ${effYd} — ${why}. ${eff.note ? escapeHtml(eff.note.charAt(0).toUpperCase() + eff.note.slice(1)) + '.' : ''}</div>
         </div>`);
     }
 
@@ -1235,11 +1421,14 @@
     // Conditioned carries to each green point — v1.9.0: these tiles ARE
     // the target picker (data-point + tap-to-choose + disabled when the
     // point isn't mapped). One control instead of two.
+    // v1.10.0: carries shift by the tee nudge (tee moves along the hole).
     const g = h.green || {};
+    const nd = h.courseId ? teeNudgeLoad(h.courseId) : 0;
+    const shift = (v) => (v == null ? null : Math.max(40, v + nd));
     const pts = [
-      ['Front', 'front', g.front],
-      ['Middle', 'middle', g.center],
-      ['Back', 'back', g.back],
+      ['Front', 'front', shift(g.front)],
+      ['Middle', 'middle', shift(g.center)],
+      ['Back', 'back', shift(g.back)],
     ];
     const mapped = pts.filter(([, , v]) => v != null);
     if (mapped.length) {
@@ -1322,6 +1511,21 @@
     });
   }
 
+  // v1.10.0: after a tee-set switch the course data changed under us —
+  // re-fetch holeInfo for the same hole and re-render everything that
+  // depends on it (number, carries, map, tee chips).
+  function rebindAfterTeeChange() {
+    if (!boundHole) return;
+    const number = boundHole.number;
+    const info = api.holeInfo(number);
+    if (info) boundHole = info;
+    paintControls();
+    paintTarget();
+    renderStrategy();
+    fetchGreenDelta();
+    recompute({ pulse: true });
+  }
+
   /* ======================================================================
      MAIN PIPELINE
      ====================================================================== */
@@ -1364,6 +1568,57 @@
      our binding when the course card closes (course change etc.).
      ====================================================================== */
   let prepSearching = false;
+
+  // v1.10.0 (tee box fairness): the importer's default tee set is usually
+  // the women's. Two fixes, both data-driven:
+  //   1. Tee-set switcher chips (Red/White/Blue…) from the stored teeSets.
+  //   2. A ± yards nudge for single-set courses (or fine-tuning within a
+  //      set) — "playing +15 yd from card". Persisted per course.
+  const TEE_NUDGE_KEY = 'caddy.prep.teeNudge';   // { courseId: yd }
+  const teeNudgeLoad = (courseId) => {
+    try {
+      const m = JSON.parse(localStorage.getItem(TEE_NUDGE_KEY) || '{}');
+      return Number.isFinite(m[courseId]) ? m[courseId] : 0;
+    } catch { return 0; }
+  };
+  const teeNudgeSave = (courseId, yd) => {
+    try {
+      const m = JSON.parse(localStorage.getItem(TEE_NUDGE_KEY) || '{}');
+      if (yd) m[courseId] = yd; else delete m[courseId];
+      localStorage.setItem(TEE_NUDGE_KEY, JSON.stringify(m));
+    } catch { /* best-effort */ }
+  };
+
+  // Effective yardage for this hole under the current nudge. The nudge
+  // shifts the tee ALONG the hole (all carries/distances uniformly).
+  function nudgedYards(h) {
+    const base = Number(h && h.yards);
+    if (!(base > 0) || !h.courseId) return base || 0;
+    return Math.max(40, base + teeNudgeLoad(h.courseId));
+  }
+
+  function teePickerHtml(h) {
+    const sets = Array.isArray(h.teeSets) ? h.teeSets : [];
+    const nudge = h.courseId ? teeNudgeLoad(h.courseId) : 0;
+    const chips = sets.filter((s) => s.name).map((s) => {
+      const active = h.activeTeeSet ? s.name === h.activeTeeSet : false;
+      const yd = s.yardsForHole != null ? `${Math.round(s.yardsForHole)} yd` : '';
+      return `<button type="button" class="prep-tee-chip${active ? ' active' : ''}" data-tee="${escapeHtml(s.name)}">${escapeHtml(s.name)}${yd ? `<i>${yd}</i>` : ''}</button>`;
+    }).join('');
+    const nudgeBit = `
+      <div class="prep-tee-nudge">
+        <button type="button" class="prep-step-btn" data-nd="-5" aria-label="Play shorter">−</button>
+        <span class="prep-step-val">${nudge ? (nudge > 0 ? '+' : '') + nudge : '±0'}<small>yd</small></span>
+        <button type="button" class="prep-step-btn" data-nd="5" aria-label="Play longer">+</button>
+      </div>`;
+    if (!sets.length && !nudge) return '';
+    return `
+      <div class="prep-tee-row" id="prepTeeRow">
+        <div class="prep-mini-label">Tees${h.activeTeeSet ? ` · from the ${escapeHtml(h.activeTeeSet)}` : ''}</div>
+        <div class="prep-tee-chips">${chips || '<span class="prep-empty">one set mapped</span>'}</div>
+        ${nudgeBit}
+      </div>`;
+  }
 
   function syncPrepChrome() {
     const sel = document.getElementById('planCourseSelect');

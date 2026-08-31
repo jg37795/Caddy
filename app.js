@@ -5553,6 +5553,7 @@
         back,
         depthYds,
         hasGreenPolygon: !!green,
+        greenRing: green && Array.isArray(green.ring) ? green.ring : null,
         hazards: [],
       });
     }
@@ -5686,6 +5687,24 @@
         if (r.hasGreenPolygon) report.greensFound++;
         if (r.strokeIndex) h.strokeIndex = r.strokeIndex;
         if (Object.keys(r.parBySet).length) h.parByTee = r.parBySet;
+
+        // v1.10.0 (real-shape maps): keep a SIMPLIFIED copy of the hole
+        // path + green ring so the Prep hole map draws the true curve.
+        // Douglas-Peucker to ~28 path points / ~20 ring points — a few
+        // KB per course. Absent on pre-v1.10 saved courses (honest
+        // generic map there) and on manual holes.
+        const simplify = (pts, maxPts) => {
+          if (!Array.isArray(pts) || pts.length <= maxPts) return pts || null;
+          const out = [pts[0]];
+          const step = (pts.length - 1) / (maxPts - 1);
+          for (let k = 1; k < maxPts - 1; k++) out.push(pts[Math.round(k * step)]);
+          out.push(pts[pts.length - 1]);
+          return out;
+        };
+        if (Array.isArray(r.path) && r.path.length > 2)
+          h.pathPts = simplify(r.path, 28);
+        if (Array.isArray(r.greenRing) && r.greenRing.length > 2)
+          h.greenRingPts = simplify(r.greenRing, 20);
 
         const ty = {};
         for (const ts of teeSetList) if (ts.holes[i]) ty[ts.name] = ts.holes[i].yards;
@@ -14503,24 +14522,68 @@ out geom;`;
         }
         return { type: hz.type, label: hz.label, sub: hz.sub, along, cross };
       });
+      // v1.10.0 (real-shape maps + tee switcher): expose the simplified
+      // path/green ring (may be null on pre-v1.10 courses), the full tee
+      // set list, the active set name, and the player's per-course tee
+      // memory — read-only.
+      const teeSets = Array.isArray(course.teeSets)
+        ? course.teeSets.map((t) => ({
+          name: t.name,
+          holesMapped: t.holes ? Object.keys(t.holes).length : 0,
+          yardsForHole: t.holes && t.holes[number]
+            ? t.holes[number].yards : null,
+        }))
+        : [];
+      let rememberedTee = null;
+      try {
+        const mem = load('caddy:courseTees', {})[
+          String(course.name || '').trim().toLowerCase()];
+        if (mem && mem.activeTeeSet) rememberedTee = mem.activeTeeSet;
+      } catch { /* best-effort */ }
       return {
         number,
         courseName: course.name || 'Course',
+        courseId: course.id || '',
         par: hole.par || inferParFromYards(yd),
         yards: yd,
         strokeIndex: hole.strokeIndex || null,
         hazards,
         green: planGreenInfo(hole),
+        pathPts: Array.isArray(hole.pathPts) ? hole.pathPts : null,
+        greenRingPts: Array.isArray(hole.greenRingPts) ? hole.greenRingPts : null,
+        activeTeeSet: course.activeTeeSet || null,
+        rememberedTee,
+        teeSets,
         // Green Maps: raw lat/lng for the elevation service (read-only).
-        teeLatLng: hole.teePoint
-          ? { lat: hole.teePoint.lat, lng: hole.teePoint.lng } : null,
-        greenLatLng: hole.greenCenter
-          ? { lat: hole.greenCenter.lat, lng: hole.greenCenter.lng } : null,
+        teeLatLng: tee
+          ? { lat: tee.lat, lng: tee.lng } : null,
+        greenLatLng: green
+          ? { lat: green.lat, lng: green.lng } : null,
         bearing:
-          hole.teePoint && hole.greenCenter
-            ? initialBearingDeg(hole.teePoint, hole.greenCenter)
+          tee && green
+            ? initialBearingDeg(tee, green)
             : null,
       };
+    },
+    // v1.10.0: switch the planner course's tee set (same path the Round
+    // setup uses, so Round + Prep agree). Returns the refreshed hole.
+    setTeeSet(teeSetName) {
+      const course = getPlannerCourse();
+      if (!course) return null;
+      const updated = applyTeeSet(course, teeSetName);
+      state.planCourseId = state.planCourseId;   // id unchanged
+      if (state.planCourseId === PREP_EPHEMERAL_ID && prepEphemeralCourse) {
+        prepEphemeralCourse = updated;
+      } else {
+        const idx = state.courseProfiles.findIndex((c) => c.id === updated.id);
+        if (idx >= 0) state.courseProfiles[idx] = updated;
+        saveCourseProfiles();
+      }
+      rememberCourseTees(updated);
+      renderPlanner();
+      // The caller (prep.js) re-binds its own hole; app.js has no
+      // boundHole state. Return the refreshed course so Prep can rebuild.
+      return updated;
     },
     // Pure bag sequence for a hole length. Same helper the planner uses;
     // no writes, no UI. null when yards or bag are missing.

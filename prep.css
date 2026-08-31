@@ -1341,9 +1341,79 @@ button.prep-carry-tile:active { transform: scale(0.96); }
   stroke-width: 1;
 }
 
+/* v1.10.0 — real-shape mode: the fairway is a STROKED path now, and the
+   green is the real OSM outline (path + interior tint). */
+.prep-holemap path.prep-hm-fairway {
+  fill: none;
+  stroke: rgba(24, 164, 91, 0.30);
+  stroke-width: 26;
+}
+body.dark .prep-holemap path.prep-hm-fairway {
+  stroke: rgba(99, 232, 154, 0.22);
+}
+.prep-hm-greenfill {
+  fill: rgba(24, 164, 91, 0.20);
+  stroke: none;
+}
+body.dark .prep-hm-greenfill {
+  fill: rgba(99, 232, 154, 0.16);
+}
+
 body.dark .prep-hm-fairway {
   fill: rgba(24, 164, 91, 0.18);
   stroke: rgba(99, 232, 154, 0.28);
+}
+
+/* v1.10.0 — tee switcher chips + nudge stepper */
+.prep-tee-row { margin-top: 10px; }
+.prep-tee-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.prep-tee-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.prep-tee-chip i {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--muted);
+}
+.prep-tee-chip.active {
+  background: linear-gradient(135deg, var(--green), var(--green-2, #0e8c4d));
+  border-color: transparent;
+  color: #062512;
+}
+.prep-tee-chip.active i { color: rgba(6, 37, 18, 0.75); }
+.prep-tee-nudge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.prep-tee-nudge .prep-step-val {
+  min-width: 64px;
+  text-align: center;
+  font-weight: 800;
+}
+.prep-tee-nudge small {
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: 2px;
 }
 
 .prep-hm-shot {
