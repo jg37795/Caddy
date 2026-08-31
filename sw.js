@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.7.0'; // PREP RESTRUCTURE (Grok R5, audited + wired by coordinator): course-search-first flow; per-hole SVG diagram (tee->green corridor, hazards projected, club-sequence segments); 'After landing' green-aware advice from the 3D green slope data (greenmap persists caddy:greenBrief:v1 via simPuttPath probes at front/middle/back); per-hole 3D Green launch; conditions collapsed by default; CaddyPrep bridge +clubSequence +hazard along/cross
+const CACHE_VERSION = 'v1.7.1'; // PREP FIXES (James round): (1) search input no longer wiped below 3 chars — results collapse, text stays; (2) course distances in miles (was km); (3) honest mapping failures — unmapped course says so explicitly, network errors distinct, typed term kept for retry; (4) manual plays-like calculator REMOVED from Prep (studio covers it; initManualCalc guarded no-op)
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

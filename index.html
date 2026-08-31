@@ -10,7 +10,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#07100b" id="themeColorMeta" />
-  <script>window.CADDY_VERSION = 'v1.7.0';</script>
+  <script>window.CADDY_VERSION = 'v1.7.1';</script>
   <meta name="color-scheme" content="light dark" />
   <meta name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -697,77 +697,9 @@
         <!-- ===== PREP STUDIO (premium pre-shot engine — logic in prep.js) ===== -->
         <div id="prepStudio"></div>
 
-        <!-- ===== MANUAL CALCULATOR (preserved) ===== -->
-        <details class="howto" style="margin-top: 4px">
-          <summary>Manual plays-like calculator</summary>
-          <div style="margin-top: 10px">
-            <div class="card compact">
-              <div class="card-title">
-                <h3>Shot Calc</h3>
-                <span class="chip">Manual</span>
-              </div>
-              <div class="hint">
-                Enter the number you know and Caddy adds the plays-like math.
-                Leave fields blank to pull the latest live
-                target/weather/elevation; bearing is the shot direction (north =
-                0°).
-              </div>
-              <div class="form-row" style="margin-top: 13px">
-                <label class="field">Horizontal yards
-                  <input id="manualYards" type="number" inputmode="decimal" placeholder="165" /></label>
-                <label class="field">Optional club
-                  <select id="manualClub"></select>
-                </label>
-              </div>
-              <div class="form-row">
-                <label class="field">Shot bearing °
-                  <input id="manualBearing" type="number" inputmode="decimal" placeholder="0" /></label>
-                <label class="field">Elevation change ft
-                  <input id="manualElevDiff" type="number" inputmode="decimal" placeholder="0" /></label>
-              </div>
-              <div class="form-row">
-                <label class="field">Course altitude ft
-                  <input id="manualAltitude" type="number" inputmode="decimal" placeholder="0" /></label>
-                <label class="field">Temp °F
-                  <input id="manualTemp" type="number" inputmode="decimal" placeholder="70" /></label>
-              </div>
-              <div class="form-row">
-                <label class="field">Humidity %
-                  <input id="manualRh" type="number" inputmode="decimal" placeholder="50" /></label>
-                <label class="field">Wind mph
-                  <input id="manualWindSpeed" type="number" inputmode="decimal" placeholder="0" /></label>
-              </div>
-              <div class="form-row">
-                <label class="field">Wind from °
-                  <input id="manualWindDir" type="number" inputmode="decimal" placeholder="0" /></label>
-                <label class="field" style="justify-content: end"><button class="ghost-btn" id="prefillBtn" type="button">
-                    Use live data
-                  </button></label>
-              </div>
-              <button class="primary-btn" id="manualCalcBtn">
-                Calculate plays-like
-              </button>
-            </div>
-            <div class="card rec-card">
-              <div class="rec-main" id="manualRec">Enter a shot</div>
-              <div class="rec-sub" id="manualRecSub">
-                Manual recommendation appears here.
-              </div>
-            </div>
-            <div class="card">
-              <div class="card-title">
-                <h3>Breakdown</h3>
-              </div>
-              <div class="breakdown" id="manualBreakdown">
-                <div class="empty">No manual calculation yet.</div>
-              </div>
-              <div class="hint" style="margin-top: 8px">
-                Lie is assumed neutral/fairway (0 yd) — no reliable free
-                auto-detection exists.
-              </div>
-            </div>
-          </div>
-        </details>
+        <!-- v1.7.1: manual plays-like calculator REMOVED per James — the
+             Prep studio covers it with real hole data, and the calculator's
+             inputs duplicated conditions already in the Conditions sheet. -->
       </section>
 
       <!-- ROUND -->

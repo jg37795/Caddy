@@ -187,6 +187,9 @@
     manualRec: $('manualRec'),
     manualRecSub: $('manualRecSub'),
     manualBreakdown: $('manualBreakdown'),
+    // v1.7.1: the manual calculator markup is REMOVED from Prep per James.
+    // These els now resolve to null; initManualCalc guards on them and
+    // becomes a no-op (kept so old code paths can't crash).
     roundRows: $('roundRows'),
     clearRoundBtn: $('clearRoundBtn'),
     roundStatusChip: $('roundStatusChip'),
@@ -2613,7 +2616,12 @@
     if (state.target) calculateRange();
   }
   function renderManualClubSelect() {
+    // v1.7.1: the manual plays-like calculator was REMOVED from Prep per
+    // James. els.manualClub no longer exists in the DOM — this render now
+    // reflects club selection in the Bag only, and the club <select> that
+    // used to drive it is gone. Kept as a no-op guard for safety.
     const sel = state.prefs.selectedClubId || '';
+    if (!els.manualClub) return;
     els.manualClub.innerHTML =
       `<option value="">Auto recommend</option>` +
       sortedClubsDesc()
@@ -2652,6 +2660,8 @@
     els.manualClub.addEventListener('change', () => {
       setSelectedClubId(els.manualClub.value);
     });
+    // v1.7.1 (audit-follow): manualClub select removed from Prep — guard
+    // the listener so removing the element can't break Bag init.
   }
 
   // Birdie red / bogey blue — the same convention every premium golf app uses.
@@ -12194,6 +12204,10 @@ out geom;`;
   // ============================================================
 
   function initManualCalc() {
+    // v1.7.1: the manual plays-like calculator was REMOVED from Prep per
+    // James (the Prep studio + hole flow covers it). Guard: without the
+    // markup, this becomes a no-op instead of crashing boot.
+    if (!els.manualCalcBtn || !els.prefillBtn || !els.manualYards) return;
     els.prefillBtn.addEventListener('click', () => {
       const w = getWeatherOrNeutral(),
         e = getElevationOrNeutral();
@@ -12942,8 +12956,16 @@ out geom;`;
     if (!els.planCourseSearch || !els.planCourseSearchResults) return;
     const term = els.planCourseSearch.value.trim();
 
+    // v-fix(search-keep) v1.7.1 (James: "unless I type three letters really
+    // fast it clears my input"): below min chars, collapse the RESULTS —
+    // never wipe the input value. Slow typers keep what they've typed.
     if (term.length < COURSE_SEARCH_MIN_CHARS) {
-      clearPlannerSearch();
+      planSearchResults = [];
+      planSearchSeq++;
+      if (els.planCourseSearchResults) {
+        els.planCourseSearchResults.hidden = true;
+        els.planCourseSearchResults.innerHTML = '';
+      }
       return;
     }
     const mySeq = ++planSearchSeq;
@@ -12963,10 +12985,12 @@ out geom;`;
         planSearchStatus('No courses matched that name.');
         return;
       }
+      // v-fix(units) v1.7.1 (James: "courses in kilometers"): distances in
+      // miles — consistent with the rest of the app.
       els.planCourseSearchResults.innerHTML = results
         .map((c, i) => {
-          const km = haversineMeters(state.loc, c) / 1000;
-          const dist = km >= 1 ? `${Math.round(km)} km` : `${Math.round(km * 1000)} m`;
+          const mi = haversineMeters(state.loc, c) / 1609.344;
+          const dist = mi >= 0.19 ? `${mi.toFixed(mi < 10 ? 1 : 0)} mi` : `${Math.round(mi * 1760)} yd`;
           return `
             <button type="button" class="prep-search-row" data-idx="${i}">
               <b>${escapeHtml(c.name)}</b>
@@ -13018,11 +13042,35 @@ out geom;`;
     try {
       const elements = await fetchAutoCourseScorecard(candidate);
       const course = normalizeCourse(buildAutoCourse(candidate, elements));
+      // v-fix(map-empty) v1.7.1 (James: "it told me it couldn't map a golf
+      // course"): a course with ZERO mapped holes used to bind silently —
+      // an empty-looking scorecard. Say so honestly and keep the search
+      // open so another course (or retry) is one tap away.
+      const mappedCount = (course.holes || []).filter(
+        (h) => h.source === 'openstreetmap'
+      ).length;
+      if (!mappedCount) {
+        planSearchResults = [];
+        planSearchStatus(
+          `${escapeHtml(candidate.name)} isn't mapped in OpenStreetMap yet — ` +
+          `no holes were found. Try another course, or use the Play tab's ` +
+          `3D Green and trace its greens manually.`
+        );
+        return;
+      }
       bindEphemeralCourse(course);
     } catch (error) {
       console.warn('Planner course mapping failed:', error);
+      planSearchResults = [];
+      // v-fix(map-err) v1.7.1: distinguish offline/timeouts from unmapped,
+      // and KEEP the typed search term so a retry doesn't need retyping.
+      const offline = error && (error.name === 'AbortError' ||
+        /timeout|network|fetch/i.test(String(error && error.message)));
       planSearchStatus(
-        `Couldn’t map ${escapeHtml(candidate.name)} right now. <button type="button" class="ghost-btn" id="planSearchRetryBtn">Try again</button>`
+        (offline
+          ? `Couldn't reach the map service for ${escapeHtml(candidate.name)}.`
+          : `Couldn't map ${escapeHtml(candidate.name)} right now.`) +
+        ` <button type="button" class="ghost-btn" id="planSearchRetryBtn">Try again</button>`
       );
       const retry = document.getElementById('planSearchRetryBtn');
       if (retry)
