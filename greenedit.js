@@ -111,10 +111,13 @@
       if (!btn) return;
       btn.classList.toggle('gel-armed', teeMode);
       btn.textContent = teeMode ? 'Cancel tee' : (teeLL ? 'Move tee' : 'Set tee');
-      readout.textContent = teeMode
-        ? (teeLL ? 'Tap the map to move the tee — or tap the tee to remove it'
-                 : 'Tap your tee box on the map')
-        : `Sample point: ${pin.getLatLng().lat.toFixed(5)}, ${pin.getLatLng().lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
+      const readout2 = sheet.querySelector('.gel-hint');
+      if (readout2) {
+        readout2.textContent = teeMode
+          ? (teeLL ? 'Tap the map to move the tee — or tap the tee to remove it'
+                   : 'Tap your tee box on the map')
+          : `Sample point: ${pin.getLatLng().lat.toFixed(5)}, ${pin.getLatLng().lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
+      }
     };
     const setTee = (ll) => {
       teeLL = ll;
@@ -145,6 +148,12 @@
         teeMode = !teeMode;
         syncTeeUI();
       });
+      // v1.13.0: deep-link from Prep's hole brief ("Tee" button) — the
+      // editor opens with tee mode already armed. One less tap; the hint
+      // line explains what to do.
+      if (new URLSearchParams(location.search).get('armtee') === '1') {
+        teeMode = true;
+      }
     }
 
     // Live crosshair readout.
@@ -157,6 +166,8 @@
         `Sample point: ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
     };
     setReadout(pin.getLatLng());
+    // v1.13.0: armtee deep-link re-syncs the UI once readout exists.
+    if (teeMode) syncTeeUI();
     // v-fix(trace-pin) v1.5.2 (Grok audit #10): in trace mode this handler
     // must not move the pin / overwrite the trace instruction. `tracing`
     // is declared below; the guard reads it lazily via the shared scope.

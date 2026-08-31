@@ -5678,3 +5678,10 @@ body[data-detent='full']:not([data-dragging='1']) .green3d-pill {
 body[data-dragging='1'] .green3d-pill {
   transition: none !important;
 }
+
+/* v1.13.0 — Check-location tee editor: armed state for the Move-tee button */
+.gel-btn.gel-armed {
+  background: rgba(24, 164, 91, 0.25);
+  border-color: rgba(24, 164, 91, 0.6);
+  color: #b8ffd9;
+}

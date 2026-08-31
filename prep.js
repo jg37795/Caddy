@@ -1289,7 +1289,24 @@
     // manual tee to the right hole.
     if (h.courseId) href += `&course=${encodeURIComponent(h.courseId)}`;
     href += `&hole=${h.number}`;
-    return `<a class="primary-btn prep-3d-btn" id="prep3dGreenBtn" href="${href}">` +
+    // v1.13.0 (James: "what if we have it next to the 3d green button"):
+    // a compact Tee button beside 3D Green — deep-links into Check
+    // location with TEE MODE PRE-ARMED (via &armtee=1), so fixing the
+    // tee box is: tap Tee → tap the map → tap Load. The editor itself
+    // lives there (it has the map); this is the shortcut.
+    let href2 = null;
+    if (g && Number.isFinite(g.lat)) {
+      href2 = `greenmap.html?lat=${g.lat.toFixed(6)}&lng=${g.lng.toFixed(6)}`;
+      if (t && Number.isFinite(t.lat) && Number.isFinite(t.lng)) {
+        href2 += `&teelat=${t.lat.toFixed(6)}&teelng=${t.lng.toFixed(6)}`;
+      }
+      if (h.courseId) href2 += `&course=${encodeURIComponent(h.courseId)}`;
+      href2 += `&hole=${h.number}&armtee=1`;
+    }
+    const teeBtn = href2
+      ? `<a class="ghost-btn prep-tee-btn" id="prepTeeBtn" href="${href2}" title="Place your tee box on a map">Tee</a>`
+      : '';
+    return `${teeBtn}<a class="primary-btn prep-3d-btn" id="prep3dGreenBtn" href="${href}">` +
       '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">' +
       '<path d="M3 17c3-2.6 6-2.6 9 0s6 2.6 9 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
       '<path d="M12 14V5.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +

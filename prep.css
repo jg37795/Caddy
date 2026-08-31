@@ -1298,6 +1298,18 @@ body.dark .prep-strat-advice {
   border-color: rgba(228, 160, 66, 0.45);
 }
 
+/* v1.13.0 — Tee shortcut beside the 3D Green button */
+.prep-tee-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: 14px;
+  margin-right: 8px;
+}
+
 /* v1.9.0 — the single hole card: number block, tiles-as-picker, tweaks */
 .prep-num-block {
   margin-top: 14px;

@@ -509,24 +509,30 @@ console.log('6. 3D orbit math — camera, projection, mesh');
     const green = [41.95, -93.75];
     // Tee ~200m due east of the green.
     const tee = [41.95, -93.75 + 200 / (111320 * Math.cos(41.95 * Math.PI / 180))];
-    const bb = GM.corridorBbox(green[0], green[1], tee[0], tee[1], 30, 300);
+    const bb = GM.corridorBbox(green[0], green[1], tee[0], tee[1], 30, 560, 50);
     const mLat = 110540, mLng = 111320 * Math.cos(41.95 * Math.PI / 180);
-    const sideM = (bb[2] - bb[0]) * mLng;
-    check('corridor covers both endpoints', 
+    // v1.13.0 (tight width): the corridor is a RECTANGLE now — length =
+    // tee→green + 2×30m margins; width = ±50m around the axis (axis-aligned
+    // envelope of the rotated rect; for a due-east hole that's exactly 100m
+    // wide after the diagonal bleed… for a due-E-W hole the envelope IS the
+    // rect: width = 2×50 = 100m).
+    const lenM = (bb[2] - bb[0]) * mLng;
+    const widM = (bb[3] - bb[1]) * mLat;
+    check('corridor covers both endpoints',
       bb[0] < green[1] && bb[2] > tee[1] && bb[1] < green[0] && bb[3] > green[0]);
-    check('span capped at 300m', sideM <= 301, sideM.toFixed(1));
-    const sideLatM = (bb[3] - bb[1]) * mLat;
-    check('square-ish bbox', Math.abs(sideM - sideLatM) / sideM < 0.02,
-      `${sideM.toFixed(1)} x ${sideLatM.toFixed(1)}`);
-    const bbNoTee = GM.corridorBbox(green[0], green[1], NaN, NaN, 30, 300);
+    check('length = 200 + 2×30 (260m)', Math.abs(lenM - 260) < 2, lenM.toFixed(1));
+    check('width tight (±50m → 100m)', Math.abs(widM - 100) < 2, widM.toFixed(1));
+    const bbNoTee = GM.corridorBbox(green[0], green[1], NaN, NaN, 30, 560);
     const sideNT = (bbNoTee[2] - bbNoTee[0]) * mLng;
-    check('no-tee fallback ≈ green ±150m (300m span)',
-      Math.abs(sideNT - 300) < 2, sideNT.toFixed(1));
+    // v1.13.0: no-tee fallback = cap square (560m) — used when Prep
+    // launches without a tee; the camera fit frames the actual mesh.
+    check('no-tee fallback = cap square (560m span)',
+      Math.abs(sideNT - 560) < 2, sideNT.toFixed(1));
     const cLng = (bbNoTee[0] + bbNoTee[2]) / 2;
     check('no-tee corridor centred on green', Math.abs(cLng - green[1]) < 1e-9);
     // Tee ~50m due north of the green.
     const bbSmall = GM.corridorBbox(green[0], green[1],
-      green[0] + 50 / mLat, green[1], 30, 300);
+      green[0] + 50 / mLat, green[1], 30, 560, 50);
     const sideSm = (bbSmall[3] - bbSmall[1]) * mLat;
     check('short hole padded by margin (≈110m)', sideSm > 105 && sideSm < 115,
       sideSm.toFixed(1));

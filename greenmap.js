@@ -746,30 +746,55 @@
 
   /* ---- Whole-hole flyover corridor --------------------------------------- */
 
-  // Square bbox covering tee→green (or green alone when tee is null) plus a
-  // margin, with the span capped (default 300 m) to stay inside API limits.
-  // Returns [w, s, e, n].
+  // v1.13.0 (tight width — James: "see how wide it generates the hole view,
+  // can we not tighten it up. leave room before the tee and after the
+  // green"): the old build made a SQUARE bbox (width forced = length), so
+  // a 300-yd hole carried 300+ m of empty ground on each side. Now the
+  // bbox is a RECTANGLE: full tee→green length + 30 m margins on the
+  // ENDS, but width limited to ±widthM (50 m default ≈ rough + adjacent
+  // trouble) around the tee→green axis line. The camera fit adapts to the
+  // actual mesh automatically.
+  // Rotated-rectangle vs axis-aligned: we return an axis-aligned bbox of
+  // the ROTATED rectangle (tee→green axis may be diagonal). Implementation:
+  // walk the four corners of the oriented rectangle through the EN
+  // projection and take min/max.
   GreenMapCore.corridorBbox = function (latA, lngA, latB, lngB,
-                                        marginM = 30, capSpanM = 300) {
-    const pts = [[latA, lngA]];
+                                        marginM = 30, capSpanM = 560,
+                                        halfWidthM = 50) {
     const hasTee = Number.isFinite(latB) && Number.isFinite(lngB);
-    if (hasTee) pts.push([latB, lngB]);
-    let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
-    pts.forEach(([la, lo]) => {
-      w = Math.min(w, lo); e = Math.max(e, lo);
-      s = Math.min(s, la); n = Math.max(n, la);
-    });
     const mLat = 110540;
-    const mLng = 111320 * Math.cos(((s + n) / 2) * Math.PI / 180);
-    const spanM = Math.max((e - w) * mLng, (n - s) * mLat);
-    // No known tee → spec fallback: green centre ±150m (full-cap square).
-    const mg = marginM == null ? 30 : marginM;
-    const sideM = hasTee
-      ? Math.min(capSpanM, spanM + 2 * mg)
-      : capSpanM;
-    const hx = sideM / 2 / mLng, hy = sideM / 2 / mLat;
-    const cLat = (s + n) / 2, cLng = (w + e) / 2;
-    return [cLng - hx, cLat - hy, cLng + hx, cLat + hy];
+    const mLng = 111320 * Math.cos(((latA + (hasTee ? latB : latA)) / 2) * Math.PI / 180);
+    // EN of B relative to A (yards not needed; metres fine)
+    const bx = hasTee ? (lngB - lngA) * mLng : 0;
+    const by = hasTee ? (latB - latA) * mLat : 0;
+    let sideM, cornersEN;
+    if (!hasTee) {
+      // No tee: square around the green at the cap (spec fallback).
+      sideM = capSpanM;
+      const hx = sideM / 2 / mLng, hy = sideM / 2 / mLat;
+      return [lngA - hx, latA - hy, lngA + hx, latA + hy];
+    }
+    const L = Math.hypot(bx, by);
+    const len = Math.min(L + 2 * marginM, capSpanM);
+    // Oriented rectangle: along axis = unit(tee→green), half-width each side.
+    const ux = bx / (L || 1e-9), uy = by / (L || 1e-9);
+    const px = -uy, py = ux;
+    const halfLen = len / 2;
+    const cx = bx / 2, cy = by / 2;   // rectangle centre (A + B)/2 in EN
+    const hw = Math.min(halfWidthM, halfLen);
+    cornersEN = [
+      [cx + ux * halfLen + px * hw, cy + uy * halfLen + py * hw],
+      [cx + ux * halfLen - px * hw, cy + uy * halfLen - py * hw],
+      [cx - ux * halfLen + px * hw, cy - uy * halfLen + py * hw],
+      [cx - ux * halfLen - px * hw, cy - uy * halfLen - py * hw],
+    ];
+    let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+    for (const [ex, ey] of cornersEN) {
+      const lng = lngA + ex / mLng, lat = latA + ey / mLat;
+      w = Math.min(w, lng); e = Math.max(e, lng);
+      s = Math.min(s, lat); n = Math.max(n, lat);
+    }
+    return [w, s, e, n];
   };
 
   // Build the 3D mesh once per grid load / exaggeration change.
@@ -1943,11 +1968,16 @@
     // and hollows read even under satellite photo (photo share 0.9 nearly
     // hid the terrain). Same NW sun as the topo ramp; gentle 0.75–1.18
     // multiplicative band. Pure arithmetic on the existing grid.
+    // v1.13.0: STYLIZED mode gets a DEEPER band (0.62–1.30) — with no
+    // photo texture the shading IS the terrain read; photo keeps 0.75–1.18
+    // so the imagery isn't over-darkened.
     try {
       const field = ds.field;
       if (field && field.gx && field.gy) {
         const W = gr.W, H = gr.H;
         const L = GreenMapCore.LIGHT_DIR;
+        const shadeLo = texMode === 'stylized' ? 0.62 : 0.75;
+        const shadeHi = texMode === 'stylized' ? 1.30 : 1.18;
         for (let q = 0; q < M.count; q++) {
           const ix = q % (W - 1), iy = (q / (W - 1)) | 0;
           if (!field.valid[iy * W + ix]) continue;   // void cells keep flat light
@@ -1957,7 +1987,7 @@
           const len = Math.hypot(gx, gy, 1);
           const nx = -gx / len, ny = -gy / len, nz = 1 / len;
           const lam = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
-          const k = 0.75 + 0.43 * lam;      // 0.75 (shade) .. 1.18 (lit)
+          const k = shadeLo + (shadeHi - shadeLo) * lam;
           for (let c = 0; c < 4; c++) {
             const o = q * 12 + c * 3;
             vcol[o] = Math.min(255, vcol[o] * k);
@@ -2002,12 +2032,21 @@
         // use the same ring), or the corridor's zone edge slivers.
         polyLocalM: null,
         colorFn: (i, zMid) => {
+          // v1.13.0 (composed stylized palette — James: "the stylized green
+          // looks so bland"): the old fill was ONE sage colour for the
+          // whole fairway. Now the terrain reads as an authored course
+          // illustration, using data we already have per cell:
+          //   • distance to the green zone edge classifies FAIRWAY (a
+          //     ribbon hugging the target) vs ROUGH (everything else) —
+          //     fairway is lighter/warmer, rough darker/cooler;
+          //   • gentle two-tone banding from relative elevation breaks
+          //     up large areas;
+          //   • fine slope-driven mottle in the rough (heat-haze texture).
+          // The green zone keeps its vivid slope/elev ramp (already good).
           if (zone && zone[i]) {
-            // Active-ramp colour for green cells (3D → rainbow topo).
             if (state.mode === 'elev')
               return GreenMapCore.elevationColorRainbow(
                 (zMid - lo) / Math.max(1e-6, hi - lo));
-            // Slope % from raw neighbours (cheap central difference).
             const W = ds.eg.W, cs = ds.eg.cellSizeM;
             const ix = i % W, iy = (i / W) | 0;
             const zx1 = ix < W - 1 ? g[i + 1] : g[i];
@@ -2017,14 +2056,62 @@
             const slp = Math.hypot(zx1 - zx0, zy1 - zy0) / (2 * cs) * 100;
             return GreenMapCore.slopeColor(slp);
           }
-          // Muted fairway, gently varied by relative elevation.
-          // v1.1.4: brightened — the old base read near-black on shaded
-          // exaggerated faces and the whole tee half vanished into the
-          // background at glancing angles.
+          const W = ds.eg.W, cs = ds.eg.cellSizeM;
+          const ix = i % W, iy = (i / W) | 0;
+          const zx1 = ix < W - 1 ? g[i + 1] : g[i];
+          const zx0 = ix > 0 ? g[i - 1] : g[i];
+          const zy1 = iy < ds.eg.H - 1 ? g[i + W] : g[i];
+          const zy0 = iy > 0 ? g[i - W] : g[i];
+          const slp = Math.hypot(zx1 - zx0, zy1 - zy0) / (2 * cs) * 100;
+
+          // Distance to the nearest green-zone cell (BFS from the zone,
+          // computed once per corridor build and cached on the dataset).
+          let dGreen = ds.dGreen;
+          if (dGreen == null) {
+            // BFS over the grid (8-connected), seed = zone cells.
+            dGreen = new Float32Array(W * ds.eg.H).fill(Infinity);
+            const q = [];
+            for (let k = 0; k < zone.length; k++)
+              if (zone[k]) { dGreen[k] = 0; q.push(k); }
+            for (let qi = 0; qi < q.length; qi++) {
+              const k = q[qi], kx = k % W, ky = (k / W) | 0;
+              const dk = dGreen[k];
+              for (let dy2 = -1; dy2 <= 1; dy2++)
+                for (let dx2 = -1; dx2 <= 1; dx2++) {
+                  if (!dx2 && !dy2) continue;
+                  const nx = kx + dx2, ny = ky + dy2;
+                  if (nx < 0 || ny < 0 || nx >= W || ny >= ds.eg.H) continue;
+                  const nk = ny * W + nx;
+                  if (dGreen[nk] > dk + 1) { dGreen[nk] = dk + 1; q.push(nk); }
+                }
+            }
+            ds.dGreen = dGreen;
+          }
+          const cells = dGreen[i];   // ~1 cell = cs metres
+
+          // FAIRWAY ribbon: within ~12 m of the green edge or a smooth
+          // corridor (low slope) close to it; ROUGH: everything else.
+          const isFairway = cells <= Math.round(14 / cs) ||
+            (cells <= Math.round(26 / cs) && slp < 6);
+          // Relative elevation banding (two gentle tones per class).
           const t = Math.max(-1, Math.min(1,
             (zMid - (lo + hi) / 2) / Math.max(0.5, hi - lo)));
-          const k = 1 + t * 0.10;
-          return [138 * k, 154 * k, 130 * k].map(Math.round);
+          const band = 1 + t * 0.07;
+          // Fine mottle in the rough: slope-driven, deterministic (hash of
+          // the cell index) so it never shimmers between frames.
+          const hash = ((ix * 73856093) ^ (iy * 19349663)) & 1023;
+          const mottle = isFairway ? 1 : 0.92 + (hash / 1023) * 0.13 +
+            Math.min(0.06, slp * 0.004);
+          if (isFairway) {
+            // Warm light green — clearly maintained corridor.
+            return [Math.round(158 * band * mottle),
+                    Math.round(176 * band * mottle),
+                    Math.round(134 * band * mottle)];
+          }
+          // Cool darker rough.
+          return [Math.round(106 * band * mottle),
+                  Math.round(126 * band * mottle),
+                  Math.round(100 * band * mottle)];
         }
       });
     if (ds.mesh) ds.mesh.gridRef = state.meshGrid;
@@ -3513,7 +3600,22 @@
       let strokeCol = null;   // v1.4.4: per-quad seam-cover colour
       const midCol = `rgb(${M.col[q * 3] | 0},${M.col[q * 3 + 1] | 0},${M.col[q * 3 + 2] | 0})`;
       if (state.layer === 'arrows') {
-        fill = 'rgb(24,32,27)';   // near-background green-black
+        // v1.13.0 (James: the arrows button seemed broken on hole view):
+        // the old flat 'rgb(24,32,27)' fill was ~the page background — the
+        // whole corridor vanished and only sparse arrows showed. Now the
+        // terrain stays VISIBLE but dimmed: current texture at 45%
+        // brightness (photo or stylized) + hillshade still in vcol, so
+        // the land reads while the arrows pop.
+        const dim = (r, g2, b) => `rgb(${(r * 0.45) | 0},${(g2 * 0.45) | 0},${(b * 0.45) | 0})`;
+        if (state.viewMode === 'hole' && M.gridRef && M.qPhoto && M.qPhoto[q]) {
+          const m = M.qPhoto[q].match(/\d+/g);
+          if (m) fill = dim(+m[0], +m[1], +m[2]);
+        }
+        if (!fill && M.vcol) {
+          const c0 = q * 12;
+          fill = dim(M.vcol[c0], M.vcol[c0 + 1], M.vcol[c0 + 2]);
+        }
+        if (!fill) fill = dim(M.col[q * 3], M.col[q * 3 + 1], M.col[q * 3 + 2]);
       // v1.4.5 (BAKE, don't sample per frame): v1.4.4 sampled the photo at
       // 4 corners + centre PER QUAD PER FRAME during rotation — ~36k
       // getImageData calls + gradient allocations per orbit frame = the
