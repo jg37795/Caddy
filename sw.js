@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.6.0'; // AUTO-GREEN-DETECTION: green-detect.js (Grok 4.6 algorithm, R1-R4 calibration loop) wired into the source ladder as detected -> trace -> OSM -> ellipse; conf >= 0.6 gate; badge '⚠ detected outline — verify via Check location' with tap-to-trace; per-cell feature pipeline (slope/smooth3/tex5/exg/bright) computed at load; sat features land async and re-render
+const CACHE_VERSION = 'v1.6.1'; // DETECTION UX: (1) smart area-aware pin cap replaces the hard 18m radius — greens extending past the cap no longer get sliced flat (James's razor-straight east edge); IoU unchanged on all 7 calibration sites; (2) loading card shows live stages: Reading elevation -> Mapping green shape -> Detecting green edges; (3) NOTHING guard: degenerate mask (<30 cells) renders an honest 'Couldn't map a green here' card pointing at Check location instead of an empty square
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

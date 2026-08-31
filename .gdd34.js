@@ -1,15 +1,3 @@
-/* ==========================================================================
-   green-detect.js — auto-detect putting green from LiDAR + imagery (v1.6.0)
-   --------------------------------------------------------------------------
-   Algorithm by Grok 4.6 (one-shot, R4) with per-site calibration by the
-   R1-R3 loop: seeded region grow (painter-safe), relative flank gates
-   (core-median similarity), pin-anchored trim, 18 m pin radius, collar
-   shrink. Scored vs OSM ground truth: mean IoU 0.718 across 7 sites
-   (A 0.743 / B 0.741 / C-D-E-F-G 0.646-0.821). Conf < 0.6 never loads;
-   the trace editor remains the fallback and the badge always says
-   "detected outline" — never presented as surveyed data.
-   Exposes window.GreenDetect.detect(data) -> {poly, confidence} | null
-   ========================================================================== */
 window.GreenDetect.detect = function (data) {
   const g = data && data.grid, W = g && g.W | 0, H = g && g.H | 0, cs = g && g.cellSizeM, N = W * H;
   if (!g || !N || !g.z) { console.log("EXIT guard", !!g, N, g && !!g.z); return null; }
@@ -80,16 +68,7 @@ window.GreenDetect.detect = function (data) {
     score[i] = s;
     if (dist <= 55 && s > maxNear) { maxNear = s; maxNearI = i; }
   }
-  console.log("EXIT maxNear", maxNear.toFixed(3)); console.error('[dbg] score map y=+18..-18, x=-12..+12:');
-  for (let my = 18; my >= -18; my -= 6) {
-    let row = '[dbg] y' + String(my).padStart(4) + ':';
-    for (let mx = -12; mx <= 12; mx += 6) {
-      const i = Math.round(H / 2 - my / cs) * W + Math.round(mx / cs + W / 2);
-      row += String(score[i].toFixed(2)).padStart(7);
-    }
-    console.error(row);
-  }
-  if (maxNear < 0.36) { console.log("EXIT maxNear", maxNear.toFixed(3)); return null; }
+  console.log("EXIT maxNear", maxNear.toFixed(3)); if (maxNear < 0.36) { console.log("EXIT maxNear", maxNear.toFixed(3)); return null; }
 
   function grow(loT, hiT, maxR) {
     const keep = new Uint8Array(N), q = [];
@@ -144,22 +123,17 @@ window.GreenDetect.detect = function (data) {
   // v-tune13: flank admissibility — dome flanks fail the smoothness
   // blend but are still green: mow-texture present, slope moderate,
   // not water (br), not rough (slope cap).
-  // v-r3b (GT/fairway census): green p90 slope 12.0, fairway p90 20.7;
-  // green br p10 111, fairway p10 43; smooth3 overlaps (0.31 vs 0.52 p90)
-  // so cap at 0.40. Depth-limited BFS (3 cells) stops fairway leaks.
   const flankOk = (i) => {
-    if (!fin(br[i]) || br[i] < 85) return false;
-    if (fin(sl[i]) && sl[i] > 13) return false;
+    if (!fin(br[i]) || br[i] < 60) return false;
+    if (fin(sl[i]) && sl[i] > 12) return false;
     if (!fin(tx[i]) || tx[i] < 0.6 || tx[i] > 16) return false;
-    if (!fin(sm[i]) || sm[i] > 0.40) return false;
     return true;
   };
   let hi = Math.max(0.50, maxNear * 0.70), lo = Math.max(0.33, hi * 0.58);
   let keep = grow(lo, hi, 65), cnt = nOn(keep);
   for (let a = 0; a < 5; a++) {
     const area = cnt * ca;
-    // v-r3f: cap the tighten at lo 0.42 (siteB sliver death)
-    if (area > 2500 && lo < 0.42) { lo = Math.min(0.42, lo + 0.055); hi += 0.035; keep = grow(lo, hi, 65); cnt = nOn(keep); }
+    if (area > 2500) { lo += 0.055; hi += 0.035; keep = grow(lo, hi, 65); cnt = nOn(keep); }
     else if (area < 150 && lo > 0.26) { lo -= 0.05; keep = grow(lo, hi, 75); cnt = nOn(keep); }
     else break;
   }
@@ -179,10 +153,7 @@ window.GreenDetect.detect = function (data) {
       if (Math.hypot((ix - W / 2) * cs - csx, (H / 2 - iy) * cs - csy) > 65) keep[i] = 0;
     }
   }
-  // v-r3e (seed survival): a lone pin-seed (sparse-data greens) is killed
-  // by erode, which requires all 8 neighbours. Tiny blobs dilate-only.
-  keep = cnt * ca > 1400 ? dilate(erode(keep))
-    : cnt < 9 ? dilate(keep) : erode(dilate(keep));
+  keep = cnt * ca > 1400 ? dilate(erode(keep)) : erode(dilate(keep));
   // fill interior holes (output is a single ring)
   const ext = new Uint8Array(N), eq = [];
   const ep = (i) => { if (i >= 0 && i < N && !keep[i] && !ext[i]) { ext[i] = 1; eq.push(i); } };
@@ -228,8 +199,6 @@ window.GreenDetect.detect = function (data) {
       if (i === oi) contains = 1;
     }
     if (maxx - minx < 8 || maxy - miny < 8) continue;
-    console.error('[dbg] COMP area', area.toFixed(0),
-      'contains', contains, 'bbox', (maxx - minx).toFixed(0) + 'x' + (maxy - miny).toFixed(0));
     const cd = Math.hypot(sx / cells.length, sy / cells.length);
     if (cd > 120) continue;
     const key = (contains ? 0 : 1) * 1e6 + cd + minD * 0.25;
@@ -243,78 +212,32 @@ window.GreenDetect.detect = function (data) {
   // that touch the core blob and pass slope/texture/brightness gates.
   // Fixes under-growth on tilted greens (siteA east flank).
   {
-    // v-r3b: BFS with per-cell depth (max 3 cells from the core) — admits
-    // the dome flank while capping any fairway leak to a 3-cell skirt.
-    const depth = new Int16Array(N).fill(-1);
     const fq = [];
-    for (let i = 0; i < N; i++) if (chosen[i]) { depth[i] = 0; fq.push(i); }
+    for (let i = 0; i < N; i++) if (chosen[i]) fq.push(i);
+    let grown = 0;
     for (let qi = 0; qi < fq.length; qi++) {
       const i = fq[qi], x = i % W, y = (i / W) | 0;
-      if (depth[i] >= 3) continue;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         if (!dx && !dy) continue;
         const nx = x + dx, ny = y + dy;
         if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1) continue;
         const j = ny * W + nx;
-        if (chosen[j] || depth[j] >= 0) continue;
+        if (chosen[j]) continue;
         if (Math.hypot((nx - W / 2) * cs, (H / 2 - ny) * cs) > 60) continue;
         if (!flankOk(j)) continue;
-        chosen[j] = 1; depth[j] = depth[i] + 1; fq.push(j);
+        chosen[j] = 1; fq.push(j); grown++;
       }
     }
   }
   // 4-connected outer ring on cell corners (true footprint, not inset centres)
-  // v-r3c (pin-anchored trim): keep only the connected component that
-  // contains the pin. Any detached growth (aprons, neighbouring greens,
-  // pond-edge smoothness) is a different feature by definition.
-  {
-    const comp = new Uint8Array(N);
-    const oi2 = ((H / 2) | 0) * W + ((W / 2) | 0);
-    if (chosen[oi2]) {
-      const q2 = [oi2];
-      comp[oi2] = 1;
-      for (let qi = 0; qi < q2.length; qi++) {
-        const i = q2[qi], x = i % W, y = (i / W) | 0;
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy) continue;
-          const nx = x + dx, ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-          const j = ny * W + nx;
-          if (chosen[j] && !comp[j]) { comp[j] = 1; q2.push(j); }
-        }
-      }
-      for (let i = 0; i < N; i++) if (chosen[i] && !comp[i]) chosen[i] = 0;
+  console.error('[dbg] chosen (x -36..+36 step 6, y +30..-30 step 6):');
+  for (let my = 30; my >= -30; my -= 6) {
+    let row = '[dbg] y' + String(my).padStart(4) + ' ';
+    for (let mx = -36; mx <= 36; mx += 6) {
+      const ix = Math.round(mx / cs + W / 2), iy = Math.round(H / 2 - my / cs);
+      row += chosen[iy * W + ix] ? '#' : '.';
     }
-  }
-  // v-r3d (pin-radius trim): the pin is ON the green; a green is
-  // 300-900 m2 (max radius ~19 m). Keep only kept-cells within 20 m of
-  // the pin - severs the west apron bridge that connected-trim cannot.
-  // v-r6 (smart cap, James's sliced-green shot): a HARD radius produced a
-  // razor-straight chord where a green legitimately extends past the cap
-  // (his east edge). Replace with a AREA-AWARE cap: grow the radius until
-  // the kept-cell area stops growing meaningfully (the blob has ended) or
-  // the physical green cap (24 m) is hit. Bridges are thin (1-3 cells) —
-  // each radius step over a bridge adds few cells; over real green it
-  // adds many. Stop at the first step adding < 4% of current area.
-  {
-    // sort kept cells by distance from pin once
-    const dcells = [];
-    for (let i = 0; i < N; i++) {
-      if (!chosen[i]) continue;
-      const mx = ((i % W) - W / 2) * cs, my = (H / 2 - ((i / W) | 0)) * cs;
-      dcells.push([Math.hypot(mx, my), i]);
-    }
-    dcells.sort((a, b) => a[0] - b[0]);
-    let keptN = 0, prevArea = 0, capR = 18;
-    let di = 0;
-    for (let r = 4; r <= 24; r += 2) {
-      while (di < dcells.length && dcells[di][0] <= r) { keptN++; di++; }
-      const area = keptN * cs * cs;
-      if (r > 4 && area - prevArea < prevArea * 0.04) { capR = r - 2; break; }
-      prevArea = area;
-      capR = r;
-    }
-    for (const [d, i] of dcells) if (d > capR) chosen[i] = 0;
+    console.error(row);
   }
   const nxt = new Int32Array(W1 * (H + 1)).fill(-1);
   const addE = (x0, y0, x1, y1) => { nxt[y0 * W1 + x0] = y1 * W1 + x1; };
@@ -397,32 +320,6 @@ window.GreenDetect.detect = function (data) {
       return L.slice(0, -1).concat(R);
     }
     return [a, b];
-  }
-  // v-r3e (collar shrink): the detected ring rides the collar's OUTER
-  // edge (~1.2 m past the putting surface). Radial inset by 1.2 m per
-  // vertex toward the ring centroid (floor 0.2 m to avoid collapse).
-  {
-    let rcx = 0, rcy = 0;
-    for (const p of ring) { rcx += p[0]; rcy += p[1]; }
-    rcx /= ring.length; rcy /= ring.length;
-    for (const p of ring) {
-      const dx = p[0] - rcx, dy = p[1] - rcy;
-      const d = Math.hypot(dx, dy) || 1;
-      const k = Math.max(0.2, (d - 1.0) / d);
-      p[0] = rcx + dx * k; p[1] = rcy + dy * k;
-    }
-  }
-  // v-r3g (collar shrink 1.0 m): ring rides the collar outer edge.
-  {
-    let rcx = 0, rcy = 0;
-    for (const p of ring) { rcx += p[0]; rcy += p[1]; }
-    rcx /= ring.length; rcy /= ring.length;
-    for (const p of ring) {
-      const dx = p[0] - rcx, dy = p[1] - rcy;
-      const d = Math.hypot(dx, dy) || 1;
-      const k = Math.max(0.2, (d - 1.0) / d);
-      p[0] = rcx + dx * k; p[1] = rcy + dy * k;
-    }
   }
   const closed = ring.concat([ring[0]]);
   let eps = cs * 0.6, simp = dp(closed, eps), guard = 0;

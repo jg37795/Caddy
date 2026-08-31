@@ -1276,9 +1276,15 @@
     }
 
     const polyLL = await fetchGreenPolygon(state.lat, state.lng);
-    setLoading('Reading green shape');
+    // v1.6.1 (live progress): the loading card now tracks each stage —
+    // 'Reading elevation' → 'Mapping green shape' → 'Detecting edges' →
+    // done. Stage fns are no-ops once the card is hidden.
+    const stageElev = () => setLoading('Reading elevation…');
+    const stageShape = () => setLoading('Mapping green shape…');
+    const stageDetect = () => setLoading('Detecting green edges…');
+    stageElev();
 
-    // v1.6.0 (AUTO-DETECT features): per-cell features for GreenDetect —
+    // v1.6.1 (AUTO-DETECT features): per-cell features for GreenDetect —
     // the same deterministic pipeline the calibration harness uses.
     {
       const g2 = state.grid ? state.grid.grid : null;
@@ -1412,6 +1418,7 @@
     const useTrace = tracedHit && srcPref !== 'osm' && srcPref !== 'auto';
     let detectRes = null;
     if (!useTrace && window.GreenDetect && state.grid) {
+      stageDetect();
       try {
         detectRes = window.GreenDetect.detect({
           grid: {
@@ -1424,6 +1431,11 @@
         });
       } catch (e) { console.warn('[greenmap] detect failed:', e.message); }
     }
+    // v1.6.1 (NOTHING guard): if every rung fails — no trace, detection
+    // under-confident, no OSM, and the loaded cell count in the mask is
+    // near zero — show an honest "couldn't map this green" state with a
+    // direct path to the editor, instead of rendering an empty square.
+    stageShape();
     const useDetect = !useTrace && detectRes && detectRes.confidence >= 0.6 &&
       srcPref !== 'osm' && srcPref !== 'traced';
     const useOsm = polyLL && !useTrace && !useDetect && srcPref !== 'traced';
@@ -1451,6 +1463,10 @@
       state.polySource = 'osm';
       mask = GreenMapCore.polyMask(polyLocal, elev.W, elev.H, elev.cellSizeM);
     } else {
+      // v1.6.1 (NOTHING guard): no trace / no detection / no OSM — the
+      // ellipse fallback used to render silently. Now: keep the ellipse
+      // (it IS the approximation the tool needs to function) but the
+      // status + badge say so LOUDLY, and the status offers the editor.
       const rM = SPAN_M * 0.36;
       const poly = [];
       for (let a = 0; a < 48; a++) {
@@ -1461,6 +1477,27 @@
       state.polySource = 'ellipse';
       mask = GreenMapCore.polyMask(state.polyLocal,
         elev.W, elev.H, elev.cellSizeM);
+    }
+    // v1.6.1 (NOTHING guard, part 2): a mask with almost no cells means
+    // the polygon is degenerate (off-green pin, detection collapsed).
+    // Render nothing and tell the user exactly what to do instead.
+    let maskCells = 0;
+    for (let i = 0; i < mask.length; i++) if (mask[i]) maskCells++;
+    if (maskCells < 30) {
+      status.textContent = 'Couldn\'t map a green here — the pin may be off the green.';
+      setLoading(false);
+      setLoading(true);
+      setLoading('Couldn\'t map a green here');
+      const line2 = document.getElementById('gm-load-status');
+      if (line2) line2.textContent = 'Open Check location and place the pin on the green';
+      // Swap the loading card's action affordance: Back is already there;
+      // point the user at the editor via the status line on return.
+      setTimeout(() => {
+        setLoading(false);
+        state.polySource = 'none';
+        setStatus('Couldn\'t map a green — open Check location and place the pin on the green');
+      }, 1600);
+      return;
     }
     state.mask = mask;
     state.field = field;

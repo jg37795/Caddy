@@ -1,15 +1,3 @@
-/* ==========================================================================
-   green-detect.js — auto-detect putting green from LiDAR + imagery (v1.6.0)
-   --------------------------------------------------------------------------
-   Algorithm by Grok 4.6 (one-shot, R4) with per-site calibration by the
-   R1-R3 loop: seeded region grow (painter-safe), relative flank gates
-   (core-median similarity), pin-anchored trim, 18 m pin radius, collar
-   shrink. Scored vs OSM ground truth: mean IoU 0.718 across 7 sites
-   (A 0.743 / B 0.741 / C-D-E-F-G 0.646-0.821). Conf < 0.6 never loads;
-   the trace editor remains the fallback and the badge always says
-   "detected outline" — never presented as surveyed data.
-   Exposes window.GreenDetect.detect(data) -> {poly, confidence} | null
-   ========================================================================== */
 window.GreenDetect.detect = function (data) {
   const g = data && data.grid, W = g && g.W | 0, H = g && g.H | 0, cs = g && g.cellSizeM, N = W * H;
   if (!g || !N || !g.z) { console.log("EXIT guard", !!g, N, g && !!g.z); return null; }
@@ -80,16 +68,7 @@ window.GreenDetect.detect = function (data) {
     score[i] = s;
     if (dist <= 55 && s > maxNear) { maxNear = s; maxNearI = i; }
   }
-  console.log("EXIT maxNear", maxNear.toFixed(3)); console.error('[dbg] score map y=+18..-18, x=-12..+12:');
-  for (let my = 18; my >= -18; my -= 6) {
-    let row = '[dbg] y' + String(my).padStart(4) + ':';
-    for (let mx = -12; mx <= 12; mx += 6) {
-      const i = Math.round(H / 2 - my / cs) * W + Math.round(mx / cs + W / 2);
-      row += String(score[i].toFixed(2)).padStart(7);
-    }
-    console.error(row);
-  }
-  if (maxNear < 0.36) { console.log("EXIT maxNear", maxNear.toFixed(3)); return null; }
+  console.log("EXIT maxNear", maxNear.toFixed(3)); if (maxNear < 0.36) { console.log("EXIT maxNear", maxNear.toFixed(3)); return null; }
 
   function grow(loT, hiT, maxR) {
     const keep = new Uint8Array(N), q = [];
@@ -158,8 +137,7 @@ window.GreenDetect.detect = function (data) {
   let keep = grow(lo, hi, 65), cnt = nOn(keep);
   for (let a = 0; a < 5; a++) {
     const area = cnt * ca;
-    // v-r3f: cap the tighten at lo 0.42 (siteB sliver death)
-    if (area > 2500 && lo < 0.42) { lo = Math.min(0.42, lo + 0.055); hi += 0.035; keep = grow(lo, hi, 65); cnt = nOn(keep); }
+    if (area > 2500) { lo += 0.055; hi += 0.035; keep = grow(lo, hi, 65); cnt = nOn(keep); }
     else if (area < 150 && lo > 0.26) { lo -= 0.05; keep = grow(lo, hi, 75); cnt = nOn(keep); }
     else break;
   }
@@ -179,10 +157,7 @@ window.GreenDetect.detect = function (data) {
       if (Math.hypot((ix - W / 2) * cs - csx, (H / 2 - iy) * cs - csy) > 65) keep[i] = 0;
     }
   }
-  // v-r3e (seed survival): a lone pin-seed (sparse-data greens) is killed
-  // by erode, which requires all 8 neighbours. Tiny blobs dilate-only.
-  keep = cnt * ca > 1400 ? dilate(erode(keep))
-    : cnt < 9 ? dilate(keep) : erode(dilate(keep));
+  keep = cnt * ca > 1400 ? dilate(erode(keep)) : erode(dilate(keep));
   // fill interior holes (output is a single ring)
   const ext = new Uint8Array(N), eq = [];
   const ep = (i) => { if (i >= 0 && i < N && !keep[i] && !ext[i]) { ext[i] = 1; eq.push(i); } };
@@ -227,9 +202,7 @@ window.GreenDetect.detect = function (data) {
       if (d < minD) minD = d;
       if (i === oi) contains = 1;
     }
-    if (maxx - minx < 8 || maxy - miny < 8) continue;
-    console.error('[dbg] COMP area', area.toFixed(0),
-      'contains', contains, 'bbox', (maxx - minx).toFixed(0) + 'x' + (maxy - miny).toFixed(0));
+    console.log("COMP area", area.toFixed(0), "cd", cd.toFixed(1), "contains", contains, "bbox", (maxx-minx).toFixed(0) + "x" + (maxy-miny).toFixed(0)); if (maxx - minx < 8 || maxy - miny < 8) continue;
     const cd = Math.hypot(sx / cells.length, sy / cells.length);
     if (cd > 120) continue;
     const key = (contains ? 0 : 1) * 1e6 + cd + minD * 0.25;
@@ -289,32 +262,10 @@ window.GreenDetect.detect = function (data) {
   // v-r3d (pin-radius trim): the pin is ON the green; a green is
   // 300-900 m2 (max radius ~19 m). Keep only kept-cells within 20 m of
   // the pin - severs the west apron bridge that connected-trim cannot.
-  // v-r6 (smart cap, James's sliced-green shot): a HARD radius produced a
-  // razor-straight chord where a green legitimately extends past the cap
-  // (his east edge). Replace with a AREA-AWARE cap: grow the radius until
-  // the kept-cell area stops growing meaningfully (the blob has ended) or
-  // the physical green cap (24 m) is hit. Bridges are thin (1-3 cells) —
-  // each radius step over a bridge adds few cells; over real green it
-  // adds many. Stop at the first step adding < 4% of current area.
-  {
-    // sort kept cells by distance from pin once
-    const dcells = [];
-    for (let i = 0; i < N; i++) {
-      if (!chosen[i]) continue;
-      const mx = ((i % W) - W / 2) * cs, my = (H / 2 - ((i / W) | 0)) * cs;
-      dcells.push([Math.hypot(mx, my), i]);
-    }
-    dcells.sort((a, b) => a[0] - b[0]);
-    let keptN = 0, prevArea = 0, capR = 18;
-    let di = 0;
-    for (let r = 4; r <= 24; r += 2) {
-      while (di < dcells.length && dcells[di][0] <= r) { keptN++; di++; }
-      const area = keptN * cs * cs;
-      if (r > 4 && area - prevArea < prevArea * 0.04) { capR = r - 2; break; }
-      prevArea = area;
-      capR = r;
-    }
-    for (const [d, i] of dcells) if (d > capR) chosen[i] = 0;
+  for (let i = 0; i < N; i++) {
+    if (!chosen[i]) continue;
+    const mx = ((i % W) - W / 2) * cs, my = (H / 2 - ((i / W) | 0)) * cs;
+    if (Math.hypot(mx, my) > 20) chosen[i] = 0;
   }
   const nxt = new Int32Array(W1 * (H + 1)).fill(-1);
   const addE = (x0, y0, x1, y1) => { nxt[y0 * W1 + x0] = y1 * W1 + x1; };
@@ -408,19 +359,7 @@ window.GreenDetect.detect = function (data) {
     for (const p of ring) {
       const dx = p[0] - rcx, dy = p[1] - rcy;
       const d = Math.hypot(dx, dy) || 1;
-      const k = Math.max(0.2, (d - 1.0) / d);
-      p[0] = rcx + dx * k; p[1] = rcy + dy * k;
-    }
-  }
-  // v-r3g (collar shrink 1.0 m): ring rides the collar outer edge.
-  {
-    let rcx = 0, rcy = 0;
-    for (const p of ring) { rcx += p[0]; rcy += p[1]; }
-    rcx /= ring.length; rcy /= ring.length;
-    for (const p of ring) {
-      const dx = p[0] - rcx, dy = p[1] - rcy;
-      const d = Math.hypot(dx, dy) || 1;
-      const k = Math.max(0.2, (d - 1.0) / d);
+      const k = Math.max(0.2, (d - 1.2) / d);
       p[0] = rcx + dx * k; p[1] = rcy + dy * k;
     }
   }

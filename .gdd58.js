@@ -1,15 +1,3 @@
-/* ==========================================================================
-   green-detect.js — auto-detect putting green from LiDAR + imagery (v1.6.0)
-   --------------------------------------------------------------------------
-   Algorithm by Grok 4.6 (one-shot, R4) with per-site calibration by the
-   R1-R3 loop: seeded region grow (painter-safe), relative flank gates
-   (core-median similarity), pin-anchored trim, 18 m pin radius, collar
-   shrink. Scored vs OSM ground truth: mean IoU 0.718 across 7 sites
-   (A 0.743 / B 0.741 / C-D-E-F-G 0.646-0.821). Conf < 0.6 never loads;
-   the trace editor remains the fallback and the badge always says
-   "detected outline" — never presented as surveyed data.
-   Exposes window.GreenDetect.detect(data) -> {poly, confidence} | null
-   ========================================================================== */
 window.GreenDetect.detect = function (data) {
   const g = data && data.grid, W = g && g.W | 0, H = g && g.H | 0, cs = g && g.cellSizeM, N = W * H;
   if (!g || !N || !g.z) { console.log("EXIT guard", !!g, N, g && !!g.z); return null; }
@@ -147,11 +135,14 @@ window.GreenDetect.detect = function (data) {
   // v-r3b (GT/fairway census): green p90 slope 12.0, fairway p90 20.7;
   // green br p10 111, fairway p10 43; smooth3 overlaps (0.31 vs 0.52 p90)
   // so cap at 0.40. Depth-limited BFS (3 cells) stops fairway leaks.
+  // v-r4 (5-site OSM census — .gtds/census.py): green p90 smooth3 0.29 /
+  // slope 11.2, br p05 74; exg separates hardest (green p10 64 vs other
+  // p50 41). tex5 does NOT separate (0.6-5.7 vs 0.4-7.7) — gate dropped.
   const flankOk = (i) => {
     if (!fin(br[i]) || br[i] < 85) return false;
-    if (fin(sl[i]) && sl[i] > 13) return false;
-    if (!fin(tx[i]) || tx[i] < 0.6 || tx[i] > 16) return false;
+    if (fin(sl[i]) && sl[i] > 12) return false;
     if (!fin(sm[i]) || sm[i] > 0.40) return false;
+    if (fin(ex[i]) && ex[i] < 45) return false;   // v-r4: strongest separator
     return true;
   };
   let hi = Math.max(0.50, maxNear * 0.70), lo = Math.max(0.33, hi * 0.58);
@@ -289,32 +280,10 @@ window.GreenDetect.detect = function (data) {
   // v-r3d (pin-radius trim): the pin is ON the green; a green is
   // 300-900 m2 (max radius ~19 m). Keep only kept-cells within 20 m of
   // the pin - severs the west apron bridge that connected-trim cannot.
-  // v-r6 (smart cap, James's sliced-green shot): a HARD radius produced a
-  // razor-straight chord where a green legitimately extends past the cap
-  // (his east edge). Replace with a AREA-AWARE cap: grow the radius until
-  // the kept-cell area stops growing meaningfully (the blob has ended) or
-  // the physical green cap (24 m) is hit. Bridges are thin (1-3 cells) —
-  // each radius step over a bridge adds few cells; over real green it
-  // adds many. Stop at the first step adding < 4% of current area.
-  {
-    // sort kept cells by distance from pin once
-    const dcells = [];
-    for (let i = 0; i < N; i++) {
-      if (!chosen[i]) continue;
-      const mx = ((i % W) - W / 2) * cs, my = (H / 2 - ((i / W) | 0)) * cs;
-      dcells.push([Math.hypot(mx, my), i]);
-    }
-    dcells.sort((a, b) => a[0] - b[0]);
-    let keptN = 0, prevArea = 0, capR = 18;
-    let di = 0;
-    for (let r = 4; r <= 24; r += 2) {
-      while (di < dcells.length && dcells[di][0] <= r) { keptN++; di++; }
-      const area = keptN * cs * cs;
-      if (r > 4 && area - prevArea < prevArea * 0.04) { capR = r - 2; break; }
-      prevArea = area;
-      capR = r;
-    }
-    for (const [d, i] of dcells) if (d > capR) chosen[i] = 0;
+  for (let i = 0; i < N; i++) {
+    if (!chosen[i]) continue;
+    const mx = ((i % W) - W / 2) * cs, my = (H / 2 - ((i / W) | 0)) * cs;
+    if (Math.hypot(mx, my) > 20) chosen[i] = 0;
   }
   const nxt = new Int32Array(W1 * (H + 1)).fill(-1);
   const addE = (x0, y0, x1, y1) => { nxt[y0 * W1 + x0] = y1 * W1 + x1; };
@@ -408,19 +377,7 @@ window.GreenDetect.detect = function (data) {
     for (const p of ring) {
       const dx = p[0] - rcx, dy = p[1] - rcy;
       const d = Math.hypot(dx, dy) || 1;
-      const k = Math.max(0.2, (d - 1.0) / d);
-      p[0] = rcx + dx * k; p[1] = rcy + dy * k;
-    }
-  }
-  // v-r3g (collar shrink 1.0 m): ring rides the collar outer edge.
-  {
-    let rcx = 0, rcy = 0;
-    for (const p of ring) { rcx += p[0]; rcy += p[1]; }
-    rcx /= ring.length; rcy /= ring.length;
-    for (const p of ring) {
-      const dx = p[0] - rcx, dy = p[1] - rcy;
-      const d = Math.hypot(dx, dy) || 1;
-      const k = Math.max(0.2, (d - 1.0) / d);
+      const k = Math.max(0.2, (d - 1.2) / d);
       p[0] = rcx + dx * k; p[1] = rcy + dy * k;
     }
   }
