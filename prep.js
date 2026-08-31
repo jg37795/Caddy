@@ -280,9 +280,11 @@
 
   function buildSkeleton() {
     studio.innerHTML = `
-      <!-- HOLE BRIEF (map + sequence + strategy + 3D green) — v1.8.0: the
-           ONE top card when a course is mapped. Reading order =
-           map → tee club → sequence → hazards → carries → green feed. -->
+      <!-- ============ THE HOLE CARD (v1.9.0) ============
+           One card when a hole is selected. Top-to-bottom:
+           header → map → TARGET TILES (the picker) → THE NUMBER →
+           tweaks (lie/shape) → caddy notes → conditions (collapsed).
+           The old Pre-shot / The-shot / Conditions boxes are merged in. -->
       <div class="card" id="prepStrategyCard" hidden>
         <div class="prep-hole-brief-head">
           <div>
@@ -292,72 +294,48 @@
           <span class="chip" id="prepStratChip">—</span>
         </div>
         <div id="prepStratBody"></div>
-      </div>
 
-      <!-- PRE-SHOT NUMBER — directly under the brief: the swing number
-           follows the hole story with nothing in between. -->
-      <div class="card prep-rec" id="prepRecCard">
-        <div class="prep-kicker">Pre-shot number</div>
-        <div class="prep-rec-main" id="prepRecMain">—</div>
-        <div id="prepEffortWrap"><span class="prep-effort-tag" id="prepEffortTag"></span></div>
-        <div class="prep-reason" id="prepReason">Set a target to see the play.</div>
-        <div class="prep-adj-chips" id="prepAdjChips"></div>
-        <div class="prep-rec-grid" id="prepRecGrid">
-          <div class="prep-rec-cell"><i>Carry to</i><b id="cellCarry">—</b></div>
-          <div class="prep-rec-cell"><i>Release</i><b id="cellRelease">—</b></div>
-          <div class="prep-rec-cell"><i>Total</i><b id="cellTotal">—</b></div>
-        </div>
-        <div class="prep-aim-row" id="prepAimRow">
-          <span class="prep-aim-arrow" id="prepAimArrow">
-            <svg viewBox="0 0 24 24" id="prepAimSvg">
-              <path d="M12 3 L17 13 H14 V21 H10 V13 H7 Z" fill="#fff"/>
-            </svg>
-          </span>
-          <span id="prepAimText">—</span>
-        </div>
-      </div>
-
-      <!-- THE SHOT -->
-      <div class="card" id="prepShotCard">
-        <div class="card-title">
-          <h2>The shot</h2>
-          <span class="chip" id="prepTargetChip">Hole —</span>
-        </div>
-
-        <div id="prepTargetMeta" class="prep-target-meta"></div>
-
-        <div id="prepHolePane">
-          <div class="prep-mini-label">Playing to</div>
-          <div class="prep-green-picker" id="prepGreenPicker">
-            <button type="button" class="prep-point-btn" data-point="front"><i>Front</i><b>—</b></button>
-            <button type="button" class="prep-point-btn" data-point="middle"><i>Middle</i><b>—</b></button>
-            <button type="button" class="prep-point-btn" data-point="back"><i>Back</i><b>—</b></button>
+        <!-- THE NUMBER — lives inside the hole card, under the target
+             tiles: tap a tile, the number re-solves in place. -->
+        <div class="prep-num-block" id="prepNumBlock">
+          <div class="prep-kicker">The number</div>
+          <div class="prep-rec-main" id="prepRecMain">—</div>
+          <div id="prepEffortWrap"><span class="prep-effort-tag" id="prepEffortTag"></span></div>
+          <div class="prep-reason" id="prepReason">Set a target to see the play.</div>
+          <div class="prep-adj-chips" id="prepAdjChips"></div>
+          <div class="prep-rec-grid" id="prepRecGrid">
+            <div class="prep-rec-cell"><i>Carry to</i><b id="cellCarry">—</b></div>
+            <div class="prep-rec-cell"><i>Release</i><b id="cellRelease">—</b></div>
+            <div class="prep-rec-cell"><i>Total</i><b id="cellTotal">—</b></div>
           </div>
-          <div class="hint" id="prepGreenHint" style="margin-top: 7px"></div>
-        </div>
+          <div class="prep-aim-row" id="prepAimRow">
+            <span class="prep-aim-arrow" id="prepAimArrow">
+              <svg viewBox="0 0 24 24" id="prepAimSvg">
+                <path d="M12 3 L17 13 H14 V21 H10 V13 H7 Z" fill="#fff"/>
+              </svg>
+            </span>
+            <span id="prepAimText">—</span>
+          </div>
 
-        <div class="section-gap" style="margin-top: 13px">
-          <div class="prep-mini-label">Lie</div>
-          <div class="prep-lie-row" id="prepLieRow">
-            ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}
+          <!-- TWEAKS — the only two inputs that change the number -->
+          <div class="prep-tweaks">
+            <div class="prep-mini-label">Lie</div>
+            <div class="prep-lie-row" id="prepLieRow">
+              ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}
+            </div>
+            <div class="prep-mini-label" style="margin-top: 11px">Intended shape</div>
+            <div class="prep-shape-row" id="prepShapeRow">
+              ${SHAPES.map((s) => `
+                <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">
+                  <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>
+                  <b>${s.name}</b><span>${s.sub}</span>
+                </button>`).join('')}
+            </div>
           </div>
         </div>
 
-        <div class="section-gap" style="margin-top: 13px">
-          <div class="prep-mini-label">Intended shape</div>
-          <div class="prep-shape-row" id="prepShapeRow">
-            ${SHAPES.map((s) => `
-              <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">
-                <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>
-                <b>${s.name}</b><span>${s.sub}</span>
-              </button>`).join('')}
-          </div>
-        </div>
-      </div>
-
-      <!-- CONDITIONS (collapsed — everything tunable lives here; the
-           live-weather sync button merged into it in v1.8.0) -->
-      <div class="card" id="prepCondCard">
+        <!-- CONDITIONS — collapsed inside the same card; same controls,
+             no separate box. Live-weather sync lives at its top. -->
         <details class="prep-cond-details" id="prepCondDetails">
         <summary>
         <div class="card-title">
@@ -480,44 +458,17 @@
   }
 
   function paintTarget() {
-    // Prep is always bound to a course hole. No hole → search/scorecard
-    // is the screen; studio cards stay hidden.
-    const shotCard = $('prepShotCard');
-    const recCard = $('prepRecCard');
-    const condCard = $('prepCondCard');
-
+    // v1.9.0: ONE hole card. The carry tiles in the brief ARE the target
+    // picker; the number block lives in the same card. No separate boxes.
+    const condCard = $('prepCondDetails');
     if (!boundHole) {
-      if (shotCard) shotCard.hidden = true;
-      if (recCard) recCard.hidden = true;
-      if (condCard) condCard.hidden = true;
-      renderStrategy();
+      const card = $('prepStrategyCard');
+      if (card) card.hidden = true;
+      if (condCard) condCard.closest('.card').hidden = true;
       syncPrepChrome();
       return;
     }
-    if (shotCard) shotCard.hidden = false;
-    if (recCard) recCard.hidden = false;
-    if (condCard) condCard.hidden = false;
-
-    $('prepTargetChip').textContent = `Hole ${boundHole.number}`;
-    const g = boundHole.green || {};
-    const pts = { front: g.front, middle: g.center, back: g.back };
-    const shown = pts[shot.greenPoint];
-    $('prepTargetMeta').innerHTML =
-      `${escapeHtml(boundHole.courseName)} · Par ${boundHole.par ?? '—'}` +
-      (boundHole.yards ? ` · ${Math.round(boundHole.yards)} yd tee-to-green` : '') +
-      (shown != null
-        ? ` · playing <b>${shown} yd</b> to the ${shot.greenPoint}`
-        : '');
-    [...$('prepGreenPicker').children].forEach((b) => {
-      const v = pts[b.dataset.point];
-      b.querySelector('b').textContent = v != null ? v : '—';
-      b.classList.toggle('active', b.dataset.point === shot.greenPoint);
-      b.toggleAttribute('disabled', v == null);
-    });
-    const anyMapped = Object.values(pts).some((v) => v != null);
-    $('prepGreenHint').textContent = anyMapped
-      ? 'Carries below update live with your conditions.'
-      : 'Green edges are not mapped — playing to the center estimate.';
+    if (condCard) condCard.closest('.card').hidden = false;
     syncPrepChrome();
   }
 
@@ -578,13 +529,17 @@
       recompute({ pulse: true });
     });
 
-    $('prepGreenPicker').addEventListener('click', (e) => {
-      const btn = e.target.closest('.prep-point-btn');
-      if (!btn || btn.hasAttribute('disabled')) return;
-      shot.greenPoint = btn.dataset.point;
+    // v1.9.0: the carry tiles in the hole brief ARE the target picker —
+    // tap Front/Middle/Back on a tile, the number re-solves in place.
+    $('prepStratBody').addEventListener('click', (e) => {
+      const tile = e.target.closest('.prep-carry-tile');
+      if (!tile || tile.hasAttribute('disabled')) return;
+      const point = tile.dataset.point;
+      if (!point || point === shot.greenPoint) return;
+      shot.greenPoint = point;
       haptic(5);
       persist();
-      paintTarget();
+      renderStrategy();       // re-paint tiles (chosen state) + feed line
       recompute({ pulse: true });
     });
 
@@ -738,7 +693,9 @@
   }
 
   function renderRecommendation(calc, rec) {
-    const card = $('prepRecCard');
+    // v1.9.0: the number block lives INSIDE the hole card now — the sweep
+    // animation targets it, not a separate card.
+    const card = $('prepNumBlock');
 
     // Wind-relative tiles (head/tail + cross, relative to the shot line)
     const headTile = $('relHeadTile');
@@ -1189,6 +1146,22 @@
     $('prepStratChip').textContent = h.par ? `Par ${h.par}` : 'Par —';
 
     const body = [];
+    // v1.9.0 (honest unmapped state): a hole with no yards and no green
+    // data gets a straight answer + what still works, not dead boxes.
+    const g0 = h.green || {};
+    const unmapped = !h.yards && g0.front == null && g0.center == null &&
+      g0.back == null;
+    if (unmapped) {
+      body.push(
+        `<div class="prep-strat-advice">Hole ${h.number} isn't mapped — no yardage, green, or hazards on record.</div>`
+      );
+      body.push(green3dButtonHtml(h));
+      body.push('<button type="button" class="ghost-btn prep-back-holes" id="prepBackHoles">All holes</button>');
+      $('prepStratBody').innerHTML = body.join('');
+      wireBackButton();
+      return;
+    }
+
     const metaBits = [
       h.par ? `Par ${h.par}` : null,
       h.yards ? `${Math.round(h.yards)} yd` : null,
@@ -1259,7 +1232,9 @@
     }
     body.push('</div>');
 
-    // Conditioned carries to each green point
+    // Conditioned carries to each green point — v1.9.0: these tiles ARE
+    // the target picker (data-point + tap-to-choose + disabled when the
+    // point isn't mapped). One control instead of two.
     const g = h.green || {};
     const pts = [
       ['Front', 'front', g.front],
@@ -1268,12 +1243,15 @@
     ];
     const mapped = pts.filter(([, , v]) => v != null);
     if (mapped.length) {
-      body.push('<div class="prep-section-gap"><div class="prep-mini-label">Conditioned carries</div><div class="prep-carry-strip">');
+      body.push('<div class="prep-section-gap"><div class="prep-mini-label">Target — tap to play it</div><div class="prep-carry-strip">');
       for (const [label, key, dist] of pts) {
-        if (dist == null) continue;
+        if (dist == null) {
+          body.push(`<div class="prep-carry-tile" data-point="${key}" disabled><i>${label}</i>—</div>`);
+          continue;
+        }
         const c = solve(dist);
         body.push(
-          `<div class="prep-carry-tile${shot.greenPoint === key ? ' chosen' : ''}"><i>${label}</i>${fmt(c.playsLikeYd)} yd</div>`
+          `<button type="button" class="prep-carry-tile${shot.greenPoint === key ? ' chosen' : ''}" data-point="${key}"><i>${label}</i>${fmt(c.playsLikeYd)} yd</button>`
         );
       }
       body.push('</div></div>');
@@ -1328,17 +1306,20 @@
     body.push('<button type="button" class="ghost-btn prep-back-holes" id="prepBackHoles">All holes</button>');
 
     $('prepStratBody').innerHTML = body.join('');
+    wireBackButton();
+  }
+
+  function wireBackButton() {
     const back = $('prepBackHoles');
-    if (back) {
-      back.addEventListener('click', () => {
-        boundHole = null;
-        const detail = document.getElementById('planDetailCard');
-        if (detail) detail.hidden = true;
-        paintControls();
-        paintTarget();
-        haptic(5);
-      });
-    }
+    if (!back) return;
+    back.addEventListener('click', () => {
+      boundHole = null;
+      const detail = document.getElementById('planDetailCard');
+      if (detail) detail.hidden = true;
+      paintControls();
+      paintTarget();
+      haptic(5);
+    });
   }
 
   /* ======================================================================
@@ -1361,17 +1342,15 @@
   function recomputeNow({ pulse = false } = {}) {
     const yd = currentTargetYd();
     if (!yd) {
-      $('prepRecMain').textContent = 'Set a target';
-      $('prepReason').textContent =
-        'Bind a course hole above to get the play for its green.';
-      $('prepAdjChips').innerHTML = '';
-      $('cellCarry').textContent = '—';
-      $('cellRelease').textContent = '—';
-      $('cellTotal').textContent = '—';
-      $('prepAimText').textContent = '—';
+      // v1.9.0: honest no-target state inside the single hole card. The
+      // number block stays visible (same card) with a clear why + fix.
+      const num = $('prepNumBlock');
+      if (num) num.hidden = true;
       renderStrategy();
       return;
     }
+    const num = $('prepNumBlock');
+    if (num) num.hidden = false;
     const calc = solve(yd);
     const rec = api.recommendClub(calc.playsLikeYd);
     renderRecommendation(calc, rec, pulse);

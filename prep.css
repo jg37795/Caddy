@@ -1298,6 +1298,43 @@ body.dark .prep-strat-advice {
   border-color: rgba(228, 160, 66, 0.45);
 }
 
+/* v1.9.0 — the single hole card: number block, tiles-as-picker, tweaks */
+.prep-num-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.prep-num-block[hidden] { display: none; }
+.prep-num-block .prep-rec-main { font-size: 34px; }
+
+/* Carry tiles are real buttons now — tap to play that target. */
+button.prep-carry-tile {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, border-color 0.15s ease;
+  font: inherit;
+  color: inherit;
+}
+button.prep-carry-tile:active { transform: scale(0.96); }
+.prep-carry-tile[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+.prep-carry-tile.chosen {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px var(--green), 0 0 14px rgba(24, 164, 91, 0.35);
+}
+
+/* Tweaks: lie + shape inside the number block */
+.prep-tweaks {
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+.prep-tweaks .prep-lie-row,
+.prep-tweaks .prep-shape-row { margin-top: 6px; }
+
+
 .prep-hm-fairway {
   fill: rgba(24, 164, 91, 0.16);
   stroke: rgba(24, 164, 91, 0.38);
