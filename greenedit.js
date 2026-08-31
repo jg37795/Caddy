@@ -49,6 +49,7 @@
       '  <button class="gel-btn" id="gelCancel">‹ Cancel</button>' +
       '  <div class="gel-title">Verify green location</div>' +
       '  <button class="gel-btn" id="gelTrace">Trace outline</button>' +
+      '  <button class="gel-btn" id="gelTee">Move tee</button>' +
       '  <button class="gel-btn" id="gelLoad">Load this green</button>' +
       '</div>' +
       '<div class="gel-map" id="gelMap"></div>' +
@@ -90,13 +91,60 @@
         iconSize: [18, 18], iconAnchor: [9, 9] }),
     }).addTo(map);
 
-    // Tee hint (if the hole has one) — context, not editable here.
-    if (boot.tee) {
-      L.marker([boot.tee.lat, boot.tee.lng], {
-        icon: L.divIcon({ className: 'gel-tee',
-          html: '<div class="gel-tee-dot"></div>',
-          iconSize: [14, 14], iconAnchor: [7, 7] }),
-      }).addTo(map).bindTooltip('Tee');
+    // v1.12.0 (editable tee — James: "allow the user to edit the tee just
+    // like we allow when a round is active"): the tee is now a movable
+    // marker with a two-tap contract identical to Round's Set tee:
+    //   "Move tee" arms tee mode → tap the map to place it → tapping the
+    //   tee itself removes it. "Load this green" re-boots with BOTH the
+    //   green AND the tee. Persisted to the course profile (per hole) so
+    //   Prep, Round and hole view all agree.
+    let teeLL = boot.tee;          // current tee (null = not set)
+    let teeMode = false;           // armed by "Move tee"
+    const teeMarker = teeLL ? L.marker([teeLL.lat, teeLL.lng], {
+      draggable: true,
+      icon: L.divIcon({ className: 'gel-tee',
+        html: '<div class="gel-tee-dot"></div>',
+        iconSize: [14, 14], iconAnchor: [7, 7] }),
+    }).addTo(map) : null;
+    const syncTeeUI = () => {
+      const btn = sheet.querySelector('#gelTee');
+      if (!btn) return;
+      btn.classList.toggle('gel-armed', teeMode);
+      btn.textContent = teeMode ? 'Cancel tee' : (teeLL ? 'Move tee' : 'Set tee');
+      readout.textContent = teeMode
+        ? (teeLL ? 'Tap the map to move the tee — or tap the tee to remove it'
+                 : 'Tap your tee box on the map')
+        : `Sample point: ${pin.getLatLng().lat.toFixed(5)}, ${pin.getLatLng().lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
+    };
+    const setTee = (ll) => {
+      teeLL = ll;
+      if (teeMarker) { map.removeLayer(teeMarker); }
+      if (ll) {
+        L.marker([ll.lat, ll.lng], {
+          draggable: true,
+          icon: L.divIcon({ className: 'gel-tee',
+            html: '<div class="gel-tee-dot"></div>',
+            iconSize: [14, 14], iconAnchor: [7, 7] }),
+        }).addTo(map)
+          .on('click', () => {
+            // Two-tap remove: tapping the tee itself while armed removes it.
+            if (teeMode) {
+              setTee(null);
+              teeMode = false;
+              syncTeeUI();
+            }
+          })
+          .on('dragend', (ev) => { teeLL = ev.target.getLatLng(); });
+      }
+      teeMode = false;
+      syncTeeUI();
+    };
+    const teeBtn = sheet.querySelector('#gelTee');
+    if (teeBtn) {
+      teeBtn.addEventListener('click', () => {
+        teeMode = !teeMode;
+        syncTeeUI();
+      });
     }
 
     // Live crosshair readout.
@@ -114,6 +162,12 @@
     // is declared below; the guard reads it lazily via the shared scope.
     map.on('click', (e) => {
       if (typeof tracing !== 'undefined' && tracing) return;
+      // v1.12.0 (tee mode): in tee mode a map tap PLACES the tee
+      // (disarming), exactly like Round's Set-tee flow.
+      if (teeMode) {
+        setTee({ lat: e.latlng.lat, lng: e.latlng.lng });
+        return;
+      }
       pin.setLatLng(e.latlng); setReadout(e.latlng);
     });
     pin.on('drag', (e) => setReadout(e.target.getLatLng()));
@@ -324,7 +378,38 @@
       const qs2 = new URLSearchParams(location.search);
       qs2.set('lat', ll.lat.toFixed(6));
       qs2.set('lng', ll.lng.toFixed(6));
-      if (!qs2.get('teelat')) { /* keep any existing tee params */ }
+      // v1.12.0 (editable tee): "Load this green" carries BOTH — the tee
+      // the player placed (or its removal), and it persists into the
+      // course profile for this hole so Prep/Round/hole-view agree.
+      if (teeLL) {
+        qs2.set('teelat', teeLL.lat.toFixed(6));
+        qs2.set('teelng', teeLL.lng.toFixed(6));
+      } else {
+        qs2.delete('teelat'); qs2.delete('teelng');
+      }
+      const courseId = qs2.get('course');
+      if (courseId) {
+        try {
+          const profiles = JSON.parse(
+            localStorage.getItem('caddy:courseProfiles:v1') || '[]');
+          const idx = profiles.findIndex((c) => c && c.id === courseId);
+          // hole number comes from ?hole= when Prep launched it
+          const holeNum = parseInt(qs2.get('hole'), 10);
+          if (idx >= 0 && holeNum >= 1 && holeNum <= 18 &&
+              Array.isArray(profiles[idx].holes) && profiles[idx].holes[holeNum - 1]) {
+            if (teeLL) {
+              profiles[idx].holes[holeNum - 1].teePoint =
+                { lat: teeLL.lat, lng: teeLL.lng };
+              profiles[idx].holes[holeNum - 1].teeSource = 'manual';
+            } else {
+              profiles[idx].holes[holeNum - 1].teeSource = 'default';
+            }
+            profiles[idx].updatedAt = Date.now();
+            localStorage.setItem('caddy:courseProfiles:v1',
+              JSON.stringify(profiles));
+          }
+        } catch (e) { /* best-effort persist */ }
+      }
       location.replace('?r=' + Date.now() + '&' + qs2.toString());   // full re-boot at the new green
     });
   }

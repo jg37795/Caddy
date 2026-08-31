@@ -1729,6 +1729,12 @@
       }
       const eg = await window.CaddyElev.fetchElevGrid(bb, HOLE_N);
       if (!eg || !eg.grid) throw new Error('no corridor coverage');
+      // v1.12.0: pull the persisted texture mode into the dataset before
+      // any bake (wireChrome reads localStorage; this copies it across).
+      try {
+        const savedTex = localStorage.getItem('caddy.holeTexMode');
+        var TEXMODE = savedTex === 'photo' ? 'photo' : 'stylized';
+      } catch (e) { var TEXMODE = 'stylized'; }
       const [w, s, e, n] = bb;
       const midLat = ((s + n) / 2) * Math.PI / 180;
       const mLng = 111320 * Math.cos(midLat), mLat = 110540;
@@ -1806,6 +1812,7 @@
         failed: false, msg: ''
       };
       state.datasets.hole = ds;
+      ds.texMode = TEXMODE;   // v1.12.0: persisted texture mode
 
       buildHoleScene();
       console.log('[greenmap] corridor ready', `${eg.W}x${eg.H}`,
@@ -1884,6 +1891,12 @@
     const mLng = 111320 * Math.cos(ds.centerLL[1] * Math.PI / 180);
     const zone = ds.zoneMask;
     const FLOOR = 42;
+    // v1.12.0 (Option B — stylized default + Photo toggle): the texture
+    // mode decides the colour source.
+    //   'stylized' → 100% our LiDAR tint (fairway/rough tones + green
+    //                slope ramp + hillshade). No satellite sampling.
+    //   'photo'    → the v1.11 blend (satellite-dominant) + hillshade.
+    const texMode = ds.texMode || 'stylized';
     const qPhoto = new Array(M.count).fill(null);
     // per-corner: vcol layout is 12 floats/quad (4 corners × RGB)
     const vcol = new Float32Array(M.vcol ? M.vcol.length : M.count * 12);
@@ -1894,7 +1907,7 @@
       const my = (gr.H / 2 - iy - 1) * cs;
       const inZone = zone && zone[Math.min(gr.W * gr.H - 1,
         iy * gr.W + ix + 1)];
-      const photoShare = inZone ? 0.65 : 0.9;
+      const photoShare = texMode === 'stylized' ? 0 : (inZone ? 0.65 : 0.9);
       const tintR = M.col[q * 3], tintG = M.col[q * 3 + 1],
             tintB = M.col[q * 3 + 2];
       const mix = (p) => {
@@ -4259,6 +4272,40 @@
     });
     document.querySelector(`.gm-layer-btn[data-layer="both"]`).classList.add('active');
 
+    // v1.12.0 (Option B): Photo/Stylized texture toggle for hole view.
+    // Stylized = 100% our LiDAR tint (default); Photo = satellite blend.
+    // Persisted so the choice survives launches. Re-bakes colours only.
+    const TEX_KEY = 'caddy.holeTexMode';
+    let texMode = 'stylized';
+    try {
+      const saved = localStorage.getItem(TEX_KEY);
+      if (saved === 'photo') texMode = 'photo';
+    } catch (e) { /* default stylized */ }
+    const applyTexMode = () => {
+      const ds = state.datasets.hole;
+      if (!ds || !ds.mesh) return;
+      ds.texMode = texMode;
+      bakeSatelliteTexture(ds);
+      render();
+    };
+    document.querySelectorAll('.gm-tex-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        texMode = btn.dataset.tex === 'photo' ? 'photo' : 'stylized';
+        document.querySelectorAll('.gm-tex-btn').forEach(b =>
+          b.classList.toggle('active', b === btn));
+        try { localStorage.setItem(TEX_KEY, texMode); } catch (e) {}
+        applyTexMode();
+        setStatus(texMode === 'photo'
+          ? 'Photo texture — satellite imagery on the terrain'
+          : 'Stylized texture — LiDAR terrain colours');
+      });
+    });
+    // mark the active chip on boot
+    document.querySelectorAll('.gm-tex-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.tex === texMode));
+    // apply the persisted mode whenever the corridor mesh is rebuilt
+    window.__holeTexMode = () => texMode;
+
     // 2D | 3D | Hole view toggle — keeps pin/ball/mode state; just re-renders.
     function frameCameraForView(v) {
       if (v === 'hole' && state.datasets.hole && !state.datasets.hole.failed) {
@@ -4359,6 +4406,10 @@
         b.classList.toggle('active', b.dataset.view === state.viewMode));
       document.getElementById('gm-exag-wrap').style.display =
         state.viewMode === '2d' ? 'none' : 'inline-flex';
+      // v1.12.0: the Stylized/Photo texture group is a hole-view control.
+      const texGroup = document.getElementById('gm-tex-group');
+      if (texGroup) texGroup.style.display =
+        state.viewMode === 'hole' ? '' : 'none';
       // v1.4.3 (controls stay visible — James's rule): the layer group is
       // wanted in EVERY view; v1.4.0 hid it in 3D/Hole and he read that
       // as "no buttons for shading or arrows". Always shown.
@@ -4494,69 +4545,10 @@
     });
     window.__syncBallBtn = syncBallBtn;   // drop-tap handler calls this
 
-    // v1.11.0 (tee switcher in hole view): read the course's tee sets
-    // from localStorage (saved by Round/Prep), show chips when the launch
-    // URL carries a course id. Switching re-LAUNCHES greenmap.html with
-    // the chosen tee's coordinates — the whole pipeline re-runs for the
-    // new tee (honest, no partial state).
-    (() => {
-      const group = document.getElementById('gm-tee-group');
-      if (!group) return;
-      const courseId = qs.get('course');
-      if (!courseId) return;
-      let course = null;
-      try {
-        const profiles = JSON.parse(
-          localStorage.getItem('caddy:courseProfiles:v1') || '[]');
-        course = profiles.find((c) => c && c.id === courseId) || null;
-      } catch (e) { return; }
-      if (!course || !Array.isArray(course.teeSets) || !course.teeSets.length)
-        return;
-      const active = course.activeTeeSet ||
-        (course.teeSets[0] && course.teeSets[0].name) || null;
-      group.innerHTML = course.teeSets.map((t) => {
-        if (!t || !t.name) return '';
-        const on = t.name === active ? ' active' : '';
-        return `<button class="gm-btn gm-tee-btn${on}" data-tee="${String(t.name).replace(/"/g, '&quot;')}">${String(t.name).replace(/</g, '&lt;')}</button>`;
-      }).join('');
-      group.hidden = false;
-      group.addEventListener('click', (e) => {
-        const btn = e.target.closest('.gm-tee-btn');
-        if (!btn || btn.dataset.tee === active) return;
-        // find the chosen set's tee point for THIS hole if the course
-        // stores per-hole tee coordinates; else keep the current pin and
-        // just reload (yardage chips in Prep carry per-tee tees anyway).
-        const set = course.teeSets.find((t) => t.name === btn.dataset.tee);
-        const u = new URLSearchParams(location.search);
-        if (set && set.holes) {
-          // hole number unknown here; the chips still update the course's
-          // active tee, and Prep (which knows the hole) launches with the
-          // right tee next time. Persist the choice:
-          try {
-            const profiles = JSON.parse(
-              localStorage.getItem('caddy:courseProfiles:v1') || '[]');
-            const idx = profiles.findIndex((c) => c && c.id === courseId);
-            if (idx >= 0) {
-              profiles[idx].activeTeeSet = btn.dataset.tee;
-              profiles[idx].teeName = btn.dataset.tee;
-              localStorage.setItem('caddy:courseProfiles:v1',
-                JSON.stringify(profiles));
-            }
-            const mem = JSON.parse(
-              localStorage.getItem('caddy:courseTees') || '{}');
-            mem[String(course.name || '').trim().toLowerCase()] = {
-              teeName: btn.dataset.tee,
-              activeTeeSet: btn.dataset.tee,
-              at: Date.now(),
-            };
-            localStorage.setItem('caddy:courseTees', JSON.stringify(mem));
-          } catch (err) { /* best-effort */ }
-          setStatus('Tees set to ' + btn.dataset.tee + ' — reopen this hole from Prep to move the tee box');
-          group.querySelectorAll('.gm-tee-btn').forEach((b) =>
-            b.classList.toggle('active', b === btn));
-        }
-      });
-    })();
+    // v1.12.0: the v1.11 dock tee chips are REMOVED per James — tee
+    // editing lives in Check location ("Move tee" → tap map → Load),
+    // which persists a manual teePoint per hole. The chips only changed
+    // a label anyway; the editor changes the actual tee.
 
     document.getElementById('gm-recenter').addEventListener('click', () => {
       if (state.viewMode === 'hole') {

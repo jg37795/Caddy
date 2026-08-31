@@ -14565,26 +14565,9 @@ out geom;`;
             : null,
       };
     },
-    // v1.10.0: switch the planner course's tee set (same path the Round
-    // setup uses, so Round + Prep agree). Returns the refreshed hole.
-    setTeeSet(teeSetName) {
-      const course = getPlannerCourse();
-      if (!course) return null;
-      const updated = applyTeeSet(course, teeSetName);
-      state.planCourseId = state.planCourseId;   // id unchanged
-      if (state.planCourseId === PREP_EPHEMERAL_ID && prepEphemeralCourse) {
-        prepEphemeralCourse = updated;
-      } else {
-        const idx = state.courseProfiles.findIndex((c) => c.id === updated.id);
-        if (idx >= 0) state.courseProfiles[idx] = updated;
-        saveCourseProfiles();
-      }
-      rememberCourseTees(updated);
-      renderPlanner();
-      // The caller (prep.js) re-binds its own hole; app.js has no
-      // boundHole state. Return the refreshed course so Prep can rebuild.
-      return updated;
-    },
+    // v1.12.0: setTeeSet removed from the bridge — tee editing lives in
+    // Check location ("Move tee"), persisted per hole as a manual
+    // teePoint; named-set switching wasn't what James wanted.
     // Pure bag sequence for a hole length. Same helper the planner uses;
     // no writes, no UI. null when yards or bag are missing.
     clubSequence(totalYd) {

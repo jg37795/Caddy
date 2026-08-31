@@ -1364,57 +1364,8 @@ body.dark .prep-hm-fairway {
   stroke: rgba(99, 232, 154, 0.28);
 }
 
-/* v1.10.0 — tee switcher chips + nudge stepper */
-.prep-tee-row { margin-top: 10px; }
-.prep-tee-chips {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-.prep-tee-chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  font: inherit;
-  font-weight: 700;
-  font-size: 13px;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.prep-tee-chip i {
-  font-style: normal;
-  font-weight: 600;
-  font-size: 11px;
-  color: var(--muted);
-}
-.prep-tee-chip.active {
-  background: linear-gradient(135deg, var(--green), var(--green-2, #0e8c4d));
-  border-color: transparent;
-  color: #062512;
-}
-.prep-tee-chip.active i { color: rgba(6, 37, 18, 0.75); }
-.prep-tee-nudge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-.prep-tee-nudge .prep-step-val {
-  min-width: 64px;
-  text-align: center;
-  font-weight: 800;
-}
-.prep-tee-nudge small {
-  font-size: 10px;
-  color: var(--muted);
-  margin-left: 2px;
-}
+/* v1.12.0 — tee chips/nudge styles removed with the feature (tee editing
+   lives in Check location). */
 
 .prep-hm-shot {
   fill: none;

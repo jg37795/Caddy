@@ -544,29 +544,9 @@
       return;
     });
 
-    // v1.10.0 (tee fairness): tee-set chips switch the stored tee set
-    // (Round agrees — same applyTeeSet path); the ± nudge shifts the
-    // effective tee along the hole, persisted per course.
-    $('prepStratBody').addEventListener('click', (e) => {
-      const chip = e.target.closest('.prep-tee-chip');
-      if (chip && chip.dataset.tee) {
-        const updated = api.setTeeSet(chip.dataset.tee);
-        if (updated) {
-          haptic(6);
-          rebindAfterTeeChange();
-        }
-        return;
-      }
-      const step = e.target.closest('.prep-tee-nudge .prep-step-btn');
-      if (step && boundHole && boundHole.courseId) {
-        const cur = teeNudgeLoad(boundHole.courseId);
-        const next = clamp(cur + Number(step.dataset.nd || 0), -60, 60);
-        teeNudgeSave(boundHole.courseId, next);
-        haptic(4);
-        renderStrategy();
-        recompute({ pulse: true });
-      }
-    });
+    // v1.12.0: the tee chips/nudge handlers are gone — tee editing lives
+    // in Check location (Move tee), persisted per hole; Prep picks it up
+    // through holeInfo on the next bind.
 
     $('prepLieRow').addEventListener('click', (e) => {
       const chip = e.target.closest('.prep-lie-chip');
@@ -635,12 +615,12 @@
     const pt = shot.greenPoint === 'front' ? g.front
       : shot.greenPoint === 'back' ? g.back
         : g.center;
-    // v1.10.0: the tee nudge shifts every carry uniformly (tee moves
-    // along the hole), so the effective target shifts with it.
-    const base = pt != null ? pt
-      : (boundHole.yards ? Math.round(boundHole.yards) : null);
-    if (base == null || !boundHole.courseId) return base;
-    return Math.max(40, base + teeNudgeLoad(boundHole.courseId));
+    // v1.12.0: the tee is whatever the player placed via Check location
+    // (manual teePoint — already reflected in holeInfo's yards/carries by
+    // the importer's tee resolution), so no arithmetic nudge here.
+    if (pt != null) return pt;
+    if (boundHole.yards) return Math.round(boundHole.yards);
+    return null;
   }
 
   // One full physics solve under the CURRENT panel conditions.
@@ -1080,7 +1060,7 @@
     const yMid = (padT + (H - padB)) / 2;
     const spanX = x1 - x0;
     const xAt = (alongYd) => x0 + spanX * clamp(alongYd / yards, 0, 1);
-    const effYd = Math.round(nudgedYards(h));
+    const effYd = Math.round(Number(h && h.yards) || 0);
     const parts = [];
 
     // ---- Projection helpers (shared by both modes) ----
@@ -1304,9 +1284,11 @@
     if (t && Number.isFinite(t.lat) && Number.isFinite(t.lng)) {
       href += `&teelat=${t.lat.toFixed(6)}&teelng=${t.lng.toFixed(6)}`;
     }
-    // v1.11.0: carry the course id so the 3D hole view can show its own
-    // tee switcher chips (course registry lookup inside greenmap.js).
+    // v1.11.0/v1.12.0: course id (tee chips removed — tee editing now
+    // lives in Check location) + hole number so the editor can persist a
+    // manual tee to the right hole.
     if (h.courseId) href += `&course=${encodeURIComponent(h.courseId)}`;
+    href += `&hole=${h.number}`;
     return `<a class="primary-btn prep-3d-btn" id="prep3dGreenBtn" href="${href}">` +
       '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">' +
       '<path d="M3 17c3-2.6 6-2.6 9 0s6 2.6 9 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
@@ -1346,18 +1328,16 @@
 
     const metaBits = [
       h.par ? `Par ${h.par}` : null,
-      h.yards ? `${Math.round(nudgedYards(h))} yd` : null,
+      h.yards ? `${Math.round(h.yards)} yd` : null,
       h.strokeIndex ? `SI ${h.strokeIndex}` : null,
       currentBearing() ? `${compass16(currentBearing())} off the tee` : null,
     ].filter(Boolean);
     body.push(
       `<div class="prep-strat-meta">${metaBits.map((b) => `<span class="prep-strat-chip">${escapeHtml(b)}</span>`).join('')}</div>`
     );
-
-    // v1.10.0 (tee fairness): tee-set chips + nudge stepper, right under
-    // the meta chips. Tapping a chip or ± re-solves the whole brief.
-    const teeRow = teePickerHtml(h);
-    if (teeRow) body.push(teeRow);
+    // v1.12.0: tee chips/nudge row removed — tee editing lives in Check
+    // location ("Move tee" → tap the map → Load). holeInfo's yards and
+    // carries already reflect the manual tee the player saved.
 
     const names = seqNames(h);
     const map = holeMapSvg(h, names);
@@ -1382,9 +1362,10 @@
     // Off-the-tee recommendation under current conditions
     // v-fix(dedupe-tee-solve) v1.5.3 (audit #20): the tee solve ran here AND
     // again in the water-danger check below; one call, reused.
-    // v1.10.0: solves the NUDGED yardage (tee set + nudge), not card length.
+    // v1.12.0: the tee is the player's placed tee (manual teePoint) —
+    // the card's yardage already reflects it via the importer/planHoleYardage.
     let teeCalc = null;
-    const effYd = Math.round(nudgedYards(h));
+    const effYd = h.yards ? Math.round(h.yards) : 0;
     if (effYd) {
       teeCalc = solve(effYd);
       const teeRec = api.recommendClub(teeCalc.playsLikeYd);
@@ -1424,14 +1405,14 @@
     // Conditioned carries to each green point — v1.9.0: these tiles ARE
     // the target picker (data-point + tap-to-choose + disabled when the
     // point isn't mapped). One control instead of two.
-    // v1.10.0: carries shift by the tee nudge (tee moves along the hole).
+    // v1.12.0: carries measure from the PLAYER'S tee (manual teePoint) —
+    // holeInfo's green.front/center/back were measured from the stored
+    // tee, so after a Move-tee re-bind they're already correct. No shift.
     const g = h.green || {};
-    const nd = h.courseId ? teeNudgeLoad(h.courseId) : 0;
-    const shift = (v) => (v == null ? null : Math.max(40, v + nd));
     const pts = [
-      ['Front', 'front', shift(g.front)],
-      ['Middle', 'middle', shift(g.center)],
-      ['Back', 'back', shift(g.back)],
+      ['Front', 'front', g.front],
+      ['Middle', 'middle', g.center],
+      ['Back', 'back', g.back],
     ];
     const mapped = pts.filter(([, , v]) => v != null);
     if (mapped.length) {
@@ -1514,21 +1495,6 @@
     });
   }
 
-  // v1.10.0: after a tee-set switch the course data changed under us —
-  // re-fetch holeInfo for the same hole and re-render everything that
-  // depends on it (number, carries, map, tee chips).
-  function rebindAfterTeeChange() {
-    if (!boundHole) return;
-    const number = boundHole.number;
-    const info = api.holeInfo(number);
-    if (info) boundHole = info;
-    paintControls();
-    paintTarget();
-    renderStrategy();
-    fetchGreenDelta();
-    recompute({ pulse: true });
-  }
-
   /* ======================================================================
      MAIN PIPELINE
      ====================================================================== */
@@ -1577,51 +1543,12 @@
   //   1. Tee-set switcher chips (Red/White/Blue…) from the stored teeSets.
   //   2. A ± yards nudge for single-set courses (or fine-tuning within a
   //      set) — "playing +15 yd from card". Persisted per course.
-  const TEE_NUDGE_KEY = 'caddy.prep.teeNudge';   // { courseId: yd }
-  const teeNudgeLoad = (courseId) => {
-    try {
-      const m = JSON.parse(localStorage.getItem(TEE_NUDGE_KEY) || '{}');
-      return Number.isFinite(m[courseId]) ? m[courseId] : 0;
-    } catch { return 0; }
-  };
-  const teeNudgeSave = (courseId, yd) => {
-    try {
-      const m = JSON.parse(localStorage.getItem(TEE_NUDGE_KEY) || '{}');
-      if (yd) m[courseId] = yd; else delete m[courseId];
-      localStorage.setItem(TEE_NUDGE_KEY, JSON.stringify(m));
-    } catch { /* best-effort */ }
-  };
-
-  // Effective yardage for this hole under the current nudge. The nudge
-  // shifts the tee ALONG the hole (all carries/distances uniformly).
-  function nudgedYards(h) {
-    const base = Number(h && h.yards);
-    if (!(base > 0) || !h.courseId) return base || 0;
-    return Math.max(40, base + teeNudgeLoad(h.courseId));
-  }
-
-  function teePickerHtml(h) {
-    const sets = Array.isArray(h.teeSets) ? h.teeSets : [];
-    const nudge = h.courseId ? teeNudgeLoad(h.courseId) : 0;
-    const chips = sets.filter((s) => s.name).map((s) => {
-      const active = h.activeTeeSet ? s.name === h.activeTeeSet : false;
-      const yd = s.yardsForHole != null ? `${Math.round(s.yardsForHole)} yd` : '';
-      return `<button type="button" class="prep-tee-chip${active ? ' active' : ''}" data-tee="${escapeHtml(s.name)}">${escapeHtml(s.name)}${yd ? `<i>${yd}</i>` : ''}</button>`;
-    }).join('');
-    const nudgeBit = `
-      <div class="prep-tee-nudge">
-        <button type="button" class="prep-step-btn" data-nd="-5" aria-label="Play shorter">−</button>
-        <span class="prep-step-val">${nudge ? (nudge > 0 ? '+' : '') + nudge : '±0'}<small>yd</small></span>
-        <button type="button" class="prep-step-btn" data-nd="5" aria-label="Play longer">+</button>
-      </div>`;
-    if (!sets.length && !nudge) return '';
-    return `
-      <div class="prep-tee-row" id="prepTeeRow">
-        <div class="prep-mini-label">Tees${h.activeTeeSet ? ` · from the ${escapeHtml(h.activeTeeSet)}` : ''}</div>
-        <div class="prep-tee-chips">${chips || '<span class="prep-empty">one set mapped</span>'}</div>
-        ${nudgeBit}
-      </div>`;
-  }
+  /* ======================================================================
+     v1.12.0: tee chips + nudge stepper REMOVED per James — "allow the
+     user to edit the tee just like when a round is active". Tee editing
+     now lives in Check location (Move tee → tap map → Load), persisted
+     to the course hole as a manual tee; Prep reads it via holeInfo.
+     ====================================================================== */
 
   function syncPrepChrome() {
     const sel = document.getElementById('planCourseSelect');
