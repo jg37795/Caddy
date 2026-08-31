@@ -1,0 +1,525 @@
+Statistical profiling result from isolate-0000015423790990-25136-v8.log, (1564 ticks, 7 unaccounted, 0 excluded).
+
+ [Shared libraries]:
+   ticks  total  nonlib   name
+   1172   74.9%          C:\Program Files\nodejs\node.exe
+     38    2.4%          C:\WINDOWS\SYSTEM32\ntdll.dll
+
+ [JavaScript]:
+   ticks  total  nonlib   name
+     36    2.3%   10.2%  LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:352:17
+     31    2.0%    8.8%  LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+     27    1.7%    7.6%  LazyCompile: *queueMutationRecord C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:33:29
+     20    1.3%    5.6%  LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     18    1.2%    5.1%  LazyCompile: *get isConnected C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:182:18
+     18    1.2%    5.1%  LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+     17    1.1%    4.8%  LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Document.js:899:19
+     13    0.8%    3.7%  LazyCompile: *get value C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:676:14
+     12    0.8%    3.4%  LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+     10    0.6%    2.8%  RegExp: (?:^[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}][A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*:[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}][A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*$)|(?:^[A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}][A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*$)
+     10    0.6%    2.8%  LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      9    0.6%    2.5%  LazyCompile: *exports.createImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Text.js:43:22
+      9    0.6%    2.5%  LazyCompile: *MutationObserver.observe.attributes :1476:28
+      8    0.5%    2.3%  LazyCompile: *exports.firstChildWithLocalNames C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\traversal.js:54:36
+      6    0.4%    1.7%  LazyCompile: *shadowIncludingDescendantsIterator C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\shadow-dom.js:251:45
+      6    0.4%    1.7%  LazyCompile: *get documentElement C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:242:22
+      6    0.4%    1.7%  LazyCompile: *get activeElement C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\DocumentOrShadowRoot-impl.js:7:20
+      6    0.4%    1.7%  LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      6    0.4%    1.7%  LazyCompile: *_node C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\symbol-tree\lib\SymbolTree.js:49:14
+      6    0.4%    1.7%  LazyCompile: *_descendantAdded C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:251:19
+      5    0.3%    1.4%  LazyCompile: *shadowIncludingInclusiveDescendantsIterator C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\shadow-dom.js:238:54
+      5    0.3%    1.4%  LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+      5    0.3%    1.4%  LazyCompile: *following C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\symbol-tree\lib\SymbolTree.js:220:18
+      4    0.3%    1.1%  LazyCompile: *get hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:279:15
+      4    0.3%    1.1%  LazyCompile: *_descendantRemoved C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:244:21
+      4    0.3%    1.1%  LazyCompile: *_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+      4    0.3%    1.1%  LazyCompile: *_attach C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:258:10
+      3    0.2%    0.8%  LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      3    0.2%    0.8%  LazyCompile: *remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\symbol-tree\lib\SymbolTree.js:645:15
+      3    0.2%    0.8%  LazyCompile: *get textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:645:20
+      3    0.2%    0.8%  LazyCompile: *exports.removeAttributeByNameNS C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:290:44
+      2    0.1%    0.6%  LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      2    0.1%    0.6%  LazyCompile: *returnTrue C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\symbol-tree\lib\SymbolTree.js:12:20
+      2    0.1%    0.6%  LazyCompile: *module.exports C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\iterable-weak-set.js:39:22
+      2    0.1%    0.6%  LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      2    0.1%    0.6%  LazyCompile: *get textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:530:18
+      2    0.1%    0.6%  LazyCompile: *get nodeName C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:150:15
+      2    0.1%    0.6%  LazyCompile: *get document C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\browser\Window.js:385:17
+      2    0.1%    0.6%  LazyCompile: *_adoptNode C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:817:13
+      1    0.1%    0.3%  LazyCompile: *resolve node:path:158:10
+      1    0.1%    0.3%  LazyCompile: *parent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\symbol-tree\lib\SymbolTree.js:143:15
+      1    0.1%    0.3%  LazyCompile: *getOwnPropertyDescriptor C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:846:27
+      1    0.1%    0.3%  LazyCompile: *exports.qname C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\validate-names.js:14:17
+      1    0.1%    0.3%  LazyCompile: *exports.createImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationRecord.js:42:22
+      1    0.1%    0.3%  LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+      1    0.1%    0.3%  LazyCompile: *accel :9358:19
+      1    0.1%    0.3%  LazyCompile: *_detach C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:268:10
+      1    0.1%    0.3%  LazyCompile: *_descendantRemoved C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:280:21
+      1    0.1%    0.3%  LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      1    0.1%    0.3%  Function: ^stepTo :9378:20
+      1    0.1%    0.3%  Function: ^splitRoot node:fs:2371:33
+      1    0.1%    0.3%  Function: ^get nodeName C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:150:15
+      1    0.1%    0.3%  Function: ^ceReactionsPreSteps C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\custom-elements.js:49:29
+
+ [C++]:
+   ticks  total  nonlib   name
+
+ [Summary]:
+   ticks  total  nonlib   name
+    347   22.2%   98.0%  JavaScript
+      0    0.0%    0.0%  C++
+     21    1.3%    5.9%  GC
+   1210   77.4%          Shared libraries
+      7    0.4%          Unaccounted
+
+ [C++ entry points]:
+   ticks    cpp   total   name
+
+ [Bottom up (heavy) profile]:
+  Note: percentage shows a share of a particular caller in the total
+  amount of its parent calls.
+  Callers occupying less than 1.0% are not shown.
+
+   ticks parent  name
+   1172   74.9%  C:\Program Files\nodejs\node.exe
+    339   28.9%    C:\Program Files\nodejs\node.exe
+     86   25.4%      LazyCompile: *MutationObserver.observe.attributes :1476:28
+     86  100.0%        LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     86  100.0%          LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     85   98.8%            LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      1    1.2%            Function: ^<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+     43   12.7%      C:\Program Files\nodejs\node.exe
+     35   81.4%        LazyCompile: *get value C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:676:14
+     35  100.0%          C:\Program Files\nodejs\node.exe
+     35  100.0%            LazyCompile: *get C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:796:6
+      3    7.0%        LazyCompile: *get C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:796:6
+      3  100.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+      3  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      1    2.3%        LazyCompile: ~parse C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\nwsapi\src\nwsapi.js:1750:13
+      1  100.0%          LazyCompile: ~_querySelectorAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\nwsapi\src\nwsapi.js:1839:31
+      1  100.0%            LazyCompile: ~_querySelector C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\nwsapi\src\nwsapi.js:1824:28
+      1    2.3%        LazyCompile: ~exports.install C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSlotElement.js:90:19
+      1  100.0%          LazyCompile: ~exports.installInterfaces C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\interfaces.js:207:29
+      1  100.0%            Function: ^setupWindow C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\browser\Window.js:102:21
+      1    2.3%        LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\psl\dist\psl.cjs:1:153345
+      1  100.0%          C:\Program Files\nodejs\node.exe
+      1  100.0%            Function: ~<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\psl\dist\psl.cjs:1:1
+      1    2.3%        Function: ~<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\entities\dist\commonjs\generated\decode-data-html.js:1:1
+      1  100.0%          Function: ^Module._compile node:internal/modules/cjs/loader:1051:37
+      1  100.0%            Function: ^Module._extensions..js node:internal/modules/cjs/loader:1106:37
+      1    2.3%        Function: ^readPackage node:internal/modules/cjs/loader:290:21
+      1  100.0%          Function: ^readPackageScope node:internal/modules/cjs/loader:321:26
+      1  100.0%            Function: ^Module._extensions..js node:internal/modules/cjs/loader:1106:37
+     35   10.3%      LazyCompile: *exports.createImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Text.js:43:22
+     33   94.3%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     33  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     33  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+      2    5.7%        LazyCompile: *createTextNode C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:689:17
+      2  100.0%          Function: ^set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      2  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     25    7.4%      LazyCompile: *get C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:796:6
+     24   96.0%        LazyCompile: *MutationObserver.observe.attributes :1476:28
+     24  100.0%          LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     24  100.0%            LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+      1    4.0%        LazyCompile: *get value C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:676:14
+      1  100.0%          C:\Program Files\nodejs\node.exe
+      1  100.0%            LazyCompile: *get C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:796:6
+     24    7.1%      Function: ^compileFunction node:vm:308:25
+     24  100.0%        Function: ^wrapSafe node:internal/modules/cjs/loader:1011:18
+     24  100.0%          Function: ^Module._compile node:internal/modules/cjs/loader:1051:37
+     24  100.0%            Function: ^Module._extensions..js node:internal/modules/cjs/loader:1106:37
+     18    5.3%      LazyCompile: *getOwnPropertyDescriptor C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:846:27
+     18  100.0%        C:\Program Files\nodejs\node.exe
+     18  100.0%          C:\Program Files\nodejs\node.exe
+     18  100.0%            LazyCompile: *get value C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLSelectElement.js:676:14
+     16    4.7%      LazyCompile: *exports.createImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationRecord.js:42:22
+     16  100.0%        LazyCompile: *queueMutationRecord C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:33:29
+     16  100.0%          LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+     16  100.0%            LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+     15    4.4%      LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     13   86.7%        LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+     13  100.0%          C:\Program Files\nodejs\node.exe
+     13  100.0%            LazyCompile: ~processTicksAndRejections node:internal/process/task_queues:68:35
+      2   13.3%        Function: ^<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      2  100.0%          C:\Program Files\nodejs\node.exe
+      2  100.0%            LazyCompile: ~processTicksAndRejections node:internal/process/task_queues:68:35
+     10    2.9%      Function: ^stat node:internal/modules/cjs/loader:151:14
+      6   60.0%        Function: ^Module._findPath node:internal/modules/cjs/loader:494:28
+      6  100.0%          Function: ^Module._resolveFilename node:internal/modules/cjs/loader:848:35
+      6  100.0%            Function: ^Module._load node:internal/modules/cjs/loader:757:24
+      4   40.0%        Function: ^tryFile node:internal/modules/cjs/loader:384:17
+      4  100.0%          Function: ^tryExtensions node:internal/modules/cjs/loader:400:23
+      4  100.0%            Function: ^Module._findPath node:internal/modules/cjs/loader:494:28
+      7    2.1%      Function: ^realpathSync node:fs:2421:22
+      7  100.0%        Function: ^toRealPath node:internal/modules/cjs/loader:393:20
+      4   57.1%          Function: ^Module._findPath node:internal/modules/cjs/loader:494:28
+      4  100.0%            Function: ^Module._resolveFilename node:internal/modules/cjs/loader:848:35
+      3   42.9%          Function: ^tryFile node:internal/modules/cjs/loader:384:17
+      3  100.0%            Function: ^tryExtensions node:internal/modules/cjs/loader:400:23
+      6    1.8%      LazyCompile: ~processTicksAndRejections node:internal/process/task_queues:68:35
+      6  100.0%        Function: ^runNextTicks node:internal/process/task_queues:59:22
+      6  100.0%          Function: ^processTimers node:internal/timers:487:25
+      6    1.8%      LazyCompile: *accel :9358:19
+      6  100.0%        LazyCompile: *stepTo :9378:20
+      5   83.3%          LazyCompile: *integrateTrajectory :9340:31
+      5  100.0%            LazyCompile: ~referenceLaunchFamily :8951:33
+      1   16.7%          Function: ^integrateTrajectory :9340:31
+      1  100.0%            LazyCompile: ~referenceLaunchFamily :8951:33
+      5    1.5%      Function: ^compileForInternalLoader node:internal/bootstrap/loaders:299:27
+      4   80.0%        Function: ^nativeModuleRequire node:internal/bootstrap/loaders:332:29
+      1   25.0%          LazyCompile: ~initializeCJSLoader node:internal/bootstrap/pre_execution:501:29
+      1  100.0%            LazyCompile: ~prepareMainThreadExecution node:internal/bootstrap/pre_execution:26:36
+      1   25.0%          Function: ~<anonymous> node:tls:1:1
+      1  100.0%            Function: ^compileForInternalLoader node:internal/bootstrap/loaders:299:27
+      1   25.0%          Function: ~<anonymous> node:crypto:1:1
+      1  100.0%            Function: ^compileForInternalLoader node:internal/bootstrap/loaders:299:27
+      1   25.0%          Function: ~<anonymous> node:_http_client:1:1
+      1  100.0%            Function: ^compileForInternalLoader node:internal/bootstrap/loaders:299:27
+      1   20.0%        Function: ^compileForPublicLoader node:internal/bootstrap/loaders:246:25
+      1  100.0%          Function: ^loadNativeModule node:internal/modules/cjs/helpers:44:26
+      1  100.0%            Function: ^Module._load node:internal/modules/cjs/loader:757:24
+    103    8.8%    LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:352:17
+    103  100.0%      LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Document.js:899:19
+    101   98.1%        LazyCompile: *MutationObserver.observe.attributes :1476:28
+    101  100.0%          LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+    101  100.0%            LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     77    6.6%    LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+     32   41.6%      LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+     32  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     32  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     32  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     28   36.4%      LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+     28  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     28  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     28  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     16   20.8%      LazyCompile: *_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+     16  100.0%        LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+     16  100.0%          LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+     16  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+      1    1.3%      Function: ^_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      1  100.0%        Function: ^_preInsert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:748:13
+      1  100.0%          Function: ^_append C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:863:10
+      1  100.0%            Function: ^insertText C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\browser\parser\html.js:139:13
+     76    6.5%    LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     61   80.3%      LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     50   82.0%        LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     39   78.0%          LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     26   66.7%            LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     13   33.3%            LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+     11   22.0%          LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+      5   45.5%            LazyCompile: *_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+      4   36.4%            LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      2   18.2%            LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+     11   18.0%        LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+      5   45.5%          LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      5  100.0%            LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      4   36.4%          LazyCompile: *_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+      4  100.0%            LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+      2   18.2%          LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      2  100.0%            LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     15   19.7%      LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+      6   40.0%        LazyCompile: *_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+      6  100.0%          LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+      6  100.0%            LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+      5   33.3%        LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      5  100.0%          LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      5  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      4   26.7%        LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      4  100.0%          LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      4  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     52    4.4%    LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+     52  100.0%      LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     51   98.1%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     51  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     51  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+      1    1.9%        Function: ^set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      1  100.0%          Function: ^set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      1  100.0%            Function: ^syncPrepChrome :1378:26
+     50    4.3%    LazyCompile: *get isConnected C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:182:18
+     26   52.0%      LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+     26  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     26  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     26  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     24   48.0%      LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+     24  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     24  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     24  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     48    4.1%    LazyCompile: *queueMutationRecord C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:33:29
+     27   56.3%      LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     27  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     27  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     27  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+     21   43.8%      LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+     21  100.0%        LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+     21  100.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+     21  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     42    3.6%    LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     42  100.0%      LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     42  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     42  100.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+     42  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     36    3.1%    LazyCompile: *MutationObserver.observe.attributes :1476:28
+     36  100.0%      LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     36  100.0%        LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     36  100.0%          LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+     36  100.0%            C:\Program Files\nodejs\node.exe
+     32    2.7%    LazyCompile: *exports.createImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Text.js:43:22
+     32  100.0%      LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     32  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     32  100.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+     32  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     22    1.9%    LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Document.js:899:19
+     22  100.0%      LazyCompile: *MutationObserver.observe.attributes :1476:28
+     22  100.0%        LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     22  100.0%          LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     21   95.5%            LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      1    4.5%            Function: ^<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+     22    1.9%    LazyCompile: *_descendantRemoved C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:244:21
+     18   81.8%      LazyCompile: *_descendantRemoved C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:244:21
+     16   88.9%        LazyCompile: *_descendantRemoved C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:244:21
+     15   93.8%          LazyCompile: *_descendantRemoved C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:244:21
+     14   93.3%            LazyCompile: *_descendantRemoved C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:244:21
+      1    6.7%            LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      1    6.3%          LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      1  100.0%            LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      2   11.1%        LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      2  100.0%          LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      2  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      4   18.2%      LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      4  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      4  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      4  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     22    1.9%    LazyCompile: *_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+     22  100.0%      LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+     22  100.0%        LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+     22  100.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+     22  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     21    1.8%    LazyCompile: *_descendantAdded C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:251:19
+     17   81.0%      LazyCompile: *_descendantAdded C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:251:19
+     16   94.1%        LazyCompile: *_descendantAdded C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:251:19
+     15   93.8%          LazyCompile: *_descendantAdded C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:251:19
+     13   86.7%            LazyCompile: *_descendantAdded C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:251:19
+      2   13.3%            LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      1    6.3%          LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      1  100.0%            LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      1    5.9%        LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      1  100.0%          LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      1  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      4   19.0%      LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      4  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      4  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      4  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     19    1.6%    LazyCompile: *get activeElement C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\DocumentOrShadowRoot-impl.js:7:20
+     19  100.0%      LazyCompile: *_runPreRemovingSteps C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:617:23
+     19  100.0%        LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+     19  100.0%          LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     19  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     16    1.4%    LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     16  100.0%      LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     16  100.0%        LazyCompile: *MutationObserver.observe.attributes :1476:28
+     16  100.0%          LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     16  100.0%            LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     16    1.4%    LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+     16  100.0%      LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     16  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     16  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     16  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+     16    1.4%    LazyCompile: *_node C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\symbol-tree\lib\SymbolTree.js:49:14
+      6   37.5%      LazyCompile: *get documentElement C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:242:22
+      6  100.0%        LazyCompile: *get activeElement C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\DocumentOrShadowRoot-impl.js:7:20
+      6  100.0%          LazyCompile: *_runPreRemovingSteps C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:617:23
+      6  100.0%            LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      5   31.3%      LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      5  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      5  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      5  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      3   18.8%      LazyCompile: *exports.firstChildWithLocalNames C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\traversal.js:54:36
+      3  100.0%        LazyCompile: *get activeElement C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\DocumentOrShadowRoot-impl.js:7:20
+      3  100.0%          LazyCompile: *_runPreRemovingSteps C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:617:23
+      3  100.0%            LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      1    6.3%      LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      1  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      1  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      1  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+      1    6.3%      Function: ^insertAfter C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\symbol-tree\lib\SymbolTree.js:738:20
+      1  100.0%        Function: ^appendChild C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\symbol-tree\lib\SymbolTree.js:815:20
+      1  100.0%          Function: ^_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      1  100.0%            Function: ^_preInsert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:748:13
+     14    1.2%    LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+     14  100.0%      LazyCompile: *MutationObserver.observe.attributes :1476:28
+     14  100.0%        LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     14  100.0%          LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     14  100.0%            LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+     13    1.1%    LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     13  100.0%      LazyCompile: *MutationObserver.observe.attributes :1476:28
+     13  100.0%        LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     13  100.0%          LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     12   92.3%            LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      1    7.7%            Function: ^<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+
+     38    2.4%  C:\WINDOWS\SYSTEM32\ntdll.dll
+     12   31.6%    C:\Program Files\nodejs\node.exe
+      2   16.7%      C:\Program Files\nodejs\node.exe
+      1   50.0%        LazyCompile: ~exports.install C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\UIEvent.js:87:19
+      1  100.0%          LazyCompile: ~exports.installInterfaces C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\interfaces.js:207:29
+      1  100.0%            Function: ^setupWindow C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\browser\Window.js:102:21
+      1   50.0%        Function: ^Module.load node:internal/modules/cjs/loader:963:33
+      1  100.0%          Function: ^Module._load node:internal/modules/cjs/loader:757:24
+      1  100.0%            Function: ^Module.require node:internal/modules/cjs/loader:991:36
+      1    8.3%      LazyCompile: ~parseScheme C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\whatwg-url\lib\url-state-machine.js:555:65
+      1  100.0%        LazyCompile: ~URLStateMachine C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\whatwg-url\lib\url-state-machine.js:481:25
+      1  100.0%          LazyCompile: ~module.exports.basicURLParse C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\whatwg-url\lib\url-state-machine.js:1206:41
+      1  100.0%            LazyCompile: ~URLImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\whatwg-url\lib\URL-impl.js:7:14
+      1    8.3%      LazyCompile: ~parse C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\rrweb-cssom\lib\parse.js:9:29
+      1  100.0%        LazyCompile: ~set C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\cssstyle\lib\CSSStyleDeclaration.js:187:19
+      1  100.0%          C:\Program Files\nodejs\node.exe
+      1  100.0%            Function: ^_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+      1    8.3%      LazyCompile: ~finalizeEsmResolution node:internal/modules/cjs/loader:939:31
+      1  100.0%        Function: ^resolveExports node:internal/modules/cjs/loader:472:24
+      1  100.0%          Function: ^Module._findPath node:internal/modules/cjs/loader:494:28
+      1  100.0%            Function: ^Module._resolveFilename node:internal/modules/cjs/loader:848:35
+      1    8.3%      LazyCompile: ~click C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:102:10
+      1  100.0%        LazyCompile: ~tick :811:18
+      1  100.0%          LazyCompile: ~feedback :821:22
+      1  100.0%            LazyCompile: ~haptic :747:18
+      1    8.3%      LazyCompile: ~_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLDetailsElement-impl.js:20:16
+      1  100.0%        Function: ^exports.appendAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:50:36
+      1  100.0%          Function: ^exports.setAttributeValue C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:242:38
+      1  100.0%            Function: ^adoptAttributes C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\browser\parser\html.js:161:18
+      1    8.3%      LazyCompile: ~ElementImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Element-impl.js:57:14
+      1  100.0%        LazyCompile: ~HTMLElementImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:14:14
+      1  100.0%          LazyCompile: ~HTMLMetaElementImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLMetaElement-impl.js:5:1
+      1  100.0%            LazyCompile: ~exports.setup C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLMetaElement.js:55:17
+      1    8.3%      LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Document.js:899:19
+      1  100.0%        LazyCompile: *MutationObserver.observe.attributes :1476:28
+      1  100.0%          LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      1  100.0%            LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+      1    8.3%      LazyCompile: *get isConnected C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:182:18
+      1  100.0%        Function: ^_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      1  100.0%          Function: ^_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      1  100.0%            Function: ^set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      1    8.3%      Function: ~<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\.gtds\prep_tap_probe2.js:1:1
+      1  100.0%        LazyCompile: ~Module._compile node:internal/modules/cjs/loader:1051:37
+      1  100.0%          LazyCompile: ~Module._extensions..js node:internal/modules/cjs/loader:1106:37
+      1  100.0%            LazyCompile: ~Module.load node:internal/modules/cjs/loader:963:33
+      1    8.3%      Function: ^implForWrapper C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\utils.js:82:24
+      1  100.0%        Function: ^exports.createImpl C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Attr.js:45:22
+      1  100.0%          Function: ^_createAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:756:19
+      1  100.0%            Function: ^exports.setAttributeValue C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:242:38
+
+     36    2.3%  LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Document-impl.js:352:17
+     35   97.2%    LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Document.js:899:19
+     35  100.0%      LazyCompile: *MutationObserver.observe.attributes :1476:28
+     35  100.0%        LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     35  100.0%          LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     33   94.3%            LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      2    5.7%            Function: ^<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      1    2.8%    LazyCompile: *MutationObserver.observe.attributes :1476:28
+      1  100.0%      LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      1  100.0%        LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+      1  100.0%          LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      1  100.0%            C:\Program Files\nodejs\node.exe
+
+     31    2.0%  LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+     13   41.9%    LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+     13  100.0%      LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     13  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     13  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     13  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+     10   32.3%    LazyCompile: *_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+     10  100.0%      LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+     10  100.0%        LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+      9   90.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+      9  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      1   10.0%          LazyCompile: *syncPrepChrome :1378:26
+      1  100.0%            LazyCompile: ~unbindHoleIfGone :1418:28
+      5   16.1%    LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      5  100.0%      LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      5  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      5  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      5  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+      3    9.7%    LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      3  100.0%      LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      3  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      3  100.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+      3  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+
+     27    1.7%  LazyCompile: *queueMutationRecord C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:33:29
+     14   51.9%    LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+     14  100.0%      LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+     14  100.0%        LazyCompile: *MutationObserver.observe.attributes :1476:28
+     14  100.0%          LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     14  100.0%            LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     12   44.4%    LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     12  100.0%      LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     12  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     12  100.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+     12  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      1    3.7%    LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      1  100.0%      LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      1  100.0%        LazyCompile: *MutationObserver.observe.attributes :1476:28
+      1  100.0%          LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      1  100.0%            LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+
+     20    1.3%  LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     16   80.0%    LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     16  100.0%      LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     14   87.5%        LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     13   92.9%          LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+     11   84.6%            LazyCompile: *_clearMemoizedQueries C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:236:24
+      2   15.4%            LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+      1    7.1%          LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+      1  100.0%            Function: ^_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      2   12.5%        LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+      2  100.0%          LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      2  100.0%            LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      4   20.0%    LazyCompile: *_modified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:216:12
+      2   50.0%      LazyCompile: *_attrModified C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\HTMLElement-impl.js:121:16
+      2  100.0%        LazyCompile: *exports.changeAttribute C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\attributes.js:29:27
+      2  100.0%          LazyCompile: *set hidden C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\HTMLElement.js:296:15
+      2  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+      1   25.0%      LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      1  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      1  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      1  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      1   25.0%      LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      1  100.0%        LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      1  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      1  100.0%            LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+
+     18    1.2%  LazyCompile: *get isConnected C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:182:18
+      9   50.0%    LazyCompile: *_remove C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1072:10
+      9  100.0%      LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      9  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      9  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      9  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+      9   50.0%    LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+      9  100.0%      LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+      9  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+      9  100.0%          LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+      9  100.0%            LazyCompile: *MutationObserver.observe.attributes :1476:28
+
+     18    1.2%  LazyCompile: *_insert C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:764:10
+     18  100.0%    LazyCompile: *_replaceAll C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:1028:14
+     18  100.0%      LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\nodes\Node-impl.js:559:18
+     18  100.0%        LazyCompile: *set textContent C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Node.js:660:20
+     18  100.0%          LazyCompile: *MutationObserver.observe.attributes :1476:28
+     18  100.0%            LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+
+     17    1.1%  LazyCompile: *getElementById C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\Document.js:899:19
+     12   70.6%    LazyCompile: *MutationObserver.observe.attributes :1476:28
+     12  100.0%      LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+     12  100.0%        LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+     12  100.0%          LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+     12  100.0%            C:\Program Files\nodejs\node.exe
+      4   23.5%    LazyCompile: *invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      4  100.0%      LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+      4  100.0%        LazyCompile: *<anonymous> C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:132:26
+      4  100.0%          C:\Program Files\nodejs\node.exe
+      4  100.0%            LazyCompile: ~processTicksAndRejections node:internal/process/task_queues:68:35
+      1    5.9%    Function: ^syncPrepChrome :1378:26
+      1  100.0%      LazyCompile: ~unbindHoleIfGone :1418:28
+      1  100.0%        LazyCompile: ~MutationObserver.observe.attributes :1476:28
+      1  100.0%          Function: ^invokeTheCallbackFunction C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\generated\MutationCallback.js:11:37
+      1  100.0%            LazyCompile: *notifyMutationObservers C:\Users\wendy\Desktop\Caddy\Caddy-main\node_modules\jsdom\lib\jsdom\living\helpers\mutation-observers.js:138:33
+

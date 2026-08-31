@@ -1385,13 +1385,29 @@
     const courseName = document.getElementById('planCourseName');
     const changeBtn = document.getElementById('prepChangeCourse');
 
-    if (boundHead) boundHead.hidden = !hasCourse;
-    if (nameEl && courseName && hasCourse)
+    // v-fix(mo-loop) v1.7.4 (James: hole tap freezes the app): every write
+    // below is now CHANGE-GUARDED. The observer on planCourseCard fires
+    // unbindHoleIfGone → syncPrepChrome; a same-value hidden/textContent
+    // write must never re-queue a mutation record, or the callback feeds
+    // itself forever (microtask storm = the freeze).
+    if (boundHead) {
+      if (boundHead.hidden !== !hasCourse) boundHead.hidden = !hasCourse;
+    }
+    if (nameEl && courseName && hasCourse &&
+        nameEl.textContent !== (courseName.textContent || 'Course'))
       nameEl.textContent = courseName.textContent || 'Course';
-    if (searchPane) searchPane.hidden = hasCourse && !prepSearching;
-    if (changeBtn) changeBtn.textContent = prepSearching ? 'Done' : 'Change';
-    if (courseCard && hasCourse)
-      courseCard.hidden = prepSearching || !!boundHole;
+    if (searchPane) {
+      const want = hasCourse && !prepSearching;
+      if (searchPane.hidden !== want) searchPane.hidden = want;
+    }
+    if (changeBtn) {
+      const label = prepSearching ? 'Done' : 'Change';
+      if (changeBtn.textContent !== label) changeBtn.textContent = label;
+    }
+    if (courseCard && hasCourse) {
+      const want = prepSearching || !!boundHole;
+      if (courseCard.hidden !== want) courseCard.hidden = want;
+    }
   }
 
   function bindHole(number) {
@@ -1473,10 +1489,22 @@
 
     const courseCard = document.getElementById('planCourseCard');
     if (courseCard && typeof MutationObserver !== 'undefined') {
-      new MutationObserver(() => {
-        if (courseCard && !courseCard.hidden) prepSearching = false;
-        unbindHoleIfGone();
-      }).observe(courseCard, {
+      // v-fix(mo-loop) v1.7.4: disconnect while reacting. The callback's
+      // own hidden/textContent writes must never be observed by itself —
+      // a self-feeding observer is a microtask storm (app freeze).
+      const mo = new MutationObserver(() => {
+        mo.disconnect();
+        try {
+          if (courseCard && !courseCard.hidden) prepSearching = false;
+          unbindHoleIfGone();
+        } finally {
+          mo.observe(courseCard, {
+            attributes: true,
+            attributeFilter: ['hidden'],
+          });
+        }
+      });
+      mo.observe(courseCard, {
         attributes: true,
         attributeFilter: ['hidden'],
       });

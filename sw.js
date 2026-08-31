@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.7.3'; // PREP TAP-FREEZE FIX (James): hole tap ran 4 full playsLike solves + 4 recommendClub ES searches (~4k quad evals each) SYNCHRONOUSLY in the tap handler — multi-second main-thread stall on iPhone. Fix: paint the hole UI first, run math on next task (bindHole yields); recommendClub memoized LRU-48 keyed on yardage+shotlog+bag (repeat taps/settles are instant)
+const CACHE_VERSION = 'v1.7.4'; // PREP TAP-FREEZE ROOT CAUSE (reproduced in jsdom: 2.5M mutation records): the planCourseCard MutationObserver + syncPrepChrome fed each other — every hidden/textContent write re-queued a mutation record, and the observer's own reaction re-wrote it, spinning a microtask storm that froze the main thread on hole tap. Fix: (1) syncPrepChrome writes are change-guarded (same-value write = no-op); (2) observer disconnects itself while reacting, re-observes after; (3) bindHole defers math to next task (v1.7.3). Verified: MO records 2,485,000 -> 2.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
