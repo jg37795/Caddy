@@ -1278,6 +1278,88 @@
     const polyLL = await fetchGreenPolygon(state.lat, state.lng);
     setLoading('Reading green shape');
 
+    // v1.6.0 (AUTO-DETECT features): per-cell features for GreenDetect —
+    // the same deterministic pipeline the calibration harness uses.
+    {
+      const g2 = state.grid ? state.grid.grid : null;
+      if (g2) {
+        const W = elev.W, H = elev.H, cs = elev.cellSizeM;
+        const N2 = W * H;
+        const idx2 = (x, y) => y * W + x;
+        const val2 = (x, y) => (x >= 0 && y >= 0 && x < W && y < H &&
+          Number.isFinite(g2[idx2(x, y)])) ? g2[idx2(x, y)] : null;
+        const sl2 = new Float64Array(N2).fill(NaN);
+        const s32 = new Float64Array(N2).fill(NaN);
+        const t52 = new Float64Array(N2).fill(NaN);
+        for (let y = 0; y < H; y++)
+          for (let x = 0; x < W; x++) {
+            const i = idx2(x, y);
+            const zc = val2(x, y); if (zc === null) continue;
+            const zx1 = val2(x + 1, y), zx0 = val2(x - 1, y);
+            const zy1 = val2(x, y + 1), zy0 = val2(x, y - 1);
+            if (zx1 !== null && zx0 !== null && zy1 !== null && zy0 !== null)
+              sl2[i] = Math.hypot(zx1 - zx0, zy1 - zy0) / (2 * cs) * 100;
+            let sA = 0, nA = 0, vA = [];
+            for (let dy = -1; dy <= 1; dy++)
+              for (let dx = -1; dx <= 1; dx++) {
+                const v = val2(x + dx, y + dy);
+                if (v !== null) { sA += v; nA++; vA.push(v); }
+              }
+            if (nA >= 5) {
+              const m = sA / nA;
+              s32[i] = Math.sqrt(vA.reduce((a, v) => a + (v - m) * (v - m), 0) / nA);
+            }
+            let sB = 0, nB = 0, vB = [];
+            for (let dy = -2; dy <= 2; dy++)
+              for (let dx = -2; dx <= 2; dx++) {
+                const sv = sl2[idx2(Math.min(W - 1, Math.max(0, x + dx)),
+                  Math.min(H - 1, Math.max(0, y + dy)))];
+                if (Number.isFinite(sv)) { sB += sv; nB++; vB.push(sv); }
+              }
+            if (nB >= 12) {
+              const m = sB / nB;
+              t52[i] = Math.sqrt(vB.reduce((a, v) => a + (v - m) * (v - m), 0) / nB);
+            }
+          }
+        state.__r4Slope = sl2;
+        state.__r4Smooth3 = s32;
+        state.__r4Tex5 = t52;
+        state.__r4Exg = new Float64Array(N2).fill(NaN);
+        state.__r4Bright = new Float64Array(N2).fill(NaN);
+        // Satellite per-cell sampling (async, non-blocking): fills exg/
+        // bright when the mosaic is ready; detection re-runs after.
+        if (window.CaddySat && !window.__satFailed) {
+          window.CaddySat.load(bbox).then((sat) => {
+            if (sat.fail) return;
+            try {
+              const mLngC = 111320 * Math.cos(state.lat * Math.PI / 180);
+              const sampler = window.CaddySat.makeSampler(sat, bbox);
+              for (let y = 0; y < H; y++)
+                for (let x = 0; x < W; x++) {
+                  const i = idx2(x, y);
+                  if (!Number.isFinite(g2[i])) continue;
+                  const lon = (bbox[0] + bbox[2]) / 2 +
+                    (x + 0.5 - W / 2) * cs / mLngC;
+                  const lat = (bbox[1] + bbox[3]) / 2 +
+                    (H / 2 - y - 0.5) * cs / 110540;
+                  const p = sampler(lon, lat);
+                  if (p) {
+                    state.__r4Exg[i] = 2 * p[1] - p[0] - p[2];
+                    state.__r4Bright[i] = 0.2126 * p[0] +
+                      0.7152 * p[1] + 0.0722 * p[2];
+                  }
+                }
+              // Satellite features landed — if the first detection ran
+              // LiDAR-only and produced no outline, retry with imagery.
+              if (state.polySource !== 'detected' &&
+                  state.polySource !== 'traced' && state.polySource !== 'osm')
+                render();
+            } catch (e) { console.warn('[greenmap] sat features:', e.message); }
+          }).catch(() => { window.__satFailed = true; });
+        }
+      }
+    }
+
     if (!elev || !elev.grid) {
       status.textContent = 'No 3DEP data here — try another location.';
       setLoading(false);
@@ -1322,8 +1404,29 @@
     // v1.2.5 (source choice): ?src=osm|traced overrides the default order
     // (trace first) — set by tapping the loc badge when both exist.
     const srcPref = qs.get('src');
-    const useTrace = tracedHit && srcPref !== 'osm';
-    const useOsm = polyLL && !useTrace && srcPref !== 'traced';
+    // v1.6.0 (AUTO-DETECT): the detected outline slots in ABOVE OSM when
+    // no trace exists — it's derived from the same LiDAR+imagery the tool
+    // shows, gated at confidence >= 0.6, with the badge reading
+    // "⚠ detected outline" so it never masquerades as surveyed data.
+    // Trace remains ground truth; ?src=auto|osm|traced forces a rung.
+    const useTrace = tracedHit && srcPref !== 'osm' && srcPref !== 'auto';
+    let detectRes = null;
+    if (!useTrace && window.GreenDetect && state.grid) {
+      try {
+        detectRes = window.GreenDetect.detect({
+          grid: {
+            W: elev.W, H: elev.H, cellSizeM: elev.cellSizeM,
+            z: state.grid.grid, slope: state.__r4Slope,
+            smooth3: state.__r4Smooth3, tex5: state.__r4Tex5,
+            exg: state.__r4Exg, bright: state.__r4Bright
+          },
+          satSample: state.__r4SatSample || (() => null)
+        });
+      } catch (e) { console.warn('[greenmap] detect failed:', e.message); }
+    }
+    const useDetect = !useTrace && detectRes && detectRes.confidence >= 0.6 &&
+      srcPref !== 'osm' && srcPref !== 'traced';
+    const useOsm = polyLL && !useTrace && !useDetect && srcPref !== 'traced';
     state.__altOsm = !!(tracedHit && polyLL);   // both available → badge offers switch
     state.__altTrace = state.__altOsm;
     if (useTrace) {
@@ -1333,6 +1436,11 @@
         (ln - state.lng) * mLng, (la - state.lat) * mLat ]);
       state.polySource = 'traced';
       mask = GreenMapCore.polyMask(state.polyLocal,
+        elev.W, elev.H, elev.cellSizeM);
+    } else if (useDetect) {
+      state.polyLocal = detectRes.poly;
+      state.polySource = 'detected';
+      mask = GreenMapCore.polyMask(detectRes.poly,
         elev.W, elev.H, elev.cellSizeM);
     } else if (useOsm) {
       const polyLocal = polyLL.map(([lon, la]) => [
@@ -1410,7 +1518,8 @@
       `max slope ${maxS.toFixed(1)}%`);
     const SRC_LABEL = state.polySource === 'traced'
       ? 'traced outline' : state.polySource === 'ellipse'
-        ? 'ellipse fallback' : 'OSM green shape';
+        ? 'ellipse fallback' : state.polySource === 'detected'
+          ? 'detected outline' : 'OSM green shape';
     status.textContent = `${SRC_LABEL} · ` +
       `${(sumS / Math.max(1, nValid)).toFixed(1)}% mean slope`;
     setLoading(false);
@@ -4193,9 +4302,11 @@
       ? '✓ real green outline (OSM)'
       : polySource === 'traced'
         ? '✓ your traced outline'
-        : polySource === 'ellipse'
-          ? '⚠ approx outline — trace it via Check location'
-          : '…';
+        : polySource === 'detected'
+          ? '⚠ detected outline — verify via Check location'
+          : polySource === 'ellipse'
+            ? '⚠ approx outline — trace it via Check location'
+            : '…';
     el.textContent = `${la}, ${ln} · ${src}` +
       // v-fix(dist-badge) v1.5.2 (audit #12): surface the centroid distance
       // so "✓ real green outline (OSM)" proves HOW near the mapped green is.
@@ -4211,6 +4322,15 @@
       el.onclick = () => {
         const qs2 = new URLSearchParams(location.search);
         qs2.set('src', 'osm');
+        location.replace('?r=' + Date.now() + '&' + qs2.toString());
+      };
+    } else if (polySource === 'detected') {
+      // v1.6.0: a detected outline is always overridable — trace or OSM.
+      el.textContent += ' · tap to trace the true outline';
+      el.style.cursor = 'pointer';
+      el.onclick = () => {
+        const qs2 = new URLSearchParams(location.search);
+        qs2.set('src', 'traced');
         location.replace('?r=' + Date.now() + '&' + qs2.toString());
       };
     } else if (polySource === 'osm' && state.__altTrace) {

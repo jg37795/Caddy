@@ -86,6 +86,13 @@ global.requestAnimationFrame = (f) => setImmediate(f);
 global.performance = global.performance || { now: () => Date.now() };
 // Overpass offline → ellipse fallback (fine).
 global.fetch = async () => { throw new Error('offline'); };
+// v1.6.0: load the detector so the smoke covers the auto-detect path
+// (offline Overpass + synthetic grid → detection may or may not fire;
+// the boot requirement is only that it must not throw).
+global.window.GreenDetect = { detect: null };
+require(path.join(__dirname, '..', 'green-detect.js'));
+check('GreenDetect bridge present', !!global.window.GreenDetect &&
+  typeof global.window.GreenDetect.detect === 'function', 'bridge');
 
 require(path.join(__dirname, '..', 'greenmap.js'));
 

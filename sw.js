@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.5.3'; // AUDIT #20 (prep perf): solve() memoized on full input signature (LRU 64) — renderStrategy's duplicate tee-solve deduped; recompute throttled to 1 run/120ms during slider drags + settles once after. Prep tab wind/temp drags no longer run 4 full physics solves per pixel-step
+const CACHE_VERSION = 'v1.6.0'; // AUTO-GREEN-DETECTION: green-detect.js (Grok 4.6 algorithm, R1-R4 calibration loop) wired into the source ladder as detected -> trace -> OSM -> ellipse; conf >= 0.6 gate; badge '⚠ detected outline — verify via Check location' with tap-to-trace; per-cell feature pipeline (slope/smooth3/tex5/exg/bright) computed at load; sat features land async and re-render
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
@@ -19,6 +19,7 @@ const APP_SHELL = [
   './prep.js',
   './elev.css',
   './caddy-elev.js',
+  './green-detect.js',
   './range.css',
   './range.js',
   './greenlink.js',
