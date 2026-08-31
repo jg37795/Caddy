@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.7.4'; // PREP TAP-FREEZE ROOT CAUSE (reproduced in jsdom: 2.5M mutation records): the planCourseCard MutationObserver + syncPrepChrome fed each other — every hidden/textContent write re-queued a mutation record, and the observer's own reaction re-wrote it, spinning a microtask storm that froze the main thread on hole tap. Fix: (1) syncPrepChrome writes are change-guarded (same-value write = no-op); (2) observer disconnects itself while reacting, re-observes after; (3) bindHole defers math to next task (v1.7.3). Verified: MO records 2,485,000 -> 2.
+const CACHE_VERSION = 'v1.8.0'; // PREP FLOW POLISH (James: 'make it amazing and make sense'): Green Map card REMOVED — the 3D Green owns slope; its one unique datum (tee→green elevation delta) now rides the hole map corner as a glass ↑/↓ chip fetched lazily per hole; Rec card sits directly under the Hole brief (swing number follows the hole story); 'Use live weather' merged into Conditions; old ge-* card code deleted. Reading order when mapped: brief (map/tee/sequence/hazards/carries/feed/3D button) -> pre-shot number -> the shot -> conditions.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

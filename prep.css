@@ -1269,6 +1269,35 @@ body.dark .prep-strat-advice {
   margin: 4px 0 2px;
 }
 
+/* v1.8.0 — map + elevation-chip overlay; the old Green Map card is gone,
+   its one useful number (tee→green delta) rides the map corner instead. */
+.prep-hm-wrap {
+  position: relative;
+}
+.prep-hm-elev {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.prep-elev-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #b8ffd9;
+  background: rgba(24, 164, 91, 0.22);
+  border: 1px solid rgba(24, 164, 91, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.prep-elev-chip.down {
+  color: #ffd9a8;
+  background: rgba(228, 160, 66, 0.18);
+  border-color: rgba(228, 160, 66, 0.45);
+}
+
 .prep-hm-fairway {
   fill: rgba(24, 164, 91, 0.16);
   stroke: rgba(24, 164, 91, 0.38);
