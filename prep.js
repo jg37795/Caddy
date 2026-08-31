@@ -225,7 +225,8 @@
       sel.setAttribute('id', 'dialSel');
       sel.setAttribute('class', 'prep-dial-sel');
       const host = $('dialSectors');
-      host.parentNode.insertBefore(sel, host.nextSibling);
+      if (host && host.parentNode) host.parentNode.insertBefore(sel, host.nextSibling);
+      else if (host) host.appendChild(sel);
     }
   }
 
@@ -1400,10 +1401,18 @@
     prepSearching = false;
     shot.greenPoint = 'middle';
     persist();
+    // v-fix(tap-freeze) v1.7.3 (James: "when I tap one of the holes the app
+    // freezes"): the solve pipeline (4 full playsLike + 4 recommendClub
+    // searches, each ~4k expected-strokes evaluations) ran SYNCHRONOUSLY
+    // in the tap handler — on iPhone that's a multi-second main-thread
+    // stall: the tap looks frozen. Paint the hole UI FIRST, then run the
+    // math on the next task so the header/card appear instantly.
     paintControls();
     paintTarget();
-    recompute({ pulse: true });
     loadGreenMap(); // lazy + cancellable; never blocks the flow
+    setTimeout(() => {
+      recompute({ pulse: true });
+    }, 0);
   }
 
   function unbindHoleIfGone() {

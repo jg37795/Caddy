@@ -10226,12 +10226,22 @@ out geom;`;
    * effort level that minimizes it rather than a fixed "take the longer club" heuristic.
    */
   const GENERIC_GREEN_DEPTH_YD = 30;  // median depth of a modern green, yd — USGA Green Section green-sizing guidance
+  const _recClubMemo = new Map();     // v1.7.3 tap-freeze: recommendClub LRU (see memoKey below)
   const EFFORT_LEVELS = [0.88, 0.94, 1.0, 1.06];  // smooth / easy / stock / firm — the four swings most players actually own
   const EFFORT_NAMES = ['smooth', 'easy', 'stock', 'firm'];
   const ES_TIE_THRESHOLD = 0.008;     // strokes; below this two options are indistinguishable given model error
 
   function recommendClub(playsYd) {
     playsYd = Math.max(0, num(playsYd, 0));
+    // v-fix(rec-memo) v1.7.3 (tap-freeze follow): the ES search below costs
+    // ~4k expected-strokes evaluations per call; renderStrategy calls it up
+    // to 4x per tap and repeat taps repeat the whole search. Memoize on the
+    // rounded yardage + shot-log version (identical inputs ⇒ identical
+    // recommendation). LRU 48.
+    const memoKey = Math.round(playsYd) + '|' + _shotLogVersion + '|' +
+      state.clubs.length;
+    const hit = _recClubMemo.get(memoKey);
+    if (hit) return hit;
     const asc = sortedClubsAsc(), desc = sortedClubsDesc();
     if (!asc.length)
       return { main: 'Add clubs', sub: 'Go to Clubs and add your stock carry distances.' };
@@ -10298,7 +10308,10 @@ out geom;`;
       bits.push(`${runner.club.name} is statistically identical — take the one you trust.`);
     else if (runner)
       bits.push(`Next best ${runner.club.name} costs ${fmt(margin, 2)} strokes.`);
-    return { main: label, sub: bits.join(' ') };
+    const out = { main: label, sub: bits.join(' ') };
+    if (_recClubMemo.size > 48) _recClubMemo.delete(_recClubMemo.keys().next().value);
+    _recClubMemo.set(memoKey, out);
+    return out;
   }
 
   /**

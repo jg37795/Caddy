@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.7.2'; // HOTFIX (James: 'you broke some buttons'): v1.7.1's calculator removal left an unguarded els.manualClub.addEventListener in initClubsEvents — TypeError on boot killed every init step AFTER it (tabs, round, stats, planner = dead buttons + weird view). Guarded; initLayerSeg also guarded; NEW tests/app_boot_smoke.js loads app.js against the real index.html and asserts boot completes — this class of bug can't ship silently again
+const CACHE_VERSION = 'v1.7.3'; // PREP TAP-FREEZE FIX (James): hole tap ran 4 full playsLike solves + 4 recommendClub ES searches (~4k quad evals each) SYNCHRONOUSLY in the tap handler — multi-second main-thread stall on iPhone. Fix: paint the hole UI first, run math on next task (bindHole yields); recommendClub memoized LRU-48 keyed on yardage+shotlog+bag (repeat taps/settles are instant)
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
