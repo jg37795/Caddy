@@ -14417,13 +14417,30 @@ out geom;`;
       const hole = (course.holes || [])[number - 1];
       if (!hole) return null;
       const yd = planHoleYardage(hole);
+      const tee = hole.teePoint;
+      const green = hole.greenCenter;
+      const rawHz = Array.isArray(hole.hazards) ? hole.hazards : [];
+      // along/cross are the existing tee→green projections (read-only);
+      // prep.js draws the hole diagram from these instead of re-deriving.
+      const hazards = planHazardsFor(hole).map((hz, i) => {
+        const raw = rawHz[i];
+        let along = null, cross = null;
+        if (
+          tee && green && raw &&
+          Number.isFinite(raw.lat) && Number.isFinite(raw.lng)
+        ) {
+          along = alongTrackYd(tee, green, raw);
+          cross = crossTrackYd(tee, green, raw);
+        }
+        return { type: hz.type, label: hz.label, sub: hz.sub, along, cross };
+      });
       return {
         number,
         courseName: course.name || 'Course',
         par: hole.par || inferParFromYards(yd),
         yards: yd,
         strokeIndex: hole.strokeIndex || null,
-        hazards: planHazardsFor(hole),
+        hazards,
         green: planGreenInfo(hole),
         // Green Maps: raw lat/lng for the elevation service (read-only).
         teeLatLng: hole.teePoint
@@ -14435,6 +14452,11 @@ out geom;`;
             ? initialBearingDeg(hole.teePoint, hole.greenCenter)
             : null,
       };
+    },
+    // Pure bag sequence for a hole length. Same helper the planner uses;
+    // no writes, no UI. null when yards or bag are missing.
+    clubSequence(totalYd) {
+      return planClubSequence(totalYd);
     },
     haptic,
   };

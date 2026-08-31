@@ -1158,3 +1158,256 @@ body.dark .prep-strat-advice {
 .prep-fv-hz.water {
   fill: rgba(90, 170, 255, 0.8);
 }
+
+/* ==========================================================================
+   PREP FLOW — bound course + search first screen
+   ========================================================================== */
+#prepBoundHead .prep-kicker {
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.prep-bound-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.prep-bound-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+#prepBoundTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prep-change-chip {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 1px solid var(--line);
+  background: rgba(127, 127, 127, 0.1);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  padding: 7px 13px;
+  border-radius: 999px;
+}
+
+.prep-change-chip:active {
+  transform: scale(0.97);
+}
+
+.prep-saved-details {
+  margin-top: 12px;
+}
+
+.prep-saved-details summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
+  color: var(--muted);
+  padding: 4px 0;
+}
+
+.prep-saved-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.prep-saved-details summary::after {
+  content: ' ›';
+  font-weight: 900;
+}
+
+.prep-saved-details[open] summary::after {
+  content: ' ˅';
+}
+
+/* Conditions live behind one collapsible so the hole brief leads. */
+.prep-cond-details {
+  margin: 0;
+}
+
+.prep-cond-details > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0 4px;
+}
+
+.prep-cond-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.prep-cond-details .card-title {
+  margin: 0;
+  flex: 1;
+}
+
+.prep-cond-body {
+  padding-top: 6px;
+}
+
+/* Hole corridor diagram (SVG inside the strategy brief) */
+.prep-holemap {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin: 4px 0 2px;
+}
+
+.prep-hm-fairway {
+  fill: rgba(24, 164, 91, 0.16);
+  stroke: rgba(24, 164, 91, 0.38);
+  stroke-width: 1;
+}
+
+body.dark .prep-hm-fairway {
+  fill: rgba(24, 164, 91, 0.18);
+  stroke: rgba(99, 232, 154, 0.28);
+}
+
+.prep-hm-shot {
+  fill: none;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.prep-hm-shot.s0 { stroke: #63e89a; }
+.prep-hm-shot.s1 { stroke: #7ec8ff; }
+.prep-hm-shot.s2 { stroke: #ffd166; }
+.prep-hm-shot.s3 { stroke: #ff9f7a; }
+
+.prep-hm-club {
+  fill: var(--text);
+  font-size: 9.5px;
+  font-weight: 800;
+  font-family: inherit;
+}
+
+.prep-hm-tee {
+  fill: #fff;
+  stroke: rgba(0, 0, 0, 0.25);
+  stroke-width: 1;
+}
+
+.prep-hm-green {
+  fill: rgba(52, 199, 122, 0.72);
+  stroke: rgba(15, 122, 67, 0.55);
+  stroke-width: 1.2;
+}
+
+.prep-hm-flag {
+  fill: #ff5b5b;
+}
+
+.prep-hm-hz.water { fill: rgba(90, 170, 255, 0.9); }
+.prep-hm-hz.bunker { fill: rgba(228, 196, 116, 0.9); }
+
+.prep-seq-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.prep-seq-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.1);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.prep-seq-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: currentColor;
+}
+
+.prep-seq-chip.s0 { color: #1a8a4a; }
+.prep-seq-chip.s1 { color: #3a8fd4; }
+.prep-seq-chip.s2 { color: #c48a12; }
+.prep-seq-chip.s3 { color: #d06a3a; }
+
+body.dark .prep-seq-chip.s0 { color: #63e89a; }
+body.dark .prep-seq-chip.s1 { color: #7ec8ff; }
+body.dark .prep-seq-chip.s2 { color: #ffd166; }
+body.dark .prep-seq-chip.s3 { color: #ff9f7a; }
+
+.prep-green-feed {
+  margin-top: 10px;
+  padding: 11px 13px;
+  border-radius: 14px;
+  background: rgba(15, 122, 67, 0.08);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+body.dark .prep-green-feed {
+  background: rgba(24, 164, 91, 0.12);
+}
+
+.prep-green-feed .prep-mini-label {
+  margin-bottom: 4px;
+}
+
+.prep-green-feed.missing {
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.prep-3d-btn {
+  margin-top: 12px;
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.prep-3d-btn svg {
+  flex: none;
+}
+
+.prep-back-holes {
+  margin-top: 8px;
+  width: 100%;
+}
+
+.prep-hole-brief-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* The hole brief lives in prep.js now — hide the legacy planner detail. */
+#shotScreen #planDetailCard {
+  display: none !important;
+}

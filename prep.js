@@ -279,12 +279,90 @@
 
   function buildSkeleton() {
     studio.innerHTML = `
-      <!-- CONDITIONS -->
+      <!-- HOLE BRIEF (map + sequence + strategy + 3D green) -->
+      <div class="card" id="prepStrategyCard" hidden>
+        <div class="prep-hole-brief-head">
+          <div>
+            <div class="prep-kicker" style="color: var(--muted); margin-bottom: 2px">Hole brief</div>
+            <h3 id="prepStratTitle" style="margin: 0">Hole strategy</h3>
+          </div>
+          <span class="chip" id="prepStratChip">—</span>
+        </div>
+        <div id="prepStratBody"></div>
+      </div>
+
+      <!-- RECOMMENDATION -->
+      <div class="card prep-rec" id="prepRecCard">
+        <div class="prep-kicker">Pre-shot number</div>
+        <div class="prep-rec-main" id="prepRecMain">—</div>
+        <div id="prepEffortWrap"><span class="prep-effort-tag" id="prepEffortTag"></span></div>
+        <div class="prep-reason" id="prepReason">Set a target to see the play.</div>
+        <div class="prep-adj-chips" id="prepAdjChips"></div>
+        <div class="prep-rec-grid" id="prepRecGrid">
+          <div class="prep-rec-cell"><i>Carry to</i><b id="cellCarry">—</b></div>
+          <div class="prep-rec-cell"><i>Release</i><b id="cellRelease">—</b></div>
+          <div class="prep-rec-cell"><i>Total</i><b id="cellTotal">—</b></div>
+        </div>
+        <div class="prep-aim-row" id="prepAimRow">
+          <span class="prep-aim-arrow" id="prepAimArrow">
+            <svg viewBox="0 0 24 24" id="prepAimSvg">
+              <path d="M12 3 L17 13 H14 V21 H10 V13 H7 Z" fill="#fff"/>
+            </svg>
+          </span>
+          <span id="prepAimText">—</span>
+        </div>
+      </div>
+
+      <!-- THE SHOT -->
+      <div class="card" id="prepShotCard">
+        <div class="card-title">
+          <h2>The shot</h2>
+          <span class="chip" id="prepTargetChip">Hole —</span>
+        </div>
+
+        <div id="prepTargetMeta" class="prep-target-meta"></div>
+
+        <div id="prepHolePane">
+          <div class="prep-mini-label">Playing to</div>
+          <div class="prep-green-picker" id="prepGreenPicker">
+            <button type="button" class="prep-point-btn" data-point="front"><i>Front</i><b>—</b></button>
+            <button type="button" class="prep-point-btn" data-point="middle"><i>Middle</i><b>—</b></button>
+            <button type="button" class="prep-point-btn" data-point="back"><i>Back</i><b>—</b></button>
+          </div>
+          <div class="hint" id="prepGreenHint" style="margin-top: 7px"></div>
+        </div>
+
+        <div class="section-gap" style="margin-top: 13px">
+          <div class="prep-mini-label">Lie</div>
+          <div class="prep-lie-row" id="prepLieRow">
+            ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}
+          </div>
+        </div>
+
+        <div class="section-gap" style="margin-top: 13px">
+          <div class="prep-mini-label">Intended shape</div>
+          <div class="prep-shape-row" id="prepShapeRow">
+            ${SHAPES.map((s) => `
+              <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">
+                <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>
+                <b>${s.name}</b><span>${s.sub}</span>
+              </button>`).join('')}
+          </div>
+        </div>
+
+        <button class="ghost-btn prep-live-btn" id="prepLiveBtn" type="button">Use live weather & elevation</button>
+      </div>
+
+      <!-- CONDITIONS (collapsed — not the first thing you see) -->
       <div class="card" id="prepCondCard">
+        <details class="prep-cond-details" id="prepCondDetails">
+        <summary>
         <div class="card-title">
           <h2>Conditions</h2>
           <span class="chip" id="prepCondChip">${compass16(cond.windFromDeg)} · ${Math.round(cond.windMph)} mph</span>
         </div>
+        </summary>
+        <div class="prep-cond-body">
         <div class="prep-cond-grid">
           <div class="prep-dial-wrap">${dialSvg()}</div>
           <div class="prep-cond-side">
@@ -339,91 +417,8 @@
           </div>
           <div class="prep-surface-note" id="prepSurfaceNote"></div>
         </div>
-      </div>
-
-      <!-- NO HOLE BOUND — clean empty state -->
-      <div class="card prep-unbound-card" id="prepUnboundCard" hidden>
-        <div class="prep-kicker">No hole bound</div>
-        <h3 class="prep-unbound-title">Bind a course hole to prep your shot</h3>
-        <p class="hint">Pick a course above and tap a hole — conditions, the
-        play and hole strategy come alive here.</p>
-      </div>
-
-      <!-- THE SHOT -->
-      <div class="card" id="prepShotCard">
-        <div class="card-title">
-          <h2>The shot</h2>
-          <span class="chip" id="prepTargetChip">Hole —</span>
         </div>
-
-        <div id="prepTargetMeta" class="prep-target-meta"></div>
-
-        <div id="prepHolePane">
-          <div class="prep-mini-label">Playing to</div>
-          <div class="prep-green-picker" id="prepGreenPicker">
-            <button type="button" class="prep-point-btn" data-point="front"><i>Front</i><b>—</b></button>
-            <button type="button" class="prep-point-btn" data-point="middle"><i>Middle</i><b>—</b></button>
-            <button type="button" class="prep-point-btn" data-point="back"><i>Back</i><b>—</b></button>
-          </div>
-          <div class="hint" id="prepGreenHint" style="margin-top: 7px"></div>
-        </div>
-
-        <div class="section-gap" style="margin-top: 13px">
-          <div class="prep-mini-label">Lie</div>
-          <div class="prep-lie-row" id="prepLieRow">
-            ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}
-          </div>
-        </div>
-
-        <div class="section-gap" style="margin-top: 13px">
-          <div class="prep-mini-label">Intended shape</div>
-          <div class="prep-shape-row" id="prepShapeRow">
-            ${SHAPES.map((s) => `
-              <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">
-                <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>
-                <b>${s.name}</b><span>${s.sub}</span>
-              </button>`).join('')}
-          </div>
-        </div>
-
-        <button class="ghost-btn prep-live-btn" id="prepLiveBtn" type="button">Use live weather & elevation</button>
-      </div>
-
-      <!-- HOLE FLYOVER (side-profile strip) -->
-      <div class="card prep-flyover-card" id="prepFlyoverCard" hidden>
-        <div class="prep-kicker">Hole flyover</div>
-        <div id="prepFlyoverBody"></div>
-      </div>
-
-      <!-- RECOMMENDATION -->
-      <div class="card prep-rec" id="prepRecCard">
-        <div class="prep-kicker">Pre-shot number</div>
-        <div class="prep-rec-main" id="prepRecMain">—</div>
-        <div id="prepEffortWrap"><span class="prep-effort-tag" id="prepEffortTag"></span></div>
-        <div class="prep-reason" id="prepReason">Set a target to see the play.</div>
-        <div class="prep-adj-chips" id="prepAdjChips"></div>
-        <div class="prep-rec-grid" id="prepRecGrid">
-          <div class="prep-rec-cell"><i>Carry to</i><b id="cellCarry">—</b></div>
-          <div class="prep-rec-cell"><i>Release</i><b id="cellRelease">—</b></div>
-          <div class="prep-rec-cell"><i>Total</i><b id="cellTotal">—</b></div>
-        </div>
-        <div class="prep-aim-row" id="prepAimRow">
-          <span class="prep-aim-arrow" id="prepAimArrow">
-            <svg viewBox="0 0 24 24" id="prepAimSvg">
-              <path d="M12 3 L17 13 H14 V21 H10 V13 H7 Z" fill="#fff"/>
-            </svg>
-          </span>
-          <span id="prepAimText">—</span>
-        </div>
-      </div>
-
-      <!-- STRATEGY -->
-      <div class="card" id="prepStrategyCard" hidden>
-        <div class="card-title">
-          <h3 id="prepStratTitle">Hole strategy</h3>
-          <span class="chip" id="prepStratChip">—</span>
-        </div>
-        <div id="prepStratBody"></div>
+        </details>
       </div>
     `;
   }
@@ -481,23 +476,23 @@
   }
 
   function paintTarget() {
-    // Prep is always bound to a course hole. No hole → clean empty state.
-    const unbound = $('prepUnboundCard');
+    // Prep is always bound to a course hole. No hole → search/scorecard
+    // is the screen; studio cards stay hidden.
     const shotCard = $('prepShotCard');
     const recCard = $('prepRecCard');
+    const condCard = $('prepCondCard');
 
     if (!boundHole) {
-      if (unbound) unbound.hidden = false;
-      shotCard.hidden = true;
-      recCard.hidden = true;
-      renderFlyover();
+      if (shotCard) shotCard.hidden = true;
+      if (recCard) recCard.hidden = true;
+      if (condCard) condCard.hidden = true;
       renderStrategy();
+      syncPrepChrome();
       return;
     }
-    if (unbound) unbound.hidden = true;
-    shotCard.hidden = false;
-    recCard.hidden = false;
-    renderFlyover();
+    if (shotCard) shotCard.hidden = false;
+    if (recCard) recCard.hidden = false;
+    if (condCard) condCard.hidden = false;
 
     $('prepTargetChip').textContent = `Hole ${boundHole.number}`;
     const g = boundHole.green || {};
@@ -519,6 +514,7 @@
     $('prepGreenHint').textContent = anyMapped
       ? 'Carries below update live with your conditions.'
       : 'Green edges are not mapped — playing to the center estimate.';
+    syncPrepChrome();
   }
 
   function wireControls() {
@@ -1005,15 +1001,187 @@
     card.hidden = false;
   }
 
+  const GREEN_BRIEF_KEY = 'caddy:greenBrief:v1';
+  const GREEN_BRIEF_MATCH_M = 60;
+
+  function metersApart(a, b) {
+    if (!a || !b) return Infinity;
+    const lat1 = Number(a.lat), lng1 = Number(a.lng);
+    const lat2 = Number(b.lat), lng2 = Number(b.lng);
+    if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return Infinity;
+    const R = 6371000;
+    const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+    const dp = (lat2 - lat1) * Math.PI / 180;
+    const dl = (lng2 - lng1) * Math.PI / 180;
+    const s = Math.sin(dp / 2) ** 2 +
+      Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+
+  function readGreenBrief(hole) {
+    if (!hole || !hole.greenLatLng) return null;
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const raw = localStorage.getItem(GREEN_BRIEF_KEY);
+      if (!raw) return null;
+      const brief = JSON.parse(raw);
+      if (!brief || !Number.isFinite(brief.lat) || !Number.isFinite(brief.lng))
+        return null;
+      if (metersApart(hole.greenLatLng, brief) > GREEN_BRIEF_MATCH_M) return null;
+      return brief;
+    } catch {
+      return null;
+    }
+  }
+
+  function breakSideLabel(breakIn) {
+    const n = Number(breakIn);
+    if (!Number.isFinite(n) || Math.abs(n) < 1.5) return null;
+    return n > 0 ? 'RIGHT' : 'LEFT';
+  }
+
+  function paceWords(cls) {
+    if (cls === 'firm') return 'firm pace';
+    if (cls === 'soft') return 'soft pace';
+    return 'true pace';
+  }
+
+  function greenFeedLine(brief, pointId) {
+    if (!brief) return null;
+    const zones = Array.isArray(brief.zones) ? brief.zones : [];
+    const zone = zones.find((z) => z && z.id === pointId) ||
+      zones.find((z) => z && z.id === 'middle') ||
+      null;
+    const atPin = brief.landing && brief.landing.atPin;
+    const br = zone && Number.isFinite(zone.breakIn)
+      ? zone.breakIn
+      : (atPin && Number.isFinite(atPin.breakIn) ? atPin.breakIn : 0);
+    const side = breakSideLabel(br);
+    const pace = paceWords(atPin && atPin.paceClass);
+    const inches = Math.round(Math.abs(br));
+    if (!side) return `After landing: putt holds, ${pace}.`;
+    return `After landing: ball feeds ${side} ~${inches} in, ${pace}.`;
+  }
+
+  function seqNames(h) {
+    if (!h || !h.yards || typeof api.clubSequence !== 'function') return [];
+    const seq = api.clubSequence(Math.round(h.yards));
+    if (!seq) return [];
+    const names = Array.isArray(seq.seq) ? seq.seq.slice() : [];
+    if (seq.finisherName) names.push(seq.finisherName);
+    return names;
+  }
+
+  function holeMapSvg(h, names) {
+    const yards = Number(h && h.yards);
+    if (!(yards > 40)) return '';
+    const W = 320, H = 168;
+    const padT = 22, padB = 18, padL = 22, padR = 28;
+    const x0 = padL, x1 = W - padR;
+    const yMid = (padT + (H - padB)) / 2;
+    const spanX = x1 - x0;
+    const xAt = (alongYd) => x0 + spanX * clamp(alongYd / yards, 0, 1);
+
+    const fairW = 28;
+    const parts = [];
+    parts.push(
+      `<rect class="prep-hm-fairway" x="${x0}" y="${(yMid - fairW / 2).toFixed(1)}" width="${spanX.toFixed(1)}" height="${fairW}" rx="14"/>`
+    );
+
+    const haz = Array.isArray(h.hazards) ? h.hazards : [];
+    for (const hz of haz) {
+      let along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
+      if (along == null || along <= 0 || along >= yards) continue;
+      const cross = Number.isFinite(hz.cross) ? hz.cross : 0;
+      const hx = xAt(along);
+      const hy = yMid + clamp(cross / 28, -1, 1) * 22;
+      if (hz.type === 'water') {
+        parts.push(
+          `<ellipse class="prep-hm-hz water" cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" rx="9" ry="6"/>`
+        );
+      } else {
+        parts.push(
+          `<ellipse class="prep-hm-hz bunker" cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" rx="8" ry="5"/>`
+        );
+      }
+    }
+
+    const clubs = names.length ? names : ['Shot'];
+    const n = clubs.length;
+    const xs = [x0];
+    for (let i = 1; i < n; i++) xs.push(x0 + (spanX * i) / n);
+    xs.push(x1);
+    for (let i = 0; i < n; i++) {
+      const a = xs[i], b = xs[i + 1];
+      const bump = (i % 2 === 0 ? -1 : 1) * 7;
+      const cpx = (a + b) / 2;
+      const cpy = yMid + bump;
+      parts.push(
+        `<path class="prep-hm-shot s${i % 4}" d="M ${a.toFixed(1)} ${yMid.toFixed(1)} Q ${cpx.toFixed(1)} ${cpy.toFixed(1)} ${b.toFixed(1)} ${yMid.toFixed(1)}"/>`
+      );
+      const lx = (a + b) / 2;
+      const ly = yMid + bump - (bump > 0 ? -12 : 12);
+      parts.push(
+        `<text class="prep-hm-club" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle">${escapeHtml(clubs[i])}</text>`
+      );
+    }
+
+    parts.push(`<circle class="prep-hm-tee" cx="${x0}" cy="${yMid}" r="5.5"/>`);
+    const g = h.green || {};
+    const depthYd = Number.isFinite(g.depth) ? g.depth : 18;
+    const gw = clamp((depthYd / yards) * spanX * 4.2, 18, 36);
+    parts.push(
+      `<ellipse class="prep-hm-green" cx="${x1}" cy="${yMid}" rx="${(gw / 2).toFixed(1)}" ry="11"/>`
+    );
+    parts.push(
+      `<line x1="${x1}" y1="${(yMid - 22).toFixed(1)}" x2="${x1}" y2="${yMid}" stroke="rgba(255,255,255,0.7)" stroke-width="1.4"/>` +
+      `<path class="prep-hm-flag" d="M ${x1} ${yMid - 22} l 9 3.5 l -9 3.5 Z"/>`
+    );
+    parts.push(
+      `<text class="prep-hm-club" x="${x0}" y="${H - 4}" text-anchor="start">Tee</text>` +
+      `<text class="prep-hm-club" x="${x1}" y="${H - 4}" text-anchor="end">${Math.round(yards)} yd</text>`
+    );
+
+    return `<svg class="prep-holemap" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hole ${h.number} map, ${Math.round(yards)} yards">${parts.join('')}</svg>`;
+  }
+
+  function seqChipsHtml(names) {
+    if (!names.length) {
+      return '<div class="prep-empty">Add carry distances in the Bag tab to get a shot sequence.</div>';
+    }
+    return `<div class="prep-seq-row">${names.map((n, i) =>
+      `<span class="prep-seq-chip s${i % 4}"><i></i>${escapeHtml(n)}</span>`
+    ).join('')}</div>`;
+  }
+
+  function green3dButtonHtml(h) {
+    const g = h.greenLatLng;
+    if (!g || !Number.isFinite(g.lat) || !Number.isFinite(g.lng)) {
+      return '<div class="hint" style="margin-top:12px">No green mapped for this hole — 3D Green needs a pin.</div>';
+    }
+    let href = `greenmap.html?lat=${g.lat.toFixed(6)}&lng=${g.lng.toFixed(6)}`;
+    const t = h.teeLatLng;
+    if (t && Number.isFinite(t.lat) && Number.isFinite(t.lng)) {
+      href += `&teelat=${t.lat.toFixed(6)}&teelng=${t.lng.toFixed(6)}`;
+    }
+    return `<a class="primary-btn prep-3d-btn" id="prep3dGreenBtn" href="${href}">` +
+      '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">' +
+      '<path d="M3 17c3-2.6 6-2.6 9 0s6 2.6 9 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+      '<path d="M12 14V5.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+      '<path d="M12 4.2l4.2 2.3L12 8.8z" fill="currentColor"/></svg>' +
+      '3D Green</a>';
+  }
+
   function renderStrategy() {
     const card = $('prepStrategyCard');
+    if (!card) return;
     if (!(boundHole)) {
       card.hidden = true;
       return;
     }
     const h = boundHole;
     card.hidden = false;
-    $('prepStratTitle').textContent = `Hole ${h.number} strategy`;
+    $('prepStratTitle').textContent = `Hole ${h.number}`;
     $('prepStratChip').textContent = h.par ? `Par ${h.par}` : 'Par —';
 
     const body = [];
@@ -1026,6 +1194,18 @@
     body.push(
       `<div class="prep-strat-meta">${metaBits.map((b) => `<span class="prep-strat-chip">${escapeHtml(b)}</span>`).join('')}</div>`
     );
+
+    const names = seqNames(h);
+    const map = holeMapSvg(h, names);
+    if (map) {
+      body.push('<div class="prep-section-gap"><div class="prep-mini-label">Hole map</div>');
+      body.push(map);
+      body.push('</div>');
+    }
+
+    body.push('<div class="prep-section-gap"><div class="prep-mini-label">How to play it</div>');
+    body.push(seqChipsHtml(names));
+    body.push('</div>');
 
     // Off-the-tee recommendation under current conditions
     // v-fix(dedupe-tee-solve) v1.5.3 (audit #20): the tee solve ran here AND
@@ -1087,6 +1267,18 @@
       body.push('</div></div>');
     }
 
+    const brief = readGreenBrief(h);
+    const feed = greenFeedLine(brief, shot.greenPoint);
+    if (feed) {
+      body.push(
+        `<div class="prep-green-feed"><div class="prep-mini-label">Green</div>${escapeHtml(feed)}</div>`
+      );
+    } else {
+      body.push(
+        '<div class="prep-green-feed missing">Open 3D Green once to load slope — then advice knows which way the ball feeds.</div>'
+      );
+    }
+
     // Advisory paragraph — conditions-aware course management.
     const tips = [];
     const depth = g.depth;
@@ -1109,16 +1301,32 @@
         (hz) =>
           hz.type === 'water' &&
           (() => {
-            const along = hazardAlongYd(hz.sub);
-            return along != null && Math.abs(along - teeCalc.playsLikeYd) <= 12;
+            const along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
+            return along != null && teeCalc && Math.abs(along - teeCalc.playsLikeYd) <= 12;
           })()
       );
-      if (danger) tips.push(`Water sits right at your carry zone (~${(hazardAlongYd(danger.sub) || 0)} yd) — take enough club or lay back.`);
+      if (danger) {
+        const along = Number.isFinite(danger.along) ? danger.along : hazardAlongYd(danger.sub);
+        tips.push(`Water sits right at your carry zone (~${Math.round(along || 0)} yd) — take enough club or lay back.`);
+      }
     }
 
     body.push(`<div class="prep-strat-advice">${tips.map(escapeHtml).join(' ') || 'Study the carries above and pick your target before you step on the tee.'}</div>`);
+    body.push(green3dButtonHtml(h));
+    body.push('<button type="button" class="ghost-btn prep-back-holes" id="prepBackHoles">All holes</button>');
 
     $('prepStratBody').innerHTML = body.join('');
+    const back = $('prepBackHoles');
+    if (back) {
+      back.addEventListener('click', () => {
+        boundHole = null;
+        const detail = document.getElementById('planDetailCard');
+        if (detail) detail.hidden = true;
+        paintControls();
+        paintTarget();
+        haptic(5);
+      });
+    }
   }
 
   /* ======================================================================
@@ -1162,12 +1370,34 @@
      PLANNER BINDING — follow the Hole planner selection without touching
      any of its code. Click delegation fires AFTER the planner's own button
      handler has updated #planDetailTitle, and a MutationObserver collapses
-     our binding when the detail card closes (course change etc.).
+     our binding when the course card closes (course change etc.).
      ====================================================================== */
+  let prepSearching = false;
+
+  function syncPrepChrome() {
+    const sel = document.getElementById('planCourseSelect');
+    const hasCourse = !!(sel && sel.value);
+    const boundHead = document.getElementById('prepBoundHead');
+    const searchPane = document.getElementById('prepSearchPane');
+    const courseCard = document.getElementById('planCourseCard');
+    const nameEl = document.getElementById('prepBoundTitle');
+    const courseName = document.getElementById('planCourseName');
+    const changeBtn = document.getElementById('prepChangeCourse');
+
+    if (boundHead) boundHead.hidden = !hasCourse;
+    if (nameEl && courseName && hasCourse)
+      nameEl.textContent = courseName.textContent || 'Course';
+    if (searchPane) searchPane.hidden = hasCourse && !prepSearching;
+    if (changeBtn) changeBtn.textContent = prepSearching ? 'Done' : 'Change';
+    if (courseCard && hasCourse)
+      courseCard.hidden = prepSearching || !!boundHole;
+  }
+
   function bindHole(number) {
     const info = api.holeInfo(number);
     if (!info) return;
     boundHole = info;
+    prepSearching = false;
     shot.greenPoint = 'middle';
     persist();
     paintControls();
@@ -1177,14 +1407,21 @@
   }
 
   function unbindHoleIfGone() {
-    if (!boundHole) return;
-    const detail = document.getElementById('planDetailCard');
-    if (!detail || detail.hidden) {
+    const sel = document.getElementById('planCourseSelect');
+    // Course gone (picker cleared) — drop the hole. While a hole brief is
+    // open we hide the scorecard ourselves, so don't treat that as unbound.
+    if (!boundHole) {
+      syncPrepChrome();
+      return;
+    }
+    if (!(sel && sel.value)) {
       boundHole = null;
       paintControls();
       paintTarget();
       renderStrategy();
-      loadGreenMap(); // boundHole null → hides the card + aborts any fetch
+      loadGreenMap();
+    } else {
+      syncPrepChrome();
     }
   }
 
@@ -1192,18 +1429,50 @@
     document.addEventListener('click', (e) => {
       const row = e.target.closest('.plan-hole-row');
       if (!row) return;
-      const title = document.getElementById('planDetailTitle');
-      const m = title ? /Hole\s+(\d+)/.exec(title.textContent || '') : null;
-      bindHole(m ? Number(m[1]) : Number(row.dataset.hole));
+      bindHole(Number(row.dataset.hole));
     }, true);
 
-    const detail = document.getElementById('planDetailCard');
-    if (detail && typeof MutationObserver !== 'undefined') {
-      new MutationObserver(unbindHoleIfGone).observe(detail, {
+    const changeBtn = document.getElementById('prepChangeCourse');
+    if (changeBtn) {
+      changeBtn.addEventListener('click', () => {
+        prepSearching = !prepSearching;
+        if (prepSearching) {
+          boundHole = null;
+          const detail = document.getElementById('planDetailCard');
+          if (detail) detail.hidden = true;
+          const search = document.getElementById('planCourseSearch');
+          if (search) {
+            try { search.focus(); } catch { }
+          }
+        }
+        haptic(5);
+        paintControls();
+        paintTarget();
+      });
+    }
+
+    const sel = document.getElementById('planCourseSelect');
+    if (sel) {
+      sel.addEventListener('change', () => {
+        prepSearching = false;
+        boundHole = null;
+        queueMicrotask(() => {
+          paintTarget();
+        });
+      });
+    }
+
+    const courseCard = document.getElementById('planCourseCard');
+    if (courseCard && typeof MutationObserver !== 'undefined') {
+      new MutationObserver(() => {
+        if (courseCard && !courseCard.hidden) prepSearching = false;
+        unbindHoleIfGone();
+      }).observe(courseCard, {
         attributes: true,
         attributeFilter: ['hidden'],
       });
     }
+    syncPrepChrome();
   }
 
   /* ======================================================================

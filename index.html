@@ -10,7 +10,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#07100b" id="themeColorMeta" />
-  <script>window.CADDY_VERSION = 'v1.6.1';</script>
+  <script>window.CADDY_VERSION = 'v1.7.0';</script>
   <meta name="color-scheme" content="light dark" />
   <meta name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -636,36 +636,49 @@
       <section id="shotScreen" class="screen">
         <h1 class="large-title">Prep</h1>
         <!-- ===== HOLE PLANNER ===== -->
-        <div class="card">
-          <div class="card-title">
-            <h2>Hole planner</h2>
-            <span class="chip" id="planCourseChip">Prep mode</span>
+        <div class="card" id="planSearchCard">
+          <div id="prepBoundHead" hidden>
+            <div class="prep-bound-row">
+              <div class="prep-bound-copy">
+                <div class="prep-kicker">Course</div>
+                <h2 id="prepBoundTitle">Course</h2>
+              </div>
+              <button type="button" class="prep-change-chip" id="prepChangeCourse">Change</button>
+            </div>
+            <div class="hint" id="planSaveBar" hidden>
+              Searched course — not saved.
+              <button class="ghost-btn" id="planSaveCourseBtn" type="button">Save course</button>
+            </div>
           </div>
-          <label class="field">
-            Course
-            <select id="planCourseSelect">
-              <option value="">Choose a course…</option>
-            </select>
-          </label>
-          <div class="hint" id="planSaveBar" hidden>
-            Searched course — not saved.
-            <button class="ghost-btn" id="planSaveCourseBtn" type="button">Save course</button>
-          </div>
-          <label class="field" style="margin-top: 8px">
-            Find a course by name
-            <input id="planCourseSearch" type="search" placeholder="e.g. Muirfield Village"
-                   autocomplete="off" enterkeyhint="search" />
-          </label>
-          <div id="planCourseSearchResults" hidden></div>
-          <div class="hint" style="margin-top: 8px">
-            Study every hole before you play — suggested club sequences,
-            marked hazards and green shape, straight from your saved
-            courses. Fully offline.
+          <div id="prepSearchPane">
+            <div class="card-title">
+              <h2>Find a course</h2>
+              <span class="chip" id="planCourseChip">Prep</span>
+            </div>
+            <label class="field">
+              Search
+              <input id="planCourseSearch" type="search" placeholder="e.g. Muirfield Village"
+                     autocomplete="off" enterkeyhint="search" />
+            </label>
+            <div id="planCourseSearchResults" hidden></div>
+            <p class="hint" id="prepSearchHint">
+              Search a course to load its scorecard. Tap a hole for the
+              map, the shots, and the 3D green.
+            </p>
+            <details class="prep-saved-details">
+              <summary>Saved courses</summary>
+              <label class="field" style="margin-top: 8px">
+                Course
+                <select id="planCourseSelect">
+                  <option value="">Choose a course…</option>
+                </select>
+              </label>
+            </details>
           </div>
         </div>
 
         <div id="planCourseCard" hidden>
-          <div class="card">
+          <div class="card" id="planScorecardCard">
             <div class="card-title">
               <h3 id="planCourseName">Course</h3>
               <span class="chip" id="planCourseMeta">—</span>

@@ -1,0 +1,1159 @@
+Warning: Unknown toolsets: a2a
+Query: # GROK R5 BRIEF — PREP TAB RESTRUCTURE + GREEN-AWARE CADDY ADVICE
+
+## Mission
+Restructure the Prep tab (prep.js + its slice of index.html/prep.css)
+into the flow James described, and make Caddy's advice green-aware
+using the 3D green's slope data. This is a UX restructure + one new
+advice feature. NO renderer/physics changes.
+
+## James's target flow (his words, structured)
+1. **Search for a course** in the Prep tab.
+2. **Load its scorecard** (holes with par/yards).
+3. **View each hole on a map view** (tee → green, hazards marked).
+4. **Get caddy advice on how to play the hole, with visuals showing each
+   shot until the green** (club sequence as visual segments: drive →
+   approach → finisher, drawn on a simple hole diagram).
+5. **View the 3D green for each hole** (link out to greenmap.html with
+   the hole's ?lat&lng&teelat&teelng).
+6. **NEW — green-aware caddy advice:** when the 3D green data for the
+   bound hole has been loaded at least once, the advice should know
+   which way the ball rolls after landing (putt break direction at the
+   landing zone, slope class of the landing area).
+
+## What exists (use it, don't rebuild it)
+- **Course search + ephemeral course**: app.js `planCourseOptions()`,
+  `planCourseSearch` input, `PREP_EPHEMERAL_ID` flow, `holeInfo(number)`
+  bridge (returns par/yards/strokeIndex/hazards/green{front,center,back,
+  depth}/teeLatLng/greenLatLng/bearing).
+- **Club sequence**: `window.CaddyPrep` does NOT expose planClubSequence —
+  you must ADD it to the bridge in app.js (Block 18, read-only style:
+  pure function of totalYd using sortedClubsDesc/Asc). Signature:
+  `clubSequence(totalYd) -> { seq: , finisherName } | null`.
+- **Strategy card**: prep.js `renderStrategy()` — keep its good parts
+  (carries strip, hazards list, tips) but restructure the tab so the
+  strategy is ONE coherent per-hole brief, not scattered cards.
+- **3D green launch**: greenlink.js pattern — `greenmap.html?lat&lng&
+  teelat&teelng` opens the 3D green for a hole. Add a "3D Green"
+  button per hole in Prep.
+- **Green slope data for advice**: greenmap.js already persists per-hole
+  green data? NO — it doesn't. ADD: when greenmap.js computes its
+  gradient field (it has `state.field`, `state.mask`, `state.pin`,
+  stimp), persist a compact summary to localStorage key
+  `caddy:greenBrief:v1` = { lat, lng, savedAt, stimp,
+  landing: { atPin: { breakIn, dirDeg, paceClass } }, zones: [ {id:
+  'front'|'middle'|'back', breakIn, dirDeg } ] } — computed with the
+  EXISTING GreenMapCore.simPuttPath/solvePutt from 3 probe points
+  (front/middle/back of green, ~2 m inside from the edges along the
+  tee→green axis). prep.js reads this brief (match by proximity of
+  greenLatLng within 60 m) and renders "After landing: ball feeds
+  LEFT ~8 in, firm pace" per green point.
+- 2D hole map: draw with SVG or canvas INSIDE prep.js (simple tee→green
+  corridor diagram: tee dot, green ellipse, hazard markers projected on
+  the tee→green axis using the hazards' existing along/cross data, shot
+  sequence segments drawn as colored lines with club labels). Do NOT
+  use Leaflet here (offline, heavy); a static diagram is the point.
+
+## Hard invariants (violating any = rejected)
+1. prep.js never mutates app state; everything through window.CaddyPrep
+   (read-only bridge) or its own `caddy.prep.*` localStorage.
+2. app.js bridge additions must be READ-ONLY pure functions (Block 18
+   style). clubSequence addition: no side effects.
+3. greenmap.js persists ONLY the compact green brief (above); it must
+   not break the headless path (tests import GreenMapCore with no DOM —
+   guard localStorage writes with try/catch and typeof localStorage).
+4. The existing solve() memo (v1.5.3) and debounce must keep working.
+5. Suite baselines: greenmap_boot_smoke prints "BOOT+FLOW SMOKE
+   PASSED"; greenmap_smoke has exactly its 2 documented failures.
+   node --check must pass on every touched file.
+
+## UX rules (James's standing orders)
+- One primary green action per screen; glass pill styling; SF-feeling
+  hierarchy; no dead ends — every screen has a next step or a way back.
+- Simplify: the tab should read top-to-bottom as the flow above. Hide
+  advanced controls (wind dial etc.) behind a single "Conditions"
+  collapsible — they exist, they're just not the first thing you see.
+- If no course is bound: the search box IS the first screen (with a
+  hint). If bound: show the loaded course name + "Change" chip.
+
+## Deliverable
+Work directly in prep.js / prep.css / index.html (prep section) /
+app.js (bridge addition) / greenmap.js (brief persistence). Verify with
+`node --check` on each touched file + both test files at baseline.
+Finish with a summary of what changed per file. Do NOT touch
+greenmap.js render math, solver physics, or sw.js version (coordinator
+bumps the version).
+
+You may EDIT these files only: prep.js, prep.css, index.html (prep
+section markup), app.js (Block 18 bridge addition only), greenmap.js
+(brief persistence only). Everything else read-only. node is available
+for --check and the test files. When done: run node --check on each
+touched file, run node tests/greenmap_boot_smoke.js (must print
+BOOT+FLOW SMOKE PASSED), run node tests/greenmap_smoke.js (must show
+exactly its 2 documented failures), then print a per-file summary of
+your changes.
+[2;3mInitializing agent...[0m
+[38;2;255;191;0m────────────────────────────────────────[0m
+
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mThis is a Caddy UX restructure. I'll load the Caddy playbook and related skills first so the work follows James's invariants instead of reinventing the tab.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📚 preparing skill_view…
+  ┊ 📚 preparing skill_view…
+  ┊ 📚 preparing skill_view…
+  ┊ 📚 preparing skill_view…
+  ┊ 📚 skill     caddy-development  2.5s
+  ┊ 📚 skill     caddy-pwa  0.4s
+  ┊ 📚 skill     caddy-golf-app  3.3s
+  ┊ 📚 skill     plan  1.4s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mLoading the Grok-delegation notes and green-map references, then inspecting the current Prep tab and related files.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📚 preparing skill_view…
+  ┊ 📚 preparing skill_view…
+  ┊ 📚 preparing skill_view…
+  ┊ 📚 preparing skill_view…
+  ┊ 📋 preparing todo…
+  ┊ 📚 skill     caddy-development → references/grok-delegation.md  3.3s
+  ┊ 📚 skill     caddy-development → references/greenmap-3d-renderer.md  2.3s
+  ┊ 📚 skill     apple-grade-mobile-ui  1.4s
+  ┊ 📚 skill     static-pwa-iteration  0.2s
+  ┊ 📋 plan      6 task(s)  0.0s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mThe brief is to implement, not plan. Next I’ll inspect the Prep tab, Block 18 bridge, and greenmap persistence so the restructure stays on the existing APIs.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔎 preparing search_files…
+  ┊ 🔎 preparing search_files…
+  ┊ 🔎 preparing search_files…
+  ┊ 🔎 preparing search_files…
+  ┊ 🔎 preparing search_files…
+  ┊ 🔎 grep      CaddyPrep|planClubSequence|PREP_EPHEMERAL_ID|planCourseOptions|holeInfo  5.6s
+  ┊ 🔎 grep      id=\"tab-prep\"|id=\"prep|class=\"prep  3.7s
+  ┊ 🔎 grep      simPuttPath|solvePutt|state\.field|caddy:greenBrief  5.6s
+  ┊ 🔎 grep      renderStrategy|greenlink|clubSequence  5.5s
+  ┊ 🔎 find      *.{js,css,html}  3.0s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mKey symbols are located. Next I’ll read the Prep tab, Block 18 bridge, club-sequence helper, and greenmap putt APIs.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      prep.js  1.2s
+  ┊ 📖 read      app.js L12550-12729  1.5s
+  ┊ 📖 read      app.js L14390-14469  1.8s
+  ┊ 🔎 grep      tab-prep|id=\"prep|class=\"prep|planCourseSearch  0.7s
+  ┊ 📖 read      greenlink.js  1.6s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI have the bridge and club-sequence shape. Next I’ll read the rest of Prep, the HTML/CSS for that tab, and where greenmap can persist a brief.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 read      prep.js L200-699  1.1s
+  ┊ 📖 read      index.html L580-829  1.2s
+  ┊ 📖 read      app.js L12725-12774  1.2s
+  ┊ 🔎 grep      planHazardsFor|planGreenInfo|along|cross  0.9s
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 preparing search_files…
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 read      prep.js L700-1339  1.4s
+  ┊ 📖 read      app.js L12734-12813  1.1s
+  ┊ 🔎 grep      prep-  1.1s
+  ┊ 🔎 grep      state\.field|state\.mask|state\.pin|stimp|persist|localStorage  0.9s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mPlanner HTML is owned by app.js except Block 18, so I’ll keep those IDs and restyle around them. Next I’ll inspect greenmap field computation and how course search binds.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 preparing search_files…
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      greenmap.js L300-529  1.2s
+  ┊ 📖 read      greenmap.js L1080-1199  1.2s
+  ┊ 🔎 grep      state\.field\s*=|computeField|buildField|gradient  0.8s
+  ┊ 🔎 grep      planCourseSearch|openHolePlan|planCourseSelect  0.9s
+  ┊ 📖 read      prep.css L1-50  1.2s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI need the greenmap load path (where the field is ready) and the existing planner/search UX so the restructure can reuse it instead of duplicating.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 grep      state\.field\s*=  1.7s
+  ┊ 📖 read      app.js L12890-13089  1.4s
+  ┊ 📖 read      app.js L13620-13699  1.4s
+  ┊ 🔎 grep      plan-hole|planCourseSearch|#shotScreen|#planCourse  0.8s
+  ┊ 📖 read      greenmap_boot_smoke.js  1.4s
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 grep      field =  0.7s
+  ┊ 📖 read      greenmap.js L1500-1649  1.4s
+  ┊ 📖 read      prep.css L1000-1159  1.5s
+  ┊ 📖 read      app.css L5280-5379  1.2s
+  ┊ 📖 read      greenmap.js L1-80  1.5s
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      greenmap.js L1350-1509  1.5s
+  ┊ 📖 read      app.js L12810-12894  1.5s
+  ┊ 📖 read      greenmap_smoke.js L1-80  1.5s
+  ┊ 📖 read      greenmap_boot_smoke.js L80-129  1.8s
+  ┊ 🔎 grep      plan-detail|plan-meta|plan-seq  0.7s
+  ┊ 📖 read      app.js L240-269  1.5s
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 preparing search_files…
+  ┊ 🔎 grep      prep.css  1.0s
+  ┊ 📖 read      app.css L5625-5674  1.5s
+  ┊ 📖 read      greenmap.js L4275-4304  1.6s
+  ┊ 🔎 grep      clubsDesc|sortedClubsDesc  0.8s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI have the APIs and constraints. Next I’ll add the read-only clubSequence bridge and persist the compact green brief, then restructure the Prep tab around them.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📋 preparing todo…
+  ┊ 🔧 preparing patch…
+  ┊ 📋 plan      update 1/6 ✓  0.0s
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\app.js  2.9s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\app.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\app.js[0m
+[38;2;139;134;130m@@ -14417,13 +14417,30 @@[0m
+[38;2;184;134;11m       const hole = (course.holes || [])[number - 1];[0m
+[38;2;184;134;11m       if (!hole) return null;[0m
+[38;2;184;134;11m       const yd = planHoleYardage(hole);[0m
+[38;2;255;255;255;48;2;19;87;20m+      const tee = hole.teePoint;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const green = hole.greenCenter;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const rawHz = Array.isArray(hole.hazards) ? hole.hazards : [];[0m
+[38;2;255;255;255;48;2;19;87;20m+      // along/cross are the existing tee→green projections (read-only);[0m
+[38;2;255;255;255;48;2;19;87;20m+      // prep.js draws the hole diagram from these instead of re-deriving.[0m
+[38;2;255;255;255;48;2;19;87;20m+      const hazards = planHazardsFor(hole).map((hz, i) => {[0m
+[38;2;255;255;255;48;2;19;87;20m+        const raw = rawHz[i];[0m
+[38;2;255;255;255;48;2;19;87;20m+        let along = null, cross = null;[0m
+[38;2;255;255;255;48;2;19;87;20m+        if ([0m
+[38;2;255;255;255;48;2;19;87;20m+          tee && green && raw &&[0m
+[38;2;255;255;255;48;2;19;87;20m+          Number.isFinite(raw.lat) && Number.isFinite(raw.lng)[0m
+[38;2;255;255;255;48;2;19;87;20m+        ) {[0m
+[38;2;255;255;255;48;2;19;87;20m+          along = alongTrackYd(tee, green, raw);[0m
+[38;2;255;255;255;48;2;19;87;20m+          cross = crossTrackYd(tee, green, raw);[0m
+[38;2;255;255;255;48;2;19;87;20m+        }[0m
+[38;2;255;255;255;48;2;19;87;20m+        return { type: hz.type, label: hz.label, sub: hz.sub, along, cross };[0m
+[38;2;255;255;255;48;2;19;87;20m+      });[0m
+[38;2;184;134;11m       return {[0m
+[38;2;184;134;11m         number,[0m
+[38;2;184;134;11m         courseName: course.name || 'Course',[0m
+[38;2;184;134;11m         par: hole.par || inferParFromYards(yd),[0m
+[38;2;184;134;11m         yards: yd,[0m
+[38;2;184;134;11m         strokeIndex: hole.strokeIndex || null,[0m
+[38;2;255;255;255;48;2;119;20;20m-        hazards: planHazardsFor(hole),[0m
+[38;2;255;255;255;48;2;19;87;20m+        hazards,[0m
+[38;2;184;134;11m         green: planGreenInfo(hole),[0m
+[38;2;184;134;11m         // Green Maps: raw lat/lng for the elevation service (read-only).[0m
+[38;2;184;134;11m         teeLatLng: hole.teePoint[0m
+[38;2;139;134;130m@@ -14436,6 +14453,11 @@[0m
+[38;2;184;134;11m             : null,[0m
+[38;2;184;134;11m       };[0m
+[38;2;184;134;11m     },[0m
+[38;2;255;255;255;48;2;19;87;20m+    // Pure bag sequence for a hole length. Same helper the planner uses;[0m
+[38;2;255;255;255;48;2;19;87;20m+    // no writes, no UI. null when yards or bag are missing.[0m
+[38;2;255;255;255;48;2;19;87;20m+    clubSequence(totalYd) {[0m
+[38;2;255;255;255;48;2;19;87;20m+      return planClubSequence(totalYd);[0m
+[38;2;255;255;255;48;2;19;87;20m+    },[0m
+[38;2;184;134;11m     haptic,[0m
+[38;2;184;134;11m   };[0m
+[38;2;184;134;11m [0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mBridge is in. Next I’ll persist the compact green brief in greenmap.js, then restructure the Prep tab around search → scorecard → hole brief.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📋 preparing todo…
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 preparing patch…
+  ┊ 📋 plan      update 2/6 ✓  0.0s
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\greenmap.js  2.1s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\greenmap.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\greenmap.js[0m
+[38;2;139;134;130m@@ -1566,6 +1566,120 @@[0m
+[38;2;184;134;11m       localStorage.setItem(LAST_GREEN_KEY, JSON.stringify({[0m
+[38;2;184;134;11m         lat: state.lat, lng: state.lng }));[0m
+[38;2;184;134;11m     } catch (e) { /* private mode etc. — non-fatal */ }[0m
+[38;2;255;255;255;48;2;19;87;20m+    persistGreenBrief();[0m
+[38;2;255;255;255;48;2;19;87;20m+  }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  // Compact per-green slope summary for Prep advice. Headless/core imports[0m
+[38;2;255;255;255;48;2;19;87;20m+  // never reach here (document guard above). localStorage is try/caught so[0m
+[38;2;255;255;255;48;2;19;87;20m+  // missing storage (tests, private mode) is a no-op.[0m
+[38;2;255;255;255;48;2;19;87;20m+  function persistGreenBrief() {[0m
+[38;2;255;255;255;48;2;19;87;20m+    try {[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (typeof localStorage === 'undefined' || !localStorage) return;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const elev = state.grid;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const field = state.field;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const mask = state.mask;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (!elev || !field || !mask) return;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const W = elev.W, H = elev.H, cs = elev.cellSizeM;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (!(W > 2) || !(H > 2) || !(cs > 0)) return;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const pin = Array.isArray(state.pin) ? state.pin : [0, 0];[0m
+[38;2;255;255;255;48;2;19;87;20m+      const stimp = Number.isFinite(state.stimp) ? state.stimp : 10;[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+      // Approach axis in local metres (x east, y north). Default +Y (north)[0m
+[38;2;255;255;255;48;2;19;87;20m+      // when no tee is known so probes still run.[0m
+[38;2;255;255;255;48;2;19;87;20m+      let ux = 0, uy = 1;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (state.teeLL &&[0m
+[38;2;255;255;255;48;2;19;87;20m+          Number.isFinite(state.teeLL.lat) &&[0m
+[38;2;255;255;255;48;2;19;87;20m+          Number.isFinite(state.teeLL.lng)) {[0m
+[38;2;255;255;255;48;2;19;87;20m+        const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);[0m
+[38;2;255;255;255;48;2;19;87;20m+        const tx = (state.teeLL.lng - state.lng) * mLng;[0m
+[38;2;255;255;255;48;2;19;87;20m+        const ty = (state.teeLL.lat - state.lat) * 111320;[0m
+[38;2;255;255;255;48;2;19;87;20m+        const len = Math.hypot(tx, ty);[0m
+[38;2;255;255;255;48;2;19;87;20m+        if (len > 1) { ux = -tx / len; uy = -ty / len; }[0m
+[38;2;255;255;255;48;2;19;87;20m+      }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+      let frontExt = 0, backExt = 0;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const poly = state.polyLocal;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (poly && poly.length > 2) {[0m
+[38;2;255;255;255;48;2;19;87;20m+        for (let i = 0; i < poly.length; i++) {[0m
+[38;2;255;255;255;48;2;19;87;20m+          const p = poly[i][0] * ux + poly[i][1] * uy;[0m
+[38;2;255;255;255;48;2;19;87;20m+          if (p > backExt) backExt = p;[0m
+[38;2;255;255;255;48;2;19;87;20m+          if (-p > frontExt) frontExt = -p;[0m
+[38;2;255;255;255;48;2;19;87;20m+        }[0m
+[38;2;255;255;255;48;2;19;87;20m+      }[0m
+[38;2;255;255;255;48;2;19;87;20m+      const fallbackR = SPAN_M * 0.36;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (frontExt < 1) frontExt = fallbackR;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (backExt < 1) backExt = fallbackR;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const inset = 2;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const frontD = Math.max(0.6, frontExt - inset);[0m
+[38;2;255;255;255;48;2;19;87;20m+      const backD = Math.max(0.6, backExt - inset);[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+      const cellOk = (mx, my) => {[0m
+[38;2;255;255;255;48;2;19;87;20m+        const ix = Math.round(mx / cs + W / 2);[0m
+[38;2;255;255;255;48;2;19;87;20m+        const iy = Math.round(H / 2 - my / cs);[0m
+[38;2;255;255;255;48;2;19;87;20m+        if (ix < 0 || iy < 0 || ix >= W || iy >= H) return -1;[0m
+[38;2;255;255;255;48;2;19;87;20m+        const i = iy * W + ix;[0m
+[38;2;255;255;255;48;2;19;87;20m+        return (field.valid[i] && (!mask || mask[i])) ? i : -1;[0m
+[38;2;255;255;255;48;2;19;87;20m+      };[0m
+[38;2;255;255;255;48;2;19;87;20m+      const probeOf = (along) => {[0m
+[38;2;255;255;255;48;2;19;87;20m+        let x = pin[0] + ux * along, y = pin[1] + uy * along;[0m
+[38;2;255;255;255;48;2;19;87;20m+        if (cellOk(x, y) >= 0) return [x, y];[0m
+[38;2;255;255;255;48;2;19;87;20m+        for (let t = 0.85; t >= 0.12; t -= 0.15) {[0m
+[38;2;255;255;255;48;2;19;87;20m+          const sx = pin[0] + ux * along * t;[0m
+[38;2;255;255;255;48;2;19;87;20m+          const sy = pin[1] + uy * along * t;[0m
+[38;2;255;255;255;48;2;19;87;20m+          if (cellOk(sx, sy) >= 0) return [sx, sy];[0m
+[38;2;255;255;255;48;2;19;87;20m+        }[0m
+[38;2;255;255;255;48;2;19;87;20m+        return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+      };[0m
+[38;2;255;255;255;48;2;19;87;20m+      const fallAt = (pt, fallback) => {[0m
+[38;2;255;255;255;48;2;19;87;20m+        if (!pt) return fallback;[0m
+[38;2;255;255;255;48;2;19;87;20m+        const i = cellOk(pt[0], pt[1]);[0m
+[38;2;255;255;255;48;2;19;87;20m+        if (i < 0) return fallback;[0m
+[38;2;255;255;255;48;2;19;87;20m+        return Math.round(GreenMapCore.fallBearingDeg(field.gx[i], field.gy[i]));[0m
+[38;2;255;255;255;48;2;19;87;20m+      };[0m
+[38;2;255;255;255;48;2;19;87;20m+      const summarize = (ballM) => {[0m
+[38;2;255;255;255;48;2;19;87;20m+        if (!ballM) return { breakIn: 0, dirDeg: 0 };[0m
+[38;2;255;255;255;48;2;19;87;20m+        const r = GreenMapCore.simPuttPath([0m
+[38;2;255;255;255;48;2;19;87;20m+          ballM, pin, field, W, H, cs, mask, { stimp });[0m
+[38;2;255;255;255;48;2;19;87;20m+        const br = Number.isFinite(r.breakIn) ? r.breakIn : 0;[0m
+[38;2;139;134;130m… omitted 42 diff line(s) across 1 additional file(s)/section(s)[0m
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\greenmap.js  2.0s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\greenmap.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\greenmap.js[0m
+[38;2;139;134;130m@@ -4405,6 +4405,7 @@[0m
+[38;2;184;134;11m       stimpEl.addEventListener('change', () => {[0m
+[38;2;184;134;11m         state.stimp = parseInt(stimpEl.value, 10) || 10;[0m
+[38;2;184;134;11m         try { localStorage.setItem('gm-stimp', String(state.stimp)); } catch (e) {}[0m
+[38;2;255;255;255;48;2;19;87;20m+        persistGreenBrief();[0m
+[38;2;184;134;11m         render();[0m
+[38;2;184;134;11m         setStatus(`Putt preview: Stimpmeter ${state.stimp}`);[0m
+[38;2;184;134;11m       });[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mBridge and green-brief persistence are in. Next I’ll restructure the Prep markup so search is the empty state and a bound course shows name + Change.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📋 preparing todo…
+  ┊ 🔧 preparing patch…
+  ┊ 📋 plan      update 3/6 ✓  0.0s
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\index.html  1.5s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\index.html → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\index.html[0m
+[38;2;139;134;130m@@ -636,36 +636,49 @@[0m
+[38;2;184;134;11m       <section id="shotScreen" class="screen">[0m
+[38;2;184;134;11m         <h1 class="large-title">Prep</h1>[0m
+[38;2;184;134;11m         <!-- ===== HOLE PLANNER ===== -->[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="card">[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="card-title">[0m
+[38;2;255;255;255;48;2;119;20;20m-            <h2>Hole planner</h2>[0m
+[38;2;255;255;255;48;2;119;20;20m-            <span class="chip" id="planCourseChip">Prep mode</span>[0m
+[38;2;255;255;255;48;2;119;20;20m-          </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <label class="field">[0m
+[38;2;255;255;255;48;2;119;20;20m-            Course[0m
+[38;2;255;255;255;48;2;119;20;20m-            <select id="planCourseSelect">[0m
+[38;2;255;255;255;48;2;119;20;20m-              <option value="">Choose a course…</option>[0m
+[38;2;255;255;255;48;2;119;20;20m-            </select>[0m
+[38;2;255;255;255;48;2;119;20;20m-          </label>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="hint" id="planSaveBar" hidden>[0m
+[38;2;255;255;255;48;2;119;20;20m-            Searched course — not saved.[0m
+[38;2;255;255;255;48;2;119;20;20m-            <button class="ghost-btn" id="planSaveCourseBtn" type="button">Save course</button>[0m
+[38;2;255;255;255;48;2;119;20;20m-          </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <label class="field" style="margin-top: 8px">[0m
+[38;2;255;255;255;48;2;119;20;20m-            Find a course by name[0m
+[38;2;255;255;255;48;2;119;20;20m-            <input id="planCourseSearch" type="search" placeholder="e.g. Muirfield Village"[0m
+[38;2;255;255;255;48;2;119;20;20m-                   autocomplete="off" enterkeyhint="search" />[0m
+[38;2;255;255;255;48;2;119;20;20m-          </label>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div id="planCourseSearchResults" hidden></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="hint" style="margin-top: 8px">[0m
+[38;2;255;255;255;48;2;119;20;20m-            Study every hole before you play — suggested club sequences,[0m
+[38;2;255;255;255;48;2;119;20;20m-            marked hazards and green shape, straight from your saved[0m
+[38;2;255;255;255;48;2;119;20;20m-            courses. Fully offline.[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="card" id="planSearchCard">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div id="prepBoundHead" hidden>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <div class="prep-bound-row">[0m
+[38;2;255;255;255;48;2;19;87;20m+              <div class="prep-bound-copy">[0m
+[38;2;255;255;255;48;2;19;87;20m+                <div class="prep-kicker">Course</div>[0m
+[38;2;255;255;255;48;2;19;87;20m+                <h2 id="prepBoundTitle">Course</h2>[0m
+[38;2;255;255;255;48;2;19;87;20m+              </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+              <button type="button" class="prep-change-chip" id="prepChangeCourse">Change</button>[0m
+[38;2;255;255;255;48;2;19;87;20m+            </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <div class="hint" id="planSaveBar" hidden>[0m
+[38;2;255;255;255;48;2;19;87;20m+              Searched course — not saved.[0m
+[38;2;255;255;255;48;2;19;87;20m+              <button class="ghost-btn" id="planSaveCourseBtn" type="button">Save course</button>[0m
+[38;2;255;255;255;48;2;19;87;20m+            </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div id="prepSearchPane">[0m
+[38;2;255;255;255;48;2;19;87;20m+            <div class="card-title">[0m
+[38;2;255;255;255;48;2;19;87;20m+              <h2>Find a course</h2>[0m
+[38;2;255;255;255;48;2;19;87;20m+              <span class="chip" id="planCourseChip">Prep</span>[0m
+[38;2;255;255;255;48;2;19;87;20m+            </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <label class="field">[0m
+[38;2;255;255;255;48;2;19;87;20m+              Search[0m
+[38;2;255;255;255;48;2;19;87;20m+              <input id="planCourseSearch" type="search" placeholder="e.g. Muirfield Village"[0m
+[38;2;255;255;255;48;2;19;87;20m+                     autocomplete="off" enterkeyhint="search" />[0m
+[38;2;255;255;255;48;2;19;87;20m+            </label>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <div id="planCourseSearchResults" hidden></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <p class="hint" id="prepSearchHint">[0m
+[38;2;255;255;255;48;2;19;87;20m+              Search a course to load its scorecard. Tap a hole for the[0m
+[38;2;255;255;255;48;2;19;87;20m+              map, the shots, and the 3D green.[0m
+[38;2;255;255;255;48;2;19;87;20m+            </p>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <details class="prep-saved-details">[0m
+[38;2;255;255;255;48;2;19;87;20m+              <summary>Saved courses</summary>[0m
+[38;2;255;255;255;48;2;19;87;20m+              <label class="field" style="margin-top: 8px">[0m
+[38;2;255;255;255;48;2;19;87;20m+                Course[0m
+[38;2;255;255;255;48;2;19;87;20m+                <select id="planCourseSelect">[0m
+[38;2;255;255;255;48;2;19;87;20m+                  <option value="">Choose a course…</option>[0m
+[38;2;255;255;255;48;2;19;87;20m+                </select>[0m
+[38;2;255;255;255;48;2;19;87;20m+              </label>[0m
+[38;2;255;255;255;48;2;19;87;20m+            </details>[0m
+[38;2;184;134;11m           </div>[0m
+[38;2;184;134;11m         </div>[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m         <div id="planCourseCard" hidden>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="card">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="card" id="planScorecardCard">[0m
+[38;2;184;134;11m             <div class="card-title">[0m
+[38;2;184;134;11m               <h3 id="planCourseName">Course</h3>[0m
+[38;2;184;134;11m               <span class="chip" id="planCourseMeta">—</span>[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mMarkup is in. Next I’ll add the bound-course CSS, then rebuild the Prep studio so the hole brief is one top-to-bottom flow.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 read      prep.css L618-737  1.1s
+  ┊ 🔎 grep      prep-kicker|ghost-btn prep-live  0.5s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mThe bound-head kicker needs its own color — the rec-card kicker is white-on-green. I’ll add that, then rebuild the Prep studio.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css  1.5s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css[0m
+[38;2;139;134;130m@@ -1158,3 +1158,253 @@[0m
+[38;2;184;134;11m .prep-fv-hz.water {[0m
+[38;2;184;134;11m   fill: rgba(90, 170, 255, 0.8);[0m
+[38;2;184;134;11m }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+/* ==========================================================================[0m
+[38;2;255;255;255;48;2;19;87;20m+   PREP FLOW — bound course + search first screen[0m
+[38;2;255;255;255;48;2;19;87;20m+   ========================================================================== */[0m
+[38;2;255;255;255;48;2;19;87;20m+#prepBoundHead .prep-kicker {[0m
+[38;2;255;255;255;48;2;19;87;20m+  color: var(--muted);[0m
+[38;2;255;255;255;48;2;19;87;20m+  margin-bottom: 2px;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-bound-row {[0m
+[38;2;255;255;255;48;2;19;87;20m+  display: flex;[0m
+[38;2;255;255;255;48;2;19;87;20m+  align-items: center;[0m
+[38;2;255;255;255;48;2;19;87;20m+  gap: 12px;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-bound-copy {[0m
+[38;2;255;255;255;48;2;19;87;20m+  min-width: 0;[0m
+[38;2;255;255;255;48;2;19;87;20m+  flex: 1;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+#prepBoundTitle {[0m
+[38;2;255;255;255;48;2;19;87;20m+  margin: 0;[0m
+[38;2;255;255;255;48;2;19;87;20m+  font-size: 20px;[0m
+[38;2;255;255;255;48;2;19;87;20m+  font-weight: 800;[0m
+[38;2;255;255;255;48;2;19;87;20m+  letter-spacing: -0.035em;[0m
+[38;2;255;255;255;48;2;19;87;20m+  line-height: 1.15;[0m
+[38;2;255;255;255;48;2;19;87;20m+  overflow: hidden;[0m
+[38;2;255;255;255;48;2;19;87;20m+  text-overflow: ellipsis;[0m
+[38;2;255;255;255;48;2;19;87;20m+  white-space: nowrap;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-change-chip {[0m
+[38;2;255;255;255;48;2;19;87;20m+  flex: 0 0 auto;[0m
+[38;2;255;255;255;48;2;19;87;20m+  appearance: none;[0m
+[38;2;255;255;255;48;2;19;87;20m+  border: 1px solid var(--line);[0m
+[38;2;255;255;255;48;2;19;87;20m+  background: rgba(127, 127, 127, 0.1);[0m
+[38;2;255;255;255;48;2;19;87;20m+  color: var(--text);[0m
+[38;2;255;255;255;48;2;19;87;20m+  font: inherit;[0m
+[38;2;255;255;255;48;2;19;87;20m+  font-size: 12.5px;[0m
+[38;2;255;255;255;48;2;19;87;20m+  font-weight: 800;[0m
+[38;2;255;255;255;48;2;19;87;20m+  letter-spacing: -0.01em;[0m
+[38;2;255;255;255;48;2;19;87;20m+  padding: 7px 13px;[0m
+[38;2;255;255;255;48;2;19;87;20m+  border-radius: 999px;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-change-chip:active {[0m
+[38;2;255;255;255;48;2;19;87;20m+  transform: scale(0.97);[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-saved-details {[0m
+[38;2;255;255;255;48;2;19;87;20m+  margin-top: 12px;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-saved-details summary {[0m
+[38;2;255;255;255;48;2;19;87;20m+  list-style: none;[0m
+[38;2;255;255;255;48;2;19;87;20m+  cursor: pointer;[0m
+[38;2;255;255;255;48;2;19;87;20m+  font-size: 13px;[0m
+[38;2;255;255;255;48;2;19;87;20m+  font-weight: 750;[0m
+[38;2;255;255;255;48;2;19;87;20m+  color: var(--muted);[0m
+[38;2;255;255;255;48;2;19;87;20m+  padding: 4px 0;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-saved-details summary::-webkit-details-marker {[0m
+[38;2;255;255;255;48;2;19;87;20m+  display: none;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-saved-details summary::after {[0m
+[38;2;255;255;255;48;2;19;87;20m+  content: ' ›';[0m
+[38;2;255;255;255;48;2;19;87;20m+  font-weight: 900;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+.prep-saved-details[open] summary::after {[0m
+[38;2;255;255;255;48;2;19;87;20m+  content: ' ˅';[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;139;134;130m… omitted 175 diff line(s) across 1 additional file(s)/section(s)[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mNext I’ll rebuild the Prep studio: conditions go behind a collapsible, and the hole brief becomes one top-to-bottom flow with the map, shots, and 3D Green.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📋 preparing todo…
+  ┊ 🔧 preparing patch…
+  ┊ 📋 plan      update 4/6 ✓  0.0s
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js  2.0s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js[0m
+[38;2;139;134;130m@@ -279,12 +279,90 @@[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m   function buildSkeleton() {[0m
+[38;2;184;134;11m     studio.innerHTML = `[0m
+[38;2;255;255;255;48;2;119;20;20m-      <!-- CONDITIONS -->[0m
+[38;2;255;255;255;48;2;19;87;20m+      <!-- HOLE BRIEF (map + sequence + strategy + 3D green) -->[0m
+[38;2;255;255;255;48;2;19;87;20m+      <div class="card" id="prepStrategyCard" hidden>[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="prep-hole-brief-head">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <div class="prep-kicker" style="color: var(--muted); margin-bottom: 2px">Hole brief</div>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <h3 id="prepStratTitle" style="margin: 0">Hole strategy</h3>[0m
+[38;2;255;255;255;48;2;19;87;20m+          </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <span class="chip" id="prepStratChip">—</span>[0m
+[38;2;255;255;255;48;2;19;87;20m+        </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div id="prepStratBody"></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+      </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+      <!-- RECOMMENDATION -->[0m
+[38;2;255;255;255;48;2;19;87;20m+      <div class="card prep-rec" id="prepRecCard">[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="prep-kicker">Pre-shot number</div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="prep-rec-main" id="prepRecMain">—</div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div id="prepEffortWrap"><span class="prep-effort-tag" id="prepEffortTag"></span></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="prep-reason" id="prepReason">Set a target to see the play.</div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="prep-adj-chips" id="prepAdjChips"></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="prep-rec-grid" id="prepRecGrid">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-rec-cell"><i>Carry to</i><b id="cellCarry">—</b></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-rec-cell"><i>Release</i><b id="cellRelease">—</b></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-rec-cell"><i>Total</i><b id="cellTotal">—</b></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="prep-aim-row" id="prepAimRow">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <span class="prep-aim-arrow" id="prepAimArrow">[0m
+[38;2;255;255;255;48;2;19;87;20m+            <svg viewBox="0 0 24 24" id="prepAimSvg">[0m
+[38;2;255;255;255;48;2;19;87;20m+              <path d="M12 3 L17 13 H14 V21 H10 V13 H7 Z" fill="#fff"/>[0m
+[38;2;255;255;255;48;2;19;87;20m+            </svg>[0m
+[38;2;255;255;255;48;2;19;87;20m+          </span>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <span id="prepAimText">—</span>[0m
+[38;2;255;255;255;48;2;19;87;20m+        </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+      </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+      <!-- THE SHOT -->[0m
+[38;2;255;255;255;48;2;19;87;20m+      <div class="card" id="prepShotCard">[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="card-title">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <h2>The shot</h2>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <span class="chip" id="prepTargetChip">Hole —</span>[0m
+[38;2;255;255;255;48;2;19;87;20m+        </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div id="prepTargetMeta" class="prep-target-meta"></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div id="prepHolePane">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-mini-label">Playing to</div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-green-picker" id="prepGreenPicker">[0m
+[38;2;255;255;255;48;2;19;87;20m+            <button type="button" class="prep-point-btn" data-point="front"><i>Front</i><b>—</b></button>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <button type="button" class="prep-point-btn" data-point="middle"><i>Middle</i><b>—</b></button>[0m
+[38;2;255;255;255;48;2;19;87;20m+            <button type="button" class="prep-point-btn" data-point="back"><i>Back</i><b>—</b></button>[0m
+[38;2;255;255;255;48;2;19;87;20m+          </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="hint" id="prepGreenHint" style="margin-top: 7px"></div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="section-gap" style="margin-top: 13px">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-mini-label">Lie</div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-lie-row" id="prepLieRow">[0m
+[38;2;255;255;255;48;2;19;87;20m+            ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}[0m
+[38;2;255;255;255;48;2;19;87;20m+          </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+        <div class="section-gap" style="margin-top: 13px">[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-mini-label">Intended shape</div>[0m
+[38;2;255;255;255;48;2;19;87;20m+          <div class="prep-shape-row" id="prepShapeRow">[0m
+[38;2;255;255;255;48;2;19;87;20m+            ${SHAPES.map((s) => `[0m
+[38;2;255;255;255;48;2;19;87;20m+              <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">[0m
+[38;2;255;255;255;48;2;19;87;20m+                <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>[0m
+[38;2;255;255;255;48;2;19;87;20m+                <b>${s.name}</b><span>${s.sub}</span>[0m
+[38;2;255;255;255;48;2;19;87;20m+              </button>`).join('')}[0m
+[38;2;255;255;255;48;2;19;87;20m+          </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+        </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+        <button class="ghost-btn prep-live-btn" id="prepLiveBtn" type="button">Use live weather & elevation</button>[0m
+[38;2;255;255;255;48;2;19;87;20m+      </div>[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;139;134;130m… omitted 13 diff line(s) across 1 additional file(s)/section(s)[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mThe skeleton still has leftover shot/rec/strategy markup. I’ll close the Conditions details and strip the duplicates.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      prep.js L400-519  1.1s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI’ll close the Conditions details and drop the leftover duplicate cards so the studio has a single hole-brief flow.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js  2.0s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js[0m
+[38;2;139;134;130m@@ -417,91 +417,8 @@[0m
+[38;2;184;134;11m           </div>[0m
+[38;2;184;134;11m           <div class="prep-surface-note" id="prepSurfaceNote"></div>[0m
+[38;2;184;134;11m         </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-      </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-      <!-- NO HOLE BOUND — clean empty state -->[0m
+[38;2;255;255;255;48;2;119;20;20m-      <div class="card prep-unbound-card" id="prepUnboundCard" hidden>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="prep-kicker">No hole bound</div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <h3 class="prep-unbound-title">Bind a course hole to prep your shot</h3>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <p class="hint">Pick a course above and tap a hole — conditions, the[0m
+[38;2;255;255;255;48;2;119;20;20m-        play and hole strategy come alive here.</p>[0m
+[38;2;255;255;255;48;2;119;20;20m-      </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-      <!-- THE SHOT -->[0m
+[38;2;255;255;255;48;2;119;20;20m-      <div class="card" id="prepShotCard">[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="card-title">[0m
+[38;2;255;255;255;48;2;119;20;20m-          <h2>The shot</h2>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <span class="chip" id="prepTargetChip">Hole —</span>[0m
+[38;2;184;134;11m         </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div id="prepTargetMeta" class="prep-target-meta"></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div id="prepHolePane">[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-mini-label">Playing to</div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-green-picker" id="prepGreenPicker">[0m
+[38;2;255;255;255;48;2;119;20;20m-            <button type="button" class="prep-point-btn" data-point="front"><i>Front</i><b>—</b></button>[0m
+[38;2;255;255;255;48;2;119;20;20m-            <button type="button" class="prep-point-btn" data-point="middle"><i>Middle</i><b>—</b></button>[0m
+[38;2;255;255;255;48;2;119;20;20m-            <button type="button" class="prep-point-btn" data-point="back"><i>Back</i><b>—</b></button>[0m
+[38;2;255;255;255;48;2;119;20;20m-          </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="hint" id="prepGreenHint" style="margin-top: 7px"></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="section-gap" style="margin-top: 13px">[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-mini-label">Lie</div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-lie-row" id="prepLieRow">[0m
+[38;2;255;255;255;48;2;119;20;20m-            ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}[0m
+[38;2;255;255;255;48;2;119;20;20m-          </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="section-gap" style="margin-top: 13px">[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-mini-label">Intended shape</div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-shape-row" id="prepShapeRow">[0m
+[38;2;255;255;255;48;2;119;20;20m-            ${SHAPES.map((s) => `[0m
+[38;2;255;255;255;48;2;119;20;20m-              <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">[0m
+[38;2;255;255;255;48;2;119;20;20m-                <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>[0m
+[38;2;255;255;255;48;2;119;20;20m-                <b>${s.name}</b><span>${s.sub}</span>[0m
+[38;2;255;255;255;48;2;119;20;20m-              </button>`).join('')}[0m
+[38;2;255;255;255;48;2;119;20;20m-          </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-        <button class="ghost-btn prep-live-btn" id="prepLiveBtn" type="button">Use live weather & elevation</button>[0m
+[38;2;255;255;255;48;2;119;20;20m-      </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-      <!-- HOLE FLYOVER (side-profile strip) -->[0m
+[38;2;255;255;255;48;2;119;20;20m-      <div class="card prep-flyover-card" id="prepFlyoverCard" hidden>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="prep-kicker">Hole flyover</div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div id="prepFlyoverBody"></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-      </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;255;255;255;48;2;119;20;20m-      <!-- RECOMMENDATION -->[0m
+[38;2;255;255;255;48;2;119;20;20m-      <div class="card prep-rec" id="prepRecCard">[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="prep-kicker">Pre-shot number</div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="prep-rec-main" id="prepRecMain">—</div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div id="prepEffortWrap"><span class="prep-effort-tag" id="prepEffortTag"></span></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="prep-reason" id="prepReason">Set a target to see the play.</div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="prep-adj-chips" id="prepAdjChips"></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="prep-rec-grid" id="prepRecGrid">[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-rec-cell"><i>Carry to</i><b id="cellCarry">—</b></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-rec-cell"><i>Release</i><b id="cellRelease">—</b></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <div class="prep-rec-cell"><i>Total</i><b id="cellTotal">—</b></div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        </div>[0m
+[38;2;255;255;255;48;2;119;20;20m-        <div class="prep-aim-row" id="prepAimRow">[0m
+[38;2;255;255;255;48;2;119;20;20m-          <span class="prep-aim-arrow" id="prepAimArrow">[0m
+[38;2;255;255;255;48;2;119;20;20m-            <svg viewBox="0 0 24 24" id="prepAimSvg">[0m
+[38;2;255;255;255;48;2;119;20;20m-              <path d="M12 3 L17 13 H14 V21 H10 V13 H7 Z" fill="#fff"/>[0m
+[38;2;255;255;255;48;2;119;20;20m-            </svg>[0m
+[38;2;255;255;255;48;2;119;20;20m-          </span>[0m
+[38;2;255;255;255;48;2;119;20;20m-          <span id="prepAimText">—</span>[0m
+[38;2;139;134;130m… omitted 14 diff line(s) across 1 additional file(s)/section(s)[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI’ll update paintTarget for the new skeleton, then rewrite renderStrategy with the hole map, sequence, 3D Green, and green-aware advice.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      prep.js L395-444  1.1s
+  ┊ 📖 read      prep.js L470-519  1.1s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI’ll update paintTarget and rewrite the hole brief so it owns the map, sequence, 3D Green, and green-aware advice.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 patch       0.0s [path required]
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js  2.0s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js[0m
+[38;2;139;134;130m@@ -476,23 +476,23 @@[0m
+[38;2;184;134;11m   }[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m   function paintTarget() {[0m
+[38;2;255;255;255;48;2;119;20;20m-    // Prep is always bound to a course hole. No hole → clean empty state.[0m
+[38;2;255;255;255;48;2;119;20;20m-    const unbound = $('prepUnboundCard');[0m
+[38;2;255;255;255;48;2;19;87;20m+    // Prep is always bound to a course hole. No hole → search/scorecard[0m
+[38;2;255;255;255;48;2;19;87;20m+    // is the screen; studio cards stay hidden.[0m
+[38;2;184;134;11m     const shotCard = $('prepShotCard');[0m
+[38;2;184;134;11m     const recCard = $('prepRecCard');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const condCard = $('prepCondCard');[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m     if (!boundHole) {[0m
+[38;2;255;255;255;48;2;119;20;20m-      if (unbound) unbound.hidden = false;[0m
+[38;2;255;255;255;48;2;119;20;20m-      shotCard.hidden = true;[0m
+[38;2;255;255;255;48;2;119;20;20m-      recCard.hidden = true;[0m
+[38;2;255;255;255;48;2;119;20;20m-      renderFlyover();[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (shotCard) shotCard.hidden = true;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (recCard) recCard.hidden = true;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (condCard) condCard.hidden = true;[0m
+[38;2;184;134;11m       renderStrategy();[0m
+[38;2;255;255;255;48;2;19;87;20m+      syncPrepChrome();[0m
+[38;2;184;134;11m       return;[0m
+[38;2;184;134;11m     }[0m
+[38;2;255;255;255;48;2;119;20;20m-    if (unbound) unbound.hidden = true;[0m
+[38;2;255;255;255;48;2;119;20;20m-    shotCard.hidden = false;[0m
+[38;2;255;255;255;48;2;119;20;20m-    recCard.hidden = false;[0m
+[38;2;255;255;255;48;2;119;20;20m-    renderFlyover();[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (shotCard) shotCard.hidden = false;[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (recCard) recCard.hidden = false;[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (condCard) condCard.hidden = false;[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m     $('prepTargetChip').textContent = `Hole ${boundHole.number}`;[0m
+[38;2;184;134;11m     const g = boundHole.green || {};[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI’ll rewrite the hole brief: corridor map, club-sequence visuals, 3D Green, and green-aware feed, plus bound-course chrome.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js  1.9s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js[0m
+[38;2;139;134;130m@@ -1000,15 +1000,187 @@[0m
+[38;2;184;134;11m     card.hidden = false;[0m
+[38;2;184;134;11m   }[0m
+[38;2;184;134;11m [0m
+[38;2;255;255;255;48;2;19;87;20m+  const GREEN_BRIEF_KEY = 'caddy:greenBrief:v1';[0m
+[38;2;255;255;255;48;2;19;87;20m+  const GREEN_BRIEF_MATCH_M = 60;[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  function metersApart(a, b) {[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!a || !b) return Infinity;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const lat1 = Number(a.lat), lng1 = Number(a.lng);[0m
+[38;2;255;255;255;48;2;19;87;20m+    const lat2 = Number(b.lat), lng2 = Number(b.lng);[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return Infinity;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const R = 6371000;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const dp = (lat2 - lat1) * Math.PI / 180;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const dl = (lng2 - lng1) * Math.PI / 180;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const s = Math.sin(dp / 2) ** 2 +[0m
+[38;2;255;255;255;48;2;19;87;20m+      Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;[0m
+[38;2;255;255;255;48;2;19;87;20m+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));[0m
+[38;2;255;255;255;48;2;19;87;20m+  }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  function readGreenBrief(hole) {[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!hole || !hole.greenLatLng) return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+    try {[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (typeof localStorage === 'undefined') return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const raw = localStorage.getItem(GREEN_BRIEF_KEY);[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (!raw) return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+      const brief = JSON.parse(raw);[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (!brief || !Number.isFinite(brief.lat) || !Number.isFinite(brief.lng))[0m
+[38;2;255;255;255;48;2;19;87;20m+        return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+      if (metersApart(hole.greenLatLng, brief) > GREEN_BRIEF_MATCH_M) return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+      return brief;[0m
+[38;2;255;255;255;48;2;19;87;20m+    } catch {[0m
+[38;2;255;255;255;48;2;19;87;20m+      return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+    }[0m
+[38;2;255;255;255;48;2;19;87;20m+  }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  function breakSideLabel(breakIn) {[0m
+[38;2;255;255;255;48;2;19;87;20m+    const n = Number(breakIn);[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!Number.isFinite(n) || Math.abs(n) < 1.5) return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+    return n > 0 ? 'RIGHT' : 'LEFT';[0m
+[38;2;255;255;255;48;2;19;87;20m+  }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  function paceWords(cls) {[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (cls === 'firm') return 'firm pace';[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (cls === 'soft') return 'soft pace';[0m
+[38;2;255;255;255;48;2;19;87;20m+    return 'true pace';[0m
+[38;2;255;255;255;48;2;19;87;20m+  }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  function greenFeedLine(brief, pointId) {[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!brief) return null;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const zones = Array.isArray(brief.zones) ? brief.zones : [];[0m
+[38;2;255;255;255;48;2;19;87;20m+    const zone = zones.find((z) => z && z.id === pointId) ||[0m
+[38;2;255;255;255;48;2;19;87;20m+      zones.find((z) => z && z.id === 'middle') ||[0m
+[38;2;255;255;255;48;2;19;87;20m+      null;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const atPin = brief.landing && brief.landing.atPin;[0m
+[38;2;255;255;255;48;2;19;87;20m+    const br = zone && Number.isFinite(zone.breakIn)[0m
+[38;2;255;255;255;48;2;19;87;20m+      ? zone.breakIn[0m
+[38;2;255;255;255;48;2;19;87;20m+      : (atPin && Number.isFinite(atPin.breakIn) ? atPin.breakIn : 0);[0m
+[38;2;255;255;255;48;2;19;87;20m+    const side = breakSideLabel(br);[0m
+[38;2;255;255;255;48;2;19;87;20m+    const pace = paceWords(atPin && atPin.paceClass);[0m
+[38;2;255;255;255;48;2;19;87;20m+    const inches = Math.round(Math.abs(br));[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!side) return `After landing: putt holds, ${pace}.`;[0m
+[38;2;255;255;255;48;2;19;87;20m+    return `After landing: ball feeds ${side} ~${inches} in, ${pace}.`;[0m
+[38;2;255;255;255;48;2;19;87;20m+  }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  function seqNames(h) {[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!h || !h.yards || typeof api.clubSequence !== 'function') return [];[0m
+[38;2;255;255;255;48;2;19;87;20m+    const seq = api.clubSequence(Math.round(h.yards));[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!seq) return [];[0m
+[38;2;255;255;255;48;2;19;87;20m+    const names = Array.isArray(seq.seq) ? seq.seq.slice() : [];[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (seq.finisherName) names.push(seq.finisherName);[0m
+[38;2;255;255;255;48;2;19;87;20m+    return names;[0m
+[38;2;255;255;255;48;2;19;87;20m+  }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  function holeMapSvg(h, names) {[0m
+[38;2;255;255;255;48;2;19;87;20m+    const yards = Number(h && h.yards);[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!(yards > 40)) return '';[0m
+[38;2;255;255;255;48;2;19;87;20m+    const W = 320, H = 168;[0m
+[38;2;139;134;130m… omitted 184 diff line(s) across 1 additional file(s)/section(s)[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI’ll wire bound-course chrome next: Change toggles search, the old planner detail stays hidden, and unbind no longer depends on that card.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      prep.js L1415-1494  1.1s
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      prep.js L1360-1429  1.6s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI’ll keep the bound-course header visible while searching (Change toggles it), hide the old planner detail, and stop unbinding when that card is hidden.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css  1.5s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css[0m
+[38;2;139;134;130m@@ -1233,10 +1233,6 @@[0m
+[38;2;184;134;11m   content: ' ˅';[0m
+[38;2;184;134;11m }[0m
+[38;2;184;134;11m [0m
+[38;2;255;255;255;48;2;119;20;20m-#planSearchCard.prep-searching #prepBoundHead {[0m
+[38;2;255;255;255;48;2;119;20;20m-  display: none !important;[0m
+[38;2;255;255;255;48;2;119;20;20m-}[0m
+[38;2;255;255;255;48;2;119;20;20m-[0m
+[38;2;184;134;11m /* Conditions live behind one collapsible so the hole brief leads. */[0m
+[38;2;184;134;11m .prep-cond-details {[0m
+[38;2;184;134;11m   margin: 0;[0m
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css  1.5s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css[0m
+[38;2;139;134;130m@@ -1404,3 +1404,8 @@[0m
+[38;2;184;134;11m   justify-content: space-between;[0m
+[38;2;184;134;11m   gap: 10px;[0m
+[38;2;184;134;11m }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+/* The hole brief lives in prep.js now — hide the legacy planner detail. */[0m
+[38;2;255;255;255;48;2;19;87;20m+#shotScreen #planDetailCard {[0m
+[38;2;255;255;255;48;2;19;87;20m+  display: none !important;[0m
+[38;2;255;255;255;48;2;19;87;20m+}[0m
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js  2.0s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js[0m
+[38;2;139;134;130m@@ -1369,12 +1369,34 @@[0m
+[38;2;184;134;11m      PLANNER BINDING — follow the Hole planner selection without touching[0m
+[38;2;184;134;11m      any of its code. Click delegation fires AFTER the planner's own button[0m
+[38;2;184;134;11m      handler has updated #planDetailTitle, and a MutationObserver collapses[0m
+[38;2;255;255;255;48;2;119;20;20m-     our binding when the detail card closes (course change etc.).[0m
+[38;2;255;255;255;48;2;19;87;20m+     our binding when the course card closes (course change etc.).[0m
+[38;2;184;134;11m      ====================================================================== */[0m
+[38;2;255;255;255;48;2;19;87;20m+  let prepSearching = false;[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+  function syncPrepChrome() {[0m
+[38;2;255;255;255;48;2;19;87;20m+    const sel = document.getElementById('planCourseSelect');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const hasCourse = !!(sel && sel.value);[0m
+[38;2;255;255;255;48;2;19;87;20m+    const boundHead = document.getElementById('prepBoundHead');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const searchPane = document.getElementById('prepSearchPane');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const courseCard = document.getElementById('planCourseCard');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const nameEl = document.getElementById('prepBoundTitle');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const courseName = document.getElementById('planCourseName');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const changeBtn = document.getElementById('prepChangeCourse');[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (boundHead) boundHead.hidden = !hasCourse;[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (nameEl && courseName && hasCourse)[0m
+[38;2;255;255;255;48;2;19;87;20m+      nameEl.textContent = courseName.textContent || 'Course';[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (searchPane) searchPane.hidden = hasCourse && !prepSearching;[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (changeBtn) changeBtn.textContent = prepSearching ? 'Done' : 'Change';[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (courseCard && hasCourse)[0m
+[38;2;255;255;255;48;2;19;87;20m+      courseCard.hidden = prepSearching || !!boundHole;[0m
+[38;2;255;255;255;48;2;19;87;20m+  }[0m
+[38;2;255;255;255;48;2;19;87;20m+[0m
+[38;2;184;134;11m   function bindHole(number) {[0m
+[38;2;184;134;11m     const info = api.holeInfo(number);[0m
+[38;2;184;134;11m     if (!info) return;[0m
+[38;2;184;134;11m     boundHole = info;[0m
+[38;2;255;255;255;48;2;19;87;20m+    prepSearching = false;[0m
+[38;2;184;134;11m     shot.greenPoint = 'middle';[0m
+[38;2;184;134;11m     persist();[0m
+[38;2;184;134;11m     paintControls();[0m
+[38;2;139;134;130m@@ -1384,14 +1406,23 @@[0m
+[38;2;184;134;11m   }[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m   function unbindHoleIfGone() {[0m
+[38;2;255;255;255;48;2;119;20;20m-    if (!boundHole) return;[0m
+[38;2;255;255;255;48;2;119;20;20m-    const detail = document.getElementById('planDetailCard');[0m
+[38;2;255;255;255;48;2;119;20;20m-    if (!detail || detail.hidden) {[0m
+[38;2;255;255;255;48;2;19;87;20m+    const courseCard = document.getElementById('planCourseCard');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const sel = document.getElementById('planCourseSelect');[0m
+[38;2;255;255;255;48;2;19;87;20m+    const hasCourse = !!(sel && sel.value) && courseCard && !courseCard.hidden;[0m
+[38;2;255;255;255;48;2;19;87;20m+    // Course gone (picker cleared) — drop the hole. While a hole brief is[0m
+[38;2;255;255;255;48;2;19;87;20m+    // open we hide the scorecard ourselves, so don't treat that as unbound.[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!boundHole) {[0m
+[38;2;255;255;255;48;2;19;87;20m+      syncPrepChrome();[0m
+[38;2;255;255;255;48;2;19;87;20m+      return;[0m
+[38;2;255;255;255;48;2;19;87;20m+    }[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (!(sel && sel.value)) {[0m
+[38;2;184;134;11m       boundHole = null;[0m
+[38;2;184;134;11m       paintControls();[0m
+[38;2;184;134;11m       paintTarget();[0m
+[38;2;184;134;11m       renderStrategy();[0m
+[38;2;255;255;255;48;2;119;20;20m-      loadGreenMap(); // boundHole null → hides the card + aborts any fetch[0m
+[38;2;255;255;255;48;2;19;87;20m+      loadGreenMap();[0m
+[38;2;255;255;255;48;2;19;87;20m+    } else {[0m
+[38;2;255;255;255;48;2;19;87;20m+      syncPrepChrome();[0m
+[38;2;184;134;11m     }[0m
+[38;2;184;134;11m   }[0m
+[38;2;184;134;11m [0m
+[38;2;139;134;130m@@ -1399,18 +1430,50 @@[0m
+[38;2;184;134;11m     document.addEventListener('click', (e) => {[0m
+[38;2;184;134;11m       const row = e.target.closest('.plan-hole-row');[0m
+[38;2;184;134;11m       if (!row) return;[0m
+[38;2;255;255;255;48;2;119;20;20m-      const title = document.getElementById('planDetailTitle');[0m
+[38;2;255;255;255;48;2;119;20;20m-      const m = title ? /Hole\s+(\d+)/.exec(title.textContent || '') : null;[0m
+[38;2;255;255;255;48;2;119;20;20m-      bindHole(m ? Number(m[1]) : Number(row.dataset.hole));[0m
+[38;2;255;255;255;48;2;19;87;20m+      bindHole(Number(row.dataset.hole));[0m
+[38;2;184;134;11m     }, true);[0m
+[38;2;184;134;11m [0m
+[38;2;255;255;255;48;2;119;20;20m-    const detail = document.getElementById('planDetailCard');[0m
+[38;2;255;255;255;48;2;119;20;20m-    if (detail && typeof MutationObserver !== 'undefined') {[0m
+[38;2;255;255;255;48;2;119;20;20m-      new MutationObserver(unbindHoleIfGone).observe(detail, {[0m
+[38;2;255;255;255;48;2;19;87;20m+    const changeBtn = document.getElementById('prepChangeCourse');[0m
+[38;2;255;255;255;48;2;19;87;20m+    if (changeBtn) {[0m
+[38;2;139;134;130m… omitted 42 diff line(s) across 1 additional file(s)/section(s)[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI’ll always sync the bound-course chrome after paintTarget, and I’ll drop the extra USGS green-map card so 3D Green is the only green path.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      prep.js L478-522  1.1s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mI’ll always sync bound-course chrome at the end of paintTarget, then syntax-check the touched files.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 preparing patch…
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js  1.9s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js[0m
+[38;2;139;134;130m@@ -514,6 +514,7 @@[0m
+[38;2;184;134;11m     $('prepGreenHint').textContent = anyMapped[0m
+[38;2;184;134;11m       ? 'Carries below update live with your conditions.'[0m
+[38;2;184;134;11m       : 'Green edges are not mapped — playing to the center estimate.';[0m
+[38;2;255;255;255;48;2;19;87;20m+    syncPrepChrome();[0m
+[38;2;184;134;11m   }[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m   function wireControls() {[0m
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js  1.9s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.js[0m
+[38;2;139;134;130m@@ -1407,9 +1407,7 @@[0m
+[38;2;184;134;11m   }[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m   function unbindHoleIfGone() {[0m
+[38;2;255;255;255;48;2;119;20;20m-    const courseCard = document.getElementById('planCourseCard');[0m
+[38;2;184;134;11m     const sel = document.getElementById('planCourseSelect');[0m
+[38;2;255;255;255;48;2;119;20;20m-    const hasCourse = !!(sel && sel.value) && courseCard && !courseCard.hidden;[0m
+[38;2;184;134;11m     // Course gone (picker cleared) — drop the hole. While a hole brief is[0m
+[38;2;184;134;11m     // open we hide the scorecard ourselves, so don't treat that as unbound.[0m
+[38;2;184;134;11m     if (!boundHole) {[0m
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mNext I’ll syntax-check the files we touched, then run the greenmap smoke baselines.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 preparing read_file…
+  ┊ 💻 preparing terminal…
+  ┊ 📖 read      greenmap.js L1558-1697  1.1s
+  ┊ 📖 read      prep.js L278-427  1.1s
+  ┊ 💻 $         node --check "C:/Users/wendy/Desktop/Caddy/Caddy-main/prep.js" + 3 commands  0.6s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mSyntax is clean. Next I’ll run both greenmap smoke suites and confirm the documented baselines.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📋 preparing todo…
+  ┊ 💻 preparing terminal…
+  ┊ 🔎 preparing search_files…
+  ┊ 📖 preparing read_file…
+  ┊ 📋 plan      update 5/6 ✓  0.0s
+  ┊ 💻 $         node tests/greenmap_boot_smoke.js  2.2s
+  ┊ 🔎 grep      FAIL|documented|fetch is not defined|FAILURE  0.6s
+  ┊ 📖 read      greenmap_smoke.js L650-709  1.3s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mBoot smoke passed. Next I’ll run the greenmap smoke suite and confirm it still has exactly the two documented failures.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 💻 preparing terminal…
+  ┊ 🔎 preparing search_files…
+  ┊ 💻 $         node tests/greenmap_smoke.js  0.6s [exit 1]
+  ┊ 🔎 grep      clubSequence  0.5s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mBoot order is wrong: paintTarget() runs before syncPrepChrome exists. I’ll move the planner-bridge wiring so chrome is defined first.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 📖 preparing read_file…
+  ┊ 📖 read      prep.js L1575-1604  1.3s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mBoot order is fine — syncPrepChrome is a function declaration, so it’s hoisted. I’ll make the 3D Green button not look like a link, then wrap up.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  ┊ 🔧 preparing patch…
+  ┊ 📋 preparing todo…
+  ┊ 🔧 patch     C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css  1.5s
+  ┊ review diff
+[38;2;218;165;32ma/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css → b/C:\Users\wendy\Desktop\Caddy\Caddy-main\prep.css[0m
+[38;2;139;134;130m@@ -1387,6 +1387,8 @@[0m
+[38;2;184;134;11m   align-items: center;[0m
+[38;2;184;134;11m   justify-content: center;[0m
+[38;2;184;134;11m   gap: 8px;[0m
+[38;2;255;255;255;48;2;19;87;20m+  text-decoration: none;[0m
+[38;2;255;255;255;48;2;19;87;20m+  box-sizing: border-box;[0m
+[38;2;184;134;11m }[0m
+[38;2;184;134;11m [0m
+[38;2;184;134;11m .prep-3d-btn svg {[0m
+  ┊ 📋 plan      update 6/6 ✓  0.0s
+
+[1;38;2;255;215;0m╭─ ⚕ Hermes ───────────────────────────────────────────────────────────────────╮[0m
+[38;2;255;248;220mPrep tab is now search → scorecard → hole brief, with green-aware advice once a 3D green has been loaded. sw.js was left alone.[0m
+[38;2;255;248;220m[0m
+[38;2;255;248;220mVerify[0m
+[38;2;255;248;220m- node --check prep.js / app.js / greenmap.js — all OK[0m
+[38;2;255;248;220m- node tests/greenmap_boot_smoke.js — BOOT+FLOW SMOKE PASSED[0m
+[38;2;255;248;220m- node tests/greenmap_smoke.js — exactly 2 documented failures (fetchElevGrid / live smoke: no elev data)[0m
+[38;2;255;248;220m[0m
+[38;2;255;248;220mPer file[0m
+[38;2;255;248;220m[0m
+[38;2;255;248;220mapp.js (Block 18 only)[0m
+[38;2;255;248;220m- clubSequence(totalYd) — read-only wrapper around planClubSequence[0m
+[38;2;255;248;220m- holeInfo hazards now include along/cross for the hole diagram (still no writes)[0m
+[38;2;255;248;220m[0m
+[38;2;255;248;220mgreenmap.js (brief persistence only)[0m
+[38;2;255;248;220m- After a green loads, persistGreenBrief() writes caddy:greenBrief:v1[0m
+[38;2;255;248;220m- Shape: { lat, lng, savedAt, stimp, landing.atPin { breakIn, dirDeg, paceClass }, zones[front/middle/back] }[0m
+[38;2;255;248;220m- Probes ~2 m inside the rim on the tee→green axis via simPuttPath[0m
+[38;2;255;248;220m- try/catch + typeof localStorage; never runs on the headless core path[0m
+[38;2;255;248;220m- Re-persists when Stimpmeter changes[0m
+[38;2;255;248;220m[0m
+[38;2;255;248;220mindex.html (Prep section)[0m
+[38;2;255;248;220m- Unbound: search is the first screen + hint; saved courses behind a details[0m
+[38;2;255;248;220m- Bound: course name + Change chip; Save bar stays for ephemeral searches[0m
+[38;2;255;248;220m- All original IDs kept (planCourseSearch, planCourseSelect, planHoleList, …)[0m
+[38;2;255;248;220m[0m
+[38;2;255;248;220mprep.js[0m
+[38;2;255;248;220m- Flow: hole brief (map + sequence + strategy) → pre-shot number → The shot → Conditions collapsible[0m
+[38;2;255;248;220m- SVG hole map: tee, green, hazards on along/cross, colored shot segments with club labels[0m
+[38;2;255;248;220m- Club sequence chips from api.clubSequence[0m
+[38;2;255;248;220m- 3D Green button → greenmap.html?lat&lng&teelat&teelng[0m
+[38;2;255;248;220m- Green feed: “After landing: ball feeds LEFT ~8 in, firm pace” when a brief matches within 60 m; otherwise an honest “open 3D Green once” note[0m
+[38;2;255;248;220m- Change / All holes navigation; scorecard hides while a hole is open[0m
+[38;2;255;248;220m- solve() memo + 120 ms debounce unchanged[0m
+[38;2;255;248;220m[0m
+[38;2;255;248;220mprep.css[0m
+[38;2;255;248;220m- Bound-head, Change chip, Conditions details, hole-map, sequence chips, green-feed, 3D button[0m
+[38;2;255;248;220m- Legacy #planDetailCard hidden (brief lives in prep.js now)[0m
+[38;2;255;248;220m[0m
+[38;2;255;248;220mNot touched: renderer/physics, sw.js. Coordinator still owns the CACHE_VERSION bump.[0m
+[1;38;2;255;215;0m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+  [tool] ( ˘⌣˘)♡ musing...
+
+Resume this session with:
+  hermes --resume 20260831_040341_87e631
+  hermes -c "Restructure Prep tab green-aware caddy"
+
+Session:        20260831_040341_87e631
+Title:          Restructure Prep tab green-aware caddy
+Duration:       29m 44s
+Messages:       126 (1 user, 124 tool calls)
+R5_DONE exit=0

@@ -1566,6 +1566,120 @@
       localStorage.setItem(LAST_GREEN_KEY, JSON.stringify({
         lat: state.lat, lng: state.lng }));
     } catch (e) { /* private mode etc. — non-fatal */ }
+    persistGreenBrief();
+  }
+
+  // Compact per-green slope summary for Prep advice. Headless/core imports
+  // never reach here (document guard above). localStorage is try/caught so
+  // missing storage (tests, private mode) is a no-op.
+  function persistGreenBrief() {
+    try {
+      if (typeof localStorage === 'undefined' || !localStorage) return;
+      const elev = state.grid;
+      const field = state.field;
+      const mask = state.mask;
+      if (!elev || !field || !mask) return;
+      const W = elev.W, H = elev.H, cs = elev.cellSizeM;
+      if (!(W > 2) || !(H > 2) || !(cs > 0)) return;
+      const pin = Array.isArray(state.pin) ? state.pin : [0, 0];
+      const stimp = Number.isFinite(state.stimp) ? state.stimp : 10;
+
+      // Approach axis in local metres (x east, y north). Default +Y (north)
+      // when no tee is known so probes still run.
+      let ux = 0, uy = 1;
+      if (state.teeLL &&
+          Number.isFinite(state.teeLL.lat) &&
+          Number.isFinite(state.teeLL.lng)) {
+        const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);
+        const tx = (state.teeLL.lng - state.lng) * mLng;
+        const ty = (state.teeLL.lat - state.lat) * 111320;
+        const len = Math.hypot(tx, ty);
+        if (len > 1) { ux = -tx / len; uy = -ty / len; }
+      }
+
+      let frontExt = 0, backExt = 0;
+      const poly = state.polyLocal;
+      if (poly && poly.length > 2) {
+        for (let i = 0; i < poly.length; i++) {
+          const p = poly[i][0] * ux + poly[i][1] * uy;
+          if (p > backExt) backExt = p;
+          if (-p > frontExt) frontExt = -p;
+        }
+      }
+      const fallbackR = SPAN_M * 0.36;
+      if (frontExt < 1) frontExt = fallbackR;
+      if (backExt < 1) backExt = fallbackR;
+      const inset = 2;
+      const frontD = Math.max(0.6, frontExt - inset);
+      const backD = Math.max(0.6, backExt - inset);
+
+      const cellOk = (mx, my) => {
+        const ix = Math.round(mx / cs + W / 2);
+        const iy = Math.round(H / 2 - my / cs);
+        if (ix < 0 || iy < 0 || ix >= W || iy >= H) return -1;
+        const i = iy * W + ix;
+        return (field.valid[i] && (!mask || mask[i])) ? i : -1;
+      };
+      const probeOf = (along) => {
+        let x = pin[0] + ux * along, y = pin[1] + uy * along;
+        if (cellOk(x, y) >= 0) return [x, y];
+        for (let t = 0.85; t >= 0.12; t -= 0.15) {
+          const sx = pin[0] + ux * along * t;
+          const sy = pin[1] + uy * along * t;
+          if (cellOk(sx, sy) >= 0) return [sx, sy];
+        }
+        return null;
+      };
+      const fallAt = (pt, fallback) => {
+        if (!pt) return fallback;
+        const i = cellOk(pt[0], pt[1]);
+        if (i < 0) return fallback;
+        return Math.round(GreenMapCore.fallBearingDeg(field.gx[i], field.gy[i]));
+      };
+      const summarize = (ballM) => {
+        if (!ballM) return { breakIn: 0, dirDeg: 0 };
+        const r = GreenMapCore.simPuttPath(
+          ballM, pin, field, W, H, cs, mask, { stimp });
+        const br = Number.isFinite(r.breakIn) ? r.breakIn : 0;
+        return {
+          breakIn: Math.round(br * 10) / 10,
+          dirDeg: fallAt(ballM, 0),
+          stopped: r.stopped,
+        };
+      };
+
+      const front = summarize(probeOf(-frontD));
+      const midBall = probeOf(-Math.min(2, frontD));
+      const middle = summarize(midBall);
+      const back = summarize(probeOf(backD));
+
+      let paceClass = 'true';
+      if (stimp >= 12) paceClass = 'firm';
+      else if (stimp <= 8) paceClass = 'soft';
+      if (middle.stopped === 'edge' || back.stopped === 'edge') paceClass = 'firm';
+      else if (middle.stopped === 'dead' && front.stopped === 'dead') paceClass = 'soft';
+
+      const pinDir = fallAt(pin, middle.dirDeg);
+      const atPin = {
+        breakIn: middle.breakIn,
+        dirDeg: pinDir,
+        paceClass,
+      };
+
+      const brief = {
+        lat: state.lat,
+        lng: state.lng,
+        savedAt: Date.now(),
+        stimp,
+        landing: { atPin },
+        zones: [
+          { id: 'front', breakIn: front.breakIn, dirDeg: front.dirDeg },
+          { id: 'middle', breakIn: middle.breakIn, dirDeg: middle.dirDeg },
+          { id: 'back', breakIn: back.breakIn, dirDeg: back.dirDeg },
+        ],
+      };
+      localStorage.setItem('caddy:greenBrief:v1', JSON.stringify(brief));
+    } catch (e) { /* quota / private mode / headless — non-fatal */ }
   }
 
   /* ======================================================================
@@ -4291,6 +4405,7 @@
       stimpEl.addEventListener('change', () => {
         state.stimp = parseInt(stimpEl.value, 10) || 10;
         try { localStorage.setItem('gm-stimp', String(state.stimp)); } catch (e) {}
+        persistGreenBrief();
         render();
         setStatus(`Putt preview: Stimpmeter ${state.stimp}`);
       });

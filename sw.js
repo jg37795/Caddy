@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.6.1'; // DETECTION UX: (1) smart area-aware pin cap replaces the hard 18m radius — greens extending past the cap no longer get sliced flat (James's razor-straight east edge); IoU unchanged on all 7 calibration sites; (2) loading card shows live stages: Reading elevation -> Mapping green shape -> Detecting green edges; (3) NOTHING guard: degenerate mask (<30 cells) renders an honest 'Couldn't map a green here' card pointing at Check location instead of an empty square
+const CACHE_VERSION = 'v1.7.0'; // PREP RESTRUCTURE (Grok R5, audited + wired by coordinator): course-search-first flow; per-hole SVG diagram (tee->green corridor, hazards projected, club-sequence segments); 'After landing' green-aware advice from the 3D green slope data (greenmap persists caddy:greenBrief:v1 via simPuttPath probes at front/middle/back); per-hole 3D Green launch; conditions collapsed by default; CaddyPrep bridge +clubSequence +hazard along/cross
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
