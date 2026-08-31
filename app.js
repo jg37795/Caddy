@@ -2657,11 +2657,16 @@
       els.newClubYards.value = '';
       renderClubs();
     });
-    els.manualClub.addEventListener('change', () => {
-      setSelectedClubId(els.manualClub.value);
-    });
-    // v1.7.1 (audit-follow): manualClub select removed from Prep — guard
-    // the listener so removing the element can't break Bag init.
+    // v1.7.2 (HOTFIX — James: "you broke some buttons"): the manualClub
+    // <select> was removed from Prep in v1.7.1, so this listener threw
+    // TypeError on null during boot — initClubsEvents died and every init
+    // step AFTER it (tabs, round events, stats, planner) never ran. That's
+    // the dead buttons + weird view. Guard it.
+    if (els.manualClub) {
+      els.manualClub.addEventListener('change', () => {
+        setSelectedClubId(els.manualClub.value);
+      });
+    }
   }
 
   // Birdie red / bogey blue — the same convention every premium golf app uses.
@@ -7069,6 +7074,7 @@ out geom;`;
   }
 
   function initLayerSeg() {
+    if (!els.layerSeg) return;   // v1.7.2: guard — smoke/edge DOMs may lack it
     const seg = els.layerSeg,
       thumb = els.segThumb,
       opts = [...seg.querySelectorAll('.seg-opt')];
@@ -7092,6 +7098,8 @@ out geom;`;
     opts.forEach((o) => o.addEventListener('click', () => select(o)));
     const saved = migrateLayer(state.prefs.mapLayer || 'satellite');
     const target = opts.find((o) => o.dataset.layer === saved) || opts[0];
+    // v1.7.2: opts is empty in a stubbed DOM — skip the rAF paint.
+    if (!opts.length || !target) return;
     requestAnimationFrame(() => {
       opts.forEach((o) => {
         o.classList.remove('active');

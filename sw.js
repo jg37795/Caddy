@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.7.1'; // PREP FIXES (James round): (1) search input no longer wiped below 3 chars — results collapse, text stays; (2) course distances in miles (was km); (3) honest mapping failures — unmapped course says so explicitly, network errors distinct, typed term kept for retry; (4) manual plays-like calculator REMOVED from Prep (studio covers it; initManualCalc guarded no-op)
+const CACHE_VERSION = 'v1.7.2'; // HOTFIX (James: 'you broke some buttons'): v1.7.1's calculator removal left an unguarded els.manualClub.addEventListener in initClubsEvents — TypeError on boot killed every init step AFTER it (tabs, round, stats, planner = dead buttons + weird view). Guarded; initLayerSeg also guarded; NEW tests/app_boot_smoke.js loads app.js against the real index.html and asserts boot completes — this class of bug can't ship silently again
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
