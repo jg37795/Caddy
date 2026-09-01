@@ -5484,17 +5484,26 @@
     const polyRough = [];
 
     const pushPolygon = (el, kind) => {
-      const ring = osmRing(el);
-      if (!ring || ring.length < 4) return;
-      // simplify to ≤14 points (20 for greens, which are small and
-      // detailed) so a full course of polygons stays well under the
-      // localStorage budget.
-      const simple = osmSimplifyRing(ring, 14);
-      if (kind === 'fairway') polyFairways.push(simple);
-      else if (kind === 'bunker') polyBunkers.push(simple);
-      else if (kind === 'water') polyWater.push(simple);
-      else if (kind === 'tee') polyTees.push(simple);
-      else if (kind === 'rough') polyRough.push(simple);
+      // v1.19.1 (James: "there's a gap in the water"): big water/fairway
+      // bodies are mapped as MULTIPOLYGON RELATIONS — several outer
+      // rings sharing edges. osmRing() returned only the FIRST outer
+      // member, so the body drew as fragments with a gap. Expand the
+      // relation into ALL outer rings; each draws as its own polygon
+      // and shared edges make them read as one continuous shape.
+      const rings = osmOuterRings(el);
+      if (!rings) return;
+      for (const ring of rings) {
+        if (!ring || ring.length < 4) continue;
+        // simplify to ≤14 points (20 for greens, which are small and
+        // detailed) so a full course of polygons stays well under the
+        // localStorage budget.
+        const simple = osmSimplifyRing(ring, 14);
+        if (kind === 'fairway') polyFairways.push(simple);
+        else if (kind === 'bunker') polyBunkers.push(simple);
+        else if (kind === 'water') polyWater.push(simple);
+        else if (kind === 'tee') polyTees.push(simple);
+        else if (kind === 'rough') polyRough.push(simple);
+      }
     };
 
     for (const el of elements) {
@@ -14473,6 +14482,23 @@ out geom;`;
       out.push(pts[Math.min(pts.length - 1, Math.round(k * step))]);
     }
     return out;
+  }
+
+  // v1.19.1 (James: "gap in the water"): multipolygon relations — ALL
+  // outer rings, each simplified separately. A simple way/closed path
+  // returns [ring]; a relation returns one ring per outer member;
+  // anything else null. (Inner rings/islands remain future work.)
+  function osmOuterRings(el) {
+    if (!el) return null;
+    if (el.type === 'relation' && Array.isArray(el.members)) {
+      const rings = el.members
+        .filter((m) => m.role === 'outer' && Array.isArray(m.geometry))
+        .map((m) => osmRing({ type: 'way', geometry: m.geometry }))
+        .filter((r) => r && r.length >= 3);
+      return rings.length ? rings : null;
+    }
+    const ring = osmRing(el);
+    return ring && ring.length >= 3 ? [ring] : null;
   }
 
   // Replaces the old osmFeaturePoint. Node -> its coords; area -> ring centroid;

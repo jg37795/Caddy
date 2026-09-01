@@ -52,8 +52,16 @@ window.fetch = async (url) => {
           geometry: ring(41.5931 - 40 * latPerYd, -93.8832, 0.0004, 0.0012) },
         { type: 'way', id: 12, tags: { golf: 'bunker' },
           geometry: ring(41.5931 - 200 * latPerYd, -93.88355, 0.00012, 0.00018) },
-        { type: 'way', id: 13, tags: { natural: 'water' },
-          geometry: ring(41.5931 - 260 * latPerYd, -93.8828, 0.0003, 0.0004) },
+        // v1.19.1: water as a MULTIPOLYGON RELATION with TWO outer
+        // rings sharing an edge — the old capture drew only the first
+        // (the "gap in the water").
+        { type: 'relation', id: 16, tags: { natural: 'water' },
+          members: [
+            { role: 'outer', geometry: ring(41.5931 - 260 * latPerYd,
+              -93.8828, 0.0003, 0.0004) },
+            { role: 'outer', geometry: ring(41.5931 - 260 * latPerYd,
+              -93.8825, 0.0003, 0.0004) },
+          ] },
         { type: 'way', id: 14, tags: { golf: 'tee' },
           geometry: ring(41.5931, -93.88325, 0.00015, 0.0002) },
         { type: 'way', id: 15, tags: { golf: 'green' },
@@ -120,10 +128,11 @@ setTimeout(() => {
             check('2. fairway polygon captured (≤14 pts)',
               Array.isArray(S.fairways) && S.fairways.length === 1 &&
               S.fairways[0].length <= 14);
-            check('3. bunker + water + tee polygons captured',
+            check('3. bunker + water + tee polygons captured (multipolygon water = both rings)',
               (S.bunkers || []).length === 1 &&
-              (S.water || []).length === 1 &&
-              (S.tees || []).length === 1);
+              (S.water || []).length === 2 &&
+              (S.tees || []).length === 1,
+              `water rings: ${(S.water || []).length}`);
             // 4-5: cartoon draws real shapes
             const svg = window.document.querySelector('.prep-holemap');
             check('4. cartoon draws real fairway polygon',
@@ -131,6 +140,15 @@ setTimeout(() => {
             check('5. cartoon draws real bunker shape, no bunker dot',
               !!svg.querySelector('path.prep-hm-shape.water') &&
               !svg.querySelector('ellipse.prep-hm-hz.bunker'));
+            // v1.19.1: shot segments are STRAIGHT lines (ball flight),
+            // not path-following curves.
+            const shots = [...svg.querySelectorAll('path.prep-hm-shot')];
+            check('5b. shot segments are straight (M x y L x y)',
+              shots.length >= 1 &&
+              shots.every((s) => {
+                const d = s.getAttribute('d') || '';
+                return /^M -?[\d.]+ -?[\d.]+ L -?[\d.]+ -?[\d.]+$/.test(d);
+              }), shots.length && shots[0].getAttribute('d'));
             // 6: sheet receives shapes
             let captured = null;
             window.PrepHoleSat.open = (o) => { captured = o; };

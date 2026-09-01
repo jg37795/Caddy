@@ -1270,15 +1270,8 @@
       // v1.15.3 (James): the dashed chord is gone. The tee→green
       // reference lives in the yardage label alone — the fairway shape
       // speaks for itself.
-      const pathDbetween = (yd0, yd1) => {
-        let d = '';
-        const steps = Math.max(2, Math.ceil((yd1 - yd0) / 15));
-        for (let k = 0; k <= steps; k++) {
-          const s = ptAlong(yd0 + (yd1 - yd0) * k / steps);
-          d += (k ? 'L' : 'M') + ` ${P.X(s.along).toFixed(1)} ${P.Y(s.cross).toFixed(1)}`;
-        }
-        return d;
-      };
+      // (pathDbetween removed in v1.19.1 — shot segments are STRAIGHT
+      // lines now, ball flight not ground-following.)
       // v1.15.3 (James: "I liked the segments you had before of each
       // club"): the segments are BACK — but now colored by the club's
       // Bag-tab category instead of a 4-color rotation, so Driver is
@@ -1292,8 +1285,14 @@
         const p1 = { x: P.X(s1.along), y: P.Y(s1.cross) };
         const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
         const hex = CAT_HEX[catOf(clubs[i])] || '#5ea8ff';
+        // v1.19.1 (James: "why does the eight iron follow the hole line?
+        // I'd be hitting it over the water"): a golf shot FLIES — draw
+        // the segment STRAIGHT from start to landing, not along the OSM
+        // hole way (that's the ground's centerline, not the flight).
+        // Landing POSITIONS still come from the path splits; the line
+        // between them is honest ball flight.
         parts.push(
-          `<path class="prep-hm-shot" d="${pathDbetween(d0, Math.min(d1, ydPerPath * effShare))}" stroke="${hex}"/>`
+          `<path class="prep-hm-shot" d="M ${p0.x.toFixed(1)} ${p0.y.toFixed(1)} L ${p1.x.toFixed(1)} ${p1.y.toFixed(1)}" stroke="${hex}"/>`
         );
         parts.push(
           `<circle class="prep-hm-land" cx="${p1.x.toFixed(1)}" cy="${p1.y.toFixed(1)}" r="3.6" fill="${hex}" stroke="rgba(10,14,12,0.9)" stroke-width="1.4"/>`
