@@ -1378,12 +1378,9 @@
         woods: '#e8a63c', irons: '#5ea8ff',
         wedges: '#b48bff', putter: '#3ec98a',
       };
-      // subtle tee→green dashed reference under the band
-      const c0 = P.toXY(h.pathPts[0]);
-      const cN = P.toXY(h.pathPts[h.pathPts.length - 1]);
-      parts.push(
-        `<line class="prep-hm-chord" x1="${P.X(c0.along).toFixed(1)}" y1="${P.Y(c0.cross).toFixed(1)}" x2="${P.X(cN.along).toFixed(1)}" y2="${P.Y(cN.cross).toFixed(1)}"/>`
-      );
+      // v1.15.3 (James): the dashed chord is gone. The tee→green
+      // reference lives in the yardage label alone — the fairway shape
+      // speaks for itself.
       const pathDbetween = (yd0, yd1) => {
         let d = '';
         const steps = Math.max(2, Math.ceil((yd1 - yd0) / 15));
@@ -1393,6 +1390,11 @@
         }
         return d;
       };
+      // v1.15.3 (James: "I liked the segments you had before of each
+      // club"): the segments are BACK — but now colored by the club's
+      // Bag-tab category instead of a 4-color rotation, so Driver is
+      // gold (wood), irons blue, wedges purple. Landing dots stay, in
+      // the same hue, as the segment's endpoint.
       for (let i = 0; i < n; i++) {
         const d0 = (ydPerPath * i) / n * (effYd / ydPerPath);
         const d1 = (ydPerPath * (i + 1)) / n * Math.min(1, effYd / ydPerPath);
@@ -1400,10 +1402,12 @@
         const p0 = { x: P.X(s0.along), y: P.Y(s0.cross) };
         const p1 = { x: P.X(s1.along), y: P.Y(s1.cross) };
         const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
-        // landing dot in the club's bag color + small label beside it
         const hex = CAT_HEX[catOf(clubs[i])] || '#5ea8ff';
         parts.push(
-          `<circle class="prep-hm-land" cx="${p1.x.toFixed(1)}" cy="${p1.y.toFixed(1)}" r="4" fill="${hex}" stroke="rgba(10,14,12,0.9)" stroke-width="1.4"/>`
+          `<path class="prep-hm-shot" d="${pathDbetween(d0, Math.min(d1, ydPerPath * effShare))}" stroke="${hex}"/>`
+        );
+        parts.push(
+          `<circle class="prep-hm-land" cx="${p1.x.toFixed(1)}" cy="${p1.y.toFixed(1)}" r="3.6" fill="${hex}" stroke="rgba(10,14,12,0.9)" stroke-width="1.4"/>`
         );
         parts.push(
           `<text class="prep-hm-club" x="${mx.toFixed(1)}" y="${(my + (i % 2 === 0 ? -8 : 14)).toFixed(1)}" text-anchor="middle" fill="${hex}">${escapeHtml(clubs[i])}</text>`
@@ -1492,13 +1496,32 @@
     return `<svg class="prep-holemap" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hole ${h.number} map, ${effYd} yards">${parts.join('')}</svg>`;
   }
 
+  // v1.15.3: bag-category helpers shared by the map AND the plan pills —
+  // one classification, one palette, everywhere.
+  function clubCatOf(name) {
+    const n2 = String(name || '').toLowerCase().trim();
+    const base = n2.replace(/\s*·.*$/, '').trim();
+    if (/putt/.test(n2)) return 'putter';
+    if (/wedge|°/.test(n2)) return 'wedges';
+    if (/^(pw|gw|sw|lw|aw)$/.test(base)) return 'wedges';
+    if (/driver|wood|hybrid|rescue|\bd?\d*h\b/.test(n2)) return 'woods';
+    return 'irons';
+  }
+  const CLUB_CAT_HEX = {
+    woods: '#e8a63c', irons: '#5ea8ff',
+    wedges: '#b48bff', putter: '#3ec98a',
+  };
+
   function seqChipsHtml(names) {
     if (!names.length) {
       return '<div class="prep-empty">Add carry distances in the Bag tab to get a shot sequence.</div>';
     }
-    return `<div class="prep-seq-row">${names.map((n, i) =>
-      `<span class="prep-seq-chip s${i % 4}"><i></i>${escapeHtml(n)}</span>`
-    ).join('')}</div>`;
+    // v1.15.3 (James): the pills color-coordinate with the map segments —
+    // same bag-category hue per club.
+    return `<div class="prep-seq-row">${names.map((n) => {
+      const hex = CLUB_CAT_HEX[clubCatOf(n)] || '#5ea8ff';
+      return `<span class="prep-seq-chip" style="color:${hex}"><i style="background:${hex}"></i>${escapeHtml(n)}</span>`;
+    }).join('')}</div>`;
   }
 
   function green3dButtonHtml(h) {
@@ -1635,6 +1658,24 @@
       const lines = [];
       let prev = 0;
       _planShotYds = [];
+      // v1.15.3 (James: "on my approach shot it doesn't tell me which
+      // side of the green to favor because of the slope"): the APPROACH
+      // row (last shot) gets a favor line from the green brief — the
+      // green's LiDAR feed (breakIn + means right) implies the HIGH side
+      // to favor. "Green feeds right → favor the left."
+      const briefApproach = readGreenBrief(h);
+      const approachFavor = (() => {
+        if (!briefApproach) return '';
+        const zones = Array.isArray(briefApproach.zones)
+          ? briefApproach.zones : [];
+        const z = zones.find((zz) => zz && zz.id === 'middle') ||
+          zones[0] || null;
+        const br = z && Number.isFinite(z.breakIn) ? z.breakIn : null;
+        if (br == null || Math.abs(br) < 1.5) return '';
+        const favor = br > 0 ? 'left' : 'right';
+        const inches = Math.round(Math.abs(br));
+        return `Favor the ${favor} side — the green feeds ${br > 0 ? 'right' : 'left'} ~${inches} in`;
+      })();
       seq.forEach((shotName, idx) => {
         const isLast = idx === seq.length - 1;
         const segYd = isLast ? effYd - prev : Math.min(
@@ -1646,7 +1687,8 @@
         const windTxt = Math.abs(delta) >= 2
           ? `plays ${fmt(calc.playsLikeYd)} (${delta > 0 ? '+' : ''}${delta})`
           : 'plays true';
-        const note = landingNotes(prev, toYd) ||
+        const note = (isLast && approachFavor) ||
+          landingNotes(prev, toYd) ||
           (isLast && g0.depth != null && g0.depth <= 14
             ? 'shallow green — favour the middle, distance control over line'
             : '');

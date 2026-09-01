@@ -135,14 +135,13 @@ setTimeout(() => {
     // 5) shot plan lines exist (buttons)
     check('7. shot plan rows rendered',
       body.querySelectorAll('.prep-plan-shot').length >= 2);
-    // v1.15.2: map redesign — landing dots in bag colors, no long shot
-    // lines, subtle dashed chord under the band.
+    // v1.15.3: segments are BACK (bag-colored), dashed chord is GONE.
     check('7b. landing dots rendered (one per shot)',
       svg.querySelectorAll('circle.prep-hm-land').length >= 2);
-    check('7c. no long colored shot lines (chords removed)',
-      !svg.querySelector('path.prep-hm-shot'));
-    check('7d. subtle dashed tee→green reference',
-      !!svg.querySelector('line.prep-hm-chord'));
+    check('7c. club segments restored, bag-colored',
+      svg.querySelectorAll('path.prep-hm-shot').length >= 2);
+    check('7d. dashed chord removed',
+      !svg.querySelector('line.prep-hm-chord'));
     // 6) All-holes button gone; header hole chip is the back nav
     check('8. All holes button removed',
       !body.querySelector('#prepBackHoles'));
