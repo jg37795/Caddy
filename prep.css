@@ -1327,7 +1327,18 @@ body.dark .prep-strat-advice {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  /* v1.15.1: rows are buttons now (tap → THE NUMBER) */
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
+.prep-plan-shot.chosen {
+  background: linear-gradient(135deg, rgba(24, 164, 91, 0.22), rgba(24, 164, 91, 0.10));
+  border-color: rgba(24, 164, 91, 0.55);
+}
+.prep-plan-shot.chosen .prep-plan-club { color: #b8ffd9; }
 .prep-plan-club {
   font-weight: 800;
   font-size: 14px;

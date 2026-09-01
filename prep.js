@@ -130,6 +130,12 @@
   let boundHole = null; // holeInfo object when a planner hole is open
                        // Prep ALWAYS works from a bound course hole — there
                        // is no manual-yardage fallback anymore.
+  // v1.15.1: which shot in the "How to play it" plan THE NUMBER reflects.
+  // -1 = the tee/full-hole number (previous behaviour). _planShotYds is
+  // rebuilt on every renderStrategy pass (plan geometry depends on the
+  // hole + bag).
+  let planShotIdx = -1;
+  let _planShotYds = [];
 
   const persist = () => {
     lsSave('cond', cond);
@@ -574,6 +580,21 @@
       recompute({ pulse: true });
     });
 
+    // v1.15.1 (tap-a-shot → number): tapping a "How to play it" row loads
+    // that shot into THE NUMBER (yardage, club context, aim). Tapping the
+    // already-selected shot deselects it — back to the tee/full number.
+    $('prepStratBody').addEventListener('click', (e) => {
+      const row = e.target.closest('.prep-plan-shot');
+      if (!row || row.dataset.shot == null) return;
+      const idx = parseInt(row.dataset.shot, 10);
+      planShotIdx = planShotIdx === idx ? -1 : idx;
+      haptic(6);
+      document.querySelectorAll('#prepStratBody .prep-plan-shot')
+        .forEach((el) => el.classList.toggle('chosen',
+          Number(el.dataset.shot) === planShotIdx));
+      recompute({ pulse: true });
+    });
+
     $('prepLiveBtn').addEventListener('click', () => {
       const w = api.weather();
       const e = api.elevation();
@@ -613,6 +634,13 @@
 
   function currentTargetYd() {
     if (!boundHole) return null;
+    // v1.15.1 (tap-a-shot → number): when a plan shot is selected, THE
+    // NUMBER solves for that shot's yardage (from the plan table), not
+    // the green target.
+    if (planShotIdx >= 0 && Array.isArray(_planShotYds) &&
+        _planShotYds[planShotIdx] != null) {
+      return _planShotYds[planShotIdx];
+    }
     const g = boundHole.green || {};
     const pt = shot.greenPoint === 'front' ? g.front
       : shot.greenPoint === 'back' ? g.back
@@ -1124,8 +1152,13 @@
       // clipped to a band. Scale = spanX / nudgeLen so the map stretches
       // with the tee nudge (tee is anchor at origin).
       const fitLen = Math.max(120, effYd);
+      // v1.15.1 (James: hole 3 dogleg still reversed): the v1.14.1 basis
+      // flip made +cross = golfer-RIGHT, but this mapping still SUBTRACTED
+      // cross (left-positive era) — net effect: right-of-play rendered
+      // ABOVE the line = dogleg left drawn as dogleg right, hazards
+      // mirrored. The viewer-behind-tee read needs golfer-right BELOW:
       const X = (along) => x0 + spanX * clamp(along / fitLen, -0.06, 1.04);
-      const Y = (cross) => yMid - clamp(cross / (fitLen * 0.22), -1.15, 1.15) * (H * 0.30);
+      const Y = (cross) => yMid + clamp(cross / (fitLen * 0.22), -1.15, 1.15) * (H * 0.30);
       P = { toXY, X, Y };
     }
 
@@ -1498,13 +1531,14 @@
       };
       const lines = [];
       let prev = 0;
+      _planShotYds = [];
       seq.forEach((shotName, idx) => {
         const isLast = idx === seq.length - 1;
         const segYd = isLast ? effYd - prev : Math.min(
           clubYardsFor(shotName) || effYd - prev, effYd - prev);
+        _planShotYds.push(Math.round(segYd));
         const toYd = prev + segYd;
         const calc = solve(segYd);
-        const rec = api.recommendClub(calc.playsLikeYd);
         const delta = Math.round(calc.playsLikeYd - segYd);
         const windTxt = Math.abs(delta) >= 2
           ? `plays ${fmt(calc.playsLikeYd)} (${delta > 0 ? '+' : ''}${delta})`
@@ -1513,12 +1547,18 @@
           (isLast && g0.depth != null && g0.depth <= 14
             ? 'shallow green — favour the middle, distance control over line'
             : '');
+        // v1.15.1 (James: "the number box is useless — let users tap the
+        // shots caddy recommends and that's what the number reflects"):
+        // each plan row is a BUTTON. Tapping it loads that shot into THE
+        // NUMBER block below — the big number becomes the carry for that
+        // shot's yardage, lie/shape/aim solve for it. The selected shot
+        // stays highlighted.
         lines.push(
-          `<div class="prep-plan-shot">` +
+          `<button type="button" class="prep-plan-shot${planShotIdx === idx ? ' chosen' : ''}" data-shot="${idx}">` +
           `<span class="prep-plan-club">${escapeHtml(clubShort(shotName))}</span>` +
           `<span class="prep-plan-num">${fmt(segYd)} yd</span>` +
           `<span class="prep-plan-sub">${windTxt}${note ? ' · ' + escapeHtml(note) : ''}</span>` +
-          `</div>`
+          `</button>`
         );
         prev = toYd;
       });

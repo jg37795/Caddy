@@ -106,10 +106,32 @@ setTimeout(() => {
     check('5. hazard text path-relative (left, ~11x yd)',
       /left,\s*~1\d\d yd/.test(hzText),
       (hzText.match(/Bunker[^\n]*?yd off the tee/) || [''])[0]);
-    // 4) bunker patch drawn LEFT of the path at its distance: parse the
-    //    bunker ellipse cx and the path point at the same y.
+    // 4) bunker patch drawn on the TEXT's side: the text says "left";
+    //    viewer-behind-tee means golfer-LEFT renders ABOVE the path.
+    //    Parse the bunker ellipse cy and the path y near its cx.
     const bz = svg.querySelector('ellipse.prep-hm-hz.bunker');
     check('6. bunker ellipse on the map', !!bz);
+    if (bz && fw) {
+      const d = fw.getAttribute('d');
+      const bx2 = parseFloat(bz.getAttribute('cx'));
+      const by2 = parseFloat(bz.getAttribute('cy'));
+      // path y at bx2: sample the path 'd' points, find the two
+      // surrounding x's, lerp y. Points are flat [x0,y0,x1,y1,…].
+      const nums = d.match(/-?[\d.]+/g).map(Number);
+      let pyAt = null;
+      for (let i = 0; i + 3 < nums.length; i += 2) {
+        const ax = nums[i], ay = nums[i + 1];
+        const bx3 = nums[i + 2], by3 = nums[i + 3];
+        if (bx2 >= Math.min(ax, bx3) && bx2 <= Math.max(ax, bx3)) {
+          const t = (bx2 - ax) / ((bx3 - ax) || 1e-9);
+          pyAt = ay + (by3 - ay) * t;
+          break;
+        }
+      }
+      check('6b. bunker drawn on the text side (left=above path)',
+        pyAt != null && by2 < pyAt,
+        `bunker y ${by2 && by2.toFixed(1)} vs path y ${pyAt && pyAt.toFixed(1)}`);
+    }
     // 5) shot plan lines exist
     check('7. shot plan rows rendered',
       body.querySelectorAll('.prep-plan-shot').length >= 2);
