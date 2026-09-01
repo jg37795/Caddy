@@ -1588,9 +1588,32 @@ button.prep-carry-tile:active { transform: scale(0.96); }
 
 /* v1.10.0 — real-shape mode: the fairway is a STROKED path now, and the
    green is the real OSM outline (path + interior tint). */
-/* v1.15.2: the fairway band is the HERO of the map — brighter fill, a
-   soft edge stroke, so the hole's true shape reads at a glance and the
-   landing dots sit clearly inside it. */
+/* v1.15.2: the fairway band is the HERO of the map — brighter fill */
+/* v1.19.0 — REAL OSM polygons (dark theme, muted fills matching the
+   app's palette): rough underlay, fairway shapes, water, tee boxes.
+   Draw order follows DOM order: rough < fairway < water < teebox. */
+.prep-holemap path.prep-hm-shape.rough {
+  fill: rgba(38, 66, 48, 0.35);
+  stroke: none;
+}
+.prep-holemap path.prep-hm-shape.fairway {
+  fill: rgba(64, 152, 99, 0.42);
+  stroke: rgba(122, 232, 160, 0.35);
+  stroke-width: 1;
+}
+.prep-holemap path.prep-hm-shape.water {
+  fill: rgba(58, 143, 212, 0.45);
+  stroke: rgba(126, 200, 255, 0.5);
+  stroke-width: 1;
+}
+.prep-holemap path.prep-hm-shape.teebox {
+  fill: rgba(130, 190, 140, 0.4);
+  stroke: rgba(200, 240, 205, 0.4);
+  stroke-width: 1;
+}
+/* v1.15.2 (continued): the band fallback keeps a soft edge stroke, so
+   the hole's true shape reads at a glance and the landing dots sit
+   clearly inside it. */
 .prep-holemap path.prep-hm-fairway {
   fill: none;
   stroke: rgba(46, 186, 108, 0.42);

@@ -124,6 +124,33 @@
     const dpr = window.devicePixelRatio || 1;
 
     // --- overlays from the STORED course (instant, offline-friendly) ---
+    // v1.19.0 (James: draw OSM's real shapes here too): fairway/rough/
+    // water/tee polygons first (under the ribbon), then the ribbon.
+    {
+      const S = hole.shapes || {};
+      const poly = (rings, style) => {
+        (Array.isArray(rings) ? rings : []).forEach((ring) => {
+          if (!Array.isArray(ring) || ring.length < 3) return;
+          L.polygon(ring.map((p) => [p.lat, p.lng]), style).addTo(map);
+        });
+      };
+      poly(S.rough, { color: 'rgba(0,0,0,0)', weight: 0,
+        fillColor: 'rgba(38,66,48,0.35)', fillOpacity: 1,
+        interactive: false });
+      poly(S.fairways, { color: 'rgba(122,232,160,0.35)', weight: 1,
+        fillColor: 'rgba(64,152,99,0.42)', fillOpacity: 1,
+        interactive: false });
+      poly(S.water, { color: 'rgba(126,200,255,0.5)', weight: 1,
+        fillColor: 'rgba(58,143,212,0.45)', fillOpacity: 1,
+        interactive: false });
+      poly(S.tees, { color: 'rgba(200,240,205,0.4)', weight: 1,
+        fillColor: 'rgba(130,190,140,0.4)', fillOpacity: 1,
+        interactive: false });
+      // real bunker outlines
+      poly(S.bunkers, { color: 'rgba(255,209,102,0.75)', weight: 1.2,
+        fillColor: 'rgba(196,138,18,0.55)', fillOpacity: 1,
+        interactive: false });
+    }
     // Fairway ribbon: the same simplified path the cartoon uses.
     // v1.17.0 premium pass: halo underlay (dark rim makes the green pop
     // off the satellite imagery, Play-tab style).

@@ -1075,7 +1075,40 @@
         const { along, cross } = P.toXY(ll);
         return (i ? 'L' : 'M') + ` ${P.X(along).toFixed(1)} ${P.Y(cross).toFixed(1)}`;
       }).join(' ');
-      parts.push(`<path class="prep-hm-fairway" d="${d}" fill="none" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`);
+      // v1.19.0 (James: "why not actually import their cartoons?"): draw
+      // OSM's REAL polygons — rough underlay, fairway shapes, water,
+      // bunkers, tee boxes — instead of only the stroked band. Polygons
+      // are pre-assigned per hole at import (h.shapes). The band stays
+      // beneath as a graceful fallback when a course has no fairway
+      // polygons mapped.
+      const shapePath = (rings, close = true) => rings.map((ring) => {
+        if (!Array.isArray(ring) || ring.length < 3) return '';
+        return ring.map((ll, i) => {
+          const { along, cross } = P.toXY(ll);
+          return (i ? 'L' : 'M') +
+            ` ${P.X(along).toFixed(1)} ${P.Y(cross).toFixed(1)}`;
+        }).join(' ') + (close ? ' Z' : '');
+      }).join(' ');
+      const S = h.shapes || {};
+      if (Array.isArray(S.rough) && S.rough.length) {
+        parts.push(
+          `<path class="prep-hm-shape rough" d="${shapePath(S.rough)}"/>`);
+      }
+      if (Array.isArray(S.fairways) && S.fairways.length) {
+        parts.push(
+          `<path class="prep-hm-shape fairway" d="${shapePath(S.fairways)}"/>`);
+      }
+      if (Array.isArray(S.water) && S.water.length) {
+        parts.push(
+          `<path class="prep-hm-shape water" d="${shapePath(S.water)}"/>`);
+      }
+      if (Array.isArray(S.tees) && S.tees.length) {
+        parts.push(
+          `<path class="prep-hm-shape teebox" d="${shapePath(S.tees)}"/>`);
+      }
+      if (!Array.isArray(S.fairways) || !S.fairways.length) {
+        parts.push(`<path class="prep-hm-fairway" d="${d}" fill="none" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`);
+      }
 
       // Green: the real outline when stored, else an ellipse at the end.
       if (Array.isArray(h.greenRingPts) && h.greenRingPts.length >= 3) {
@@ -1148,7 +1181,17 @@
         return best;
       };
       const haz = Array.isArray(h.hazards) ? h.hazards : [];
+      // v1.19.0: bunkers/water with REAL outlines (h.shapes) draw as
+      // their true shapes; the ellipse dots stay only for point-only
+      // hazards (no polygon mapped).
+      const shapes = h.shapes || {};
+      const bunkersDrawn = Array.isArray(shapes.bunkers) &&
+        shapes.bunkers.length;
+      const waterDrawn = Array.isArray(shapes.water) &&
+        shapes.water.length;
       for (const hz of haz) {
+        if (hz.type === 'bunker' && bunkersDrawn) continue;
+        if (hz.type === 'water' && waterDrawn) continue;
         let ax = null, ay = null;
         if (Number.isFinite(hz.lat) && Number.isFinite(hz.lng) && h.teeLatLng) {
           const pr = pathProject(hz);
@@ -1766,6 +1809,8 @@
           yards: boundHole.yards || null,
           pathPts: boundHole.pathPts || null,
           greenRingPts: boundHole.greenRingPts || null,
+          // v1.19.0: REAL OSM polygons (fairway/bunker/water/tee/rough).
+          shapes: boundHole.shapes || null,
           teePoint: boundHole.teeLatLng
             ? { lat: boundHole.teeLatLng.lat,
                 lng: boundHole.teeLatLng.lng } : null,

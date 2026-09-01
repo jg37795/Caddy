@@ -5472,6 +5472,30 @@
     const greens = [];
     const pins = [];
     const hazardEls = [];
+    // v1.19.0 (James, with the OSM-vs-Caddy screenshot): OSM already has
+    // the REAL shapes — fairways, bunkers, water, tee boxes. Our query
+    // fetches them and we threw them away, keeping only hole lines +
+    // hazard points. Capture the polygons now; the hole map draws the
+    // actual course instead of a band approximation.
+    const polyFairways = [];
+    const polyBunkers = [];
+    const polyWater = [];
+    const polyTees = [];
+    const polyRough = [];
+
+    const pushPolygon = (el, kind) => {
+      const ring = osmRing(el);
+      if (!ring || ring.length < 4) return;
+      // simplify to ≤14 points (20 for greens, which are small and
+      // detailed) so a full course of polygons stays well under the
+      // localStorage budget.
+      const simple = osmSimplifyRing(ring, 14);
+      if (kind === 'fairway') polyFairways.push(simple);
+      else if (kind === 'bunker') polyBunkers.push(simple);
+      else if (kind === 'water') polyWater.push(simple);
+      else if (kind === 'tee') polyTees.push(simple);
+      else if (kind === 'rough') polyRough.push(simple);
+    };
 
     for (const el of elements) {
       const t = el.tags || {};
@@ -5480,12 +5504,17 @@
         if (p) holeWays.push({ el, path: p });
       } else if (t.golf === 'tee') {
         teeEls.push(el);
+        if (osmRing(el)) pushPolygon(el, 'tee');
       } else if (t.golf === 'green') {
         const ring = osmRing(el);
         if (ring) greens.push({ ring, centroid: osmFeaturePoint(el) });
       } else if (t.golf === 'pin') {
         const p = osmFeaturePoint(el);
         if (p) pins.push(p);
+      } else if (t.golf === 'fairway') {
+        pushPolygon(el, 'fairway');
+      } else if (t.golf === 'rough') {
+        pushPolygon(el, 'rough');
       } else if (
         t.golf === 'bunker' ||
         t.golf === 'water_hazard' ||
@@ -5494,6 +5523,9 @@
       ) {
         const pt = osmFeaturePoint(el);
         if (pt) hazardEls.push({ pt, kind: t.golf === 'bunker' ? 'bunker' : 'water' });
+        // real outline too (bunkers are areas; natural=water may be an
+        // area or a mapped riverbank — osmRing returns null for lines)
+        pushPolygon(el, t.golf === 'bunker' ? 'bunker' : 'water');
       }
     }
 
@@ -5659,6 +5691,38 @@
       }
     }
 
+    // ---- Pass 3b (v1.19.0): assign REAL shape polygons to holes ----
+    // OSM doesn't tag fairways/bunkers/water with a hole number, so
+    // spatially assign: a polygon belongs to every hole whose path runs
+    // within CORRIDOR_YD of the polygon's centroid (a bunker shared by
+    // two holes draws on both — truthful, it IS in play from both).
+    const CORRIDOR_YD = 160;
+    const polyCentroid = (ring) => {
+      let lat = 0, lng = 0;
+      for (const p of ring) { lat += p.lat; lng += p.lng; }
+      return { lat: lat / ring.length, lng: lng / ring.length };
+    };
+    const shapesByHole = new Map();   // hole num -> {fairways, bunkers, water, tees, rough}
+    const assignShape = (ring, key) => {
+      if (!ring || ring.length < 3) return;
+      const c = polyCentroid(ring);
+      for (const r of byNum.values()) {
+        const dYd = osmDistPointToPathM(c, r.path) * OSM_YD_PER_M;
+        if (dYd > CORRIDOR_YD) continue;
+        if (!shapesByHole.has(r.num)) {
+          shapesByHole.set(r.num, {
+            fairways: [], bunkers: [], water: [], tees: [], rough: [],
+          });
+        }
+        shapesByHole.get(r.num)[key].push(ring);
+      }
+    };
+    for (const ring of polyFairways) assignShape(ring, 'fairways');
+    for (const ring of polyBunkers) assignShape(ring, 'bunkers');
+    for (const ring of polyWater) assignShape(ring, 'water');
+    for (const ring of polyTees) assignShape(ring, 'tees');
+    for (const ring of polyRough) assignShape(ring, 'rough');
+
     // ---- Pass 4: build the 18 holes. NEVER emit a key without a real value. ----
     const report = {
       holesMapped: 0,
@@ -5778,6 +5842,19 @@
         if (Object.keys(ty).length) h.teeYards = ty;
 
         if (r.hazards.length) h.hazards = r.hazards.slice(0, 12);
+
+        // v1.19.0: the hole's REAL course shapes (OSM polygons, simplified).
+        const shapes = shapesByHole.get(i);
+        if (shapes) {
+          const any = shapes.fairways.length || shapes.bunkers.length ||
+            shapes.water.length || shapes.tees.length || shapes.rough.length;
+          if (any) {
+            h.shapes = {};
+            for (const k of ['fairways', 'bunkers', 'water', 'tees', 'rough']) {
+              if (shapes[k].length) h.shapes[k] = shapes[k];
+            }
+          }
+        }
       }
 
       holes.push(h);
@@ -12869,6 +12946,19 @@ out geom;`;
         );
       });
 
+    // v1.19.0 (James approved): a saved course predating the real-shapes
+    // import can upgrade itself — 'Re-map' re-runs the OSM import and
+    // replaces the profile, preserving player-placed tees. Hidden for
+    // manual courses (nothing to re-map).
+    const remapBtn = document.getElementById('planRemapCourse');
+    if (remapBtn) {
+      const canRemap = course.source === 'openstreetmap' &&
+        Number.isFinite(Number(course.osmId));
+      remapBtn.hidden = !canRemap;
+      remapBtn.disabled = false;
+      remapBtn.textContent = 'Re-map course';
+    }
+
     // A stale detail card from a previous course selection is misleading —
     // collapse it whenever the course changes underneath.
     if (els.planDetailCard) els.planDetailCard.hidden = true;
@@ -13363,6 +13453,56 @@ out geom;`;
     els.planSaveCourseBtn?.addEventListener('click', savePlannerEphemeralCourse);
   }
 
+  // v1.19.0: Re-map a SAVED course — re-runs the OSM import with the
+  // current pipeline (real-shape polygons) and replaces the profile.
+  // Player-placed tees (teeSource=player) survive the replacement.
+  async function remapPlannerCourse() {
+    const course = getPlannerCourse();
+    if (!course || course.source !== 'openstreetmap' ||
+        !Number.isFinite(Number(course.osmId))) return;
+    const candidate = {
+      id: `osm:${course.osmType || 'W'}:${course.osmId}`,
+      osmType: course.osmType || 'way',
+      osmId: Number(course.osmId),
+      name: course.name,
+      lat: course.location ? course.location.lat : null,
+      lng: course.location ? course.location.lng : null,
+      source: 'openstreetmap',
+    };
+    const btn = document.getElementById('planRemapCourse');
+    if (btn) { btn.disabled = true; btn.textContent = 'Re-mapping…'; }
+    try {
+      const elements = await fetchAutoCourseScorecard(candidate);
+      const fresh = normalizeCourse(
+        buildAutoCourse(candidate, elements));
+      const mappedCount = (fresh.holes || []).filter(
+        (h) => h.source === 'openstreetmap').length;
+      if (!mappedCount) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Re-map course'; }
+        return;
+      }
+      // preserve player-placed tees per hole
+      (fresh.holes || []).forEach((h, i) => {
+        const old = (course.holes || [])[i];
+        if (old && old.teeSource === 'player' && old.teePoint) {
+          h.teePoint = old.teePoint;
+          h.teeSource = 'player';
+        }
+      });
+      fresh.osmType = candidate.osmType;
+      fresh.osmId = candidate.osmId;
+      saveCourseProfile(fresh);
+      const saved = getSavedCourseMatch(fresh.name);
+      if (saved) state.planCourseId = saved.id;
+      renderPlanner();
+      renderPlannerCourse();
+      haptic(10);
+    } catch (error) {
+      console.warn('Re-map failed:', error);
+      if (btn) { btn.disabled = false; btn.textContent = 'Re-map failed — tap to retry'; }
+    }
+  }
+
   function initPlanner() {
     if (!els.planCourseSelect) return;
     els.planCourseSelect.addEventListener('change', () => {
@@ -13370,6 +13510,8 @@ out geom;`;
       renderPlannerCourse();
       haptic(5);
     });
+    document.getElementById('planRemapCourse')?.addEventListener(
+      'click', remapPlannerCourse);
     wirePlannerCourseSearch();
     renderPlanner();
   }
@@ -14320,6 +14462,19 @@ out geom;`;
     return null;
   }
 
+  // v1.19.0: uniform resample of a closed ring to ≤ maxPts vertices
+  // (module-level so buildAutoCourse can budget polygon storage; the
+  // per-hole simplify inside the hole pass stays as-is).
+  function osmSimplifyRing(pts, maxPts) {
+    if (!Array.isArray(pts) || pts.length <= maxPts) return pts || null;
+    const out = [];
+    const step = pts.length / maxPts;
+    for (let k = 0; k < maxPts; k++) {
+      out.push(pts[Math.min(pts.length - 1, Math.round(k * step))]);
+    }
+    return out;
+  }
+
   // Replaces the old osmFeaturePoint. Node -> its coords; area -> ring centroid;
   // last resort -> element.center (only for nearby-course candidates).
   function osmFeaturePoint(element) {
@@ -14768,7 +14923,10 @@ out geom;`;
         hazards,
         green: planGreenInfo(hole),
         pathPts: Array.isArray(hole.pathPts) ? hole.pathPts : null,
-        greenRingPts: Array.isArray(hole.greenRingPts) ? hole.greenRingPts : null,
+        greenRingPts: Array.isArray(hole.greenRingPts)
+          ? hole.greenRingPts : null,
+        // v1.19.0: REAL course shapes for the hole map + satellite sheet.
+        shapes: hole.shapes || null,
         activeTeeSet: course.activeTeeSet || null,
         rememberedTee,
         teeSets,

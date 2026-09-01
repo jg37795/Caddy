@@ -1,0 +1,94 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-01T21:41:24Z",
+    "timestamp_areas_base": "2026-09-01T01:22:02Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "way",
+  "id": 762581353,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "9"
+  }
+},
+{
+  "type": "way",
+  "id": 762581354,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "8"
+  }
+},
+{
+  "type": "way",
+  "id": 762581355,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "7"
+  }
+},
+{
+  "type": "way",
+  "id": 762581356,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "6"
+  }
+},
+{
+  "type": "way",
+  "id": 762581357,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "5"
+  }
+},
+{
+  "type": "way",
+  "id": 762581358,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "4"
+  }
+},
+{
+  "type": "way",
+  "id": 762581359,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "3"
+  }
+},
+{
+  "type": "way",
+  "id": 762581360,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "2"
+  }
+},
+{
+  "type": "way",
+  "id": 762581361,
+  "tags": {
+    "golf": "hole",
+    "par": "3",
+    "ref": "1"
+  }
+}
+
+  ]
+}

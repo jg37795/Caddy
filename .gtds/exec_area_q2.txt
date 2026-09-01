@@ -1,0 +1,1 @@
+[out:json][timeout:25];area(3610543316)->.a;( way["golf"="hole"](area.a); );out tags;

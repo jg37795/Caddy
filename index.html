@@ -10,7 +10,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#07100b" id="themeColorMeta" />
-  <script>window.CADDY_VERSION = 'v1.18.1';</script>
+  <script>window.CADDY_VERSION = 'v1.19.0';</script>
   <meta name="color-scheme" content="light dark" />
   <meta name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -683,6 +683,10 @@
               <h3 id="planCourseName">Course</h3>
               <span class="chip" id="planCourseMeta">—</span>
             </div>
+            <!-- v1.19.0: upgrades a pre-shapes saved course to real OSM
+                 polygons (hidden for manual courses). -->
+            <button class="ghost-btn" id="planRemapCourse" type="button"
+              hidden style="margin: 0 0 8px; width: 100%">Re-map course</button>
             <div class="plan-hole-list" id="planHoleList"></div>
           </div>
 
