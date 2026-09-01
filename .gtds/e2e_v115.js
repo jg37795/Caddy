@@ -132,9 +132,17 @@ setTimeout(() => {
         pyAt != null && by2 < pyAt,
         `bunker y ${by2 && by2.toFixed(1)} vs path y ${pyAt && pyAt.toFixed(1)}`);
     }
-    // 5) shot plan lines exist
+    // 5) shot plan lines exist (buttons)
     check('7. shot plan rows rendered',
       body.querySelectorAll('.prep-plan-shot').length >= 2);
+    // v1.15.2: map redesign — landing dots in bag colors, no long shot
+    // lines, subtle dashed chord under the band.
+    check('7b. landing dots rendered (one per shot)',
+      svg.querySelectorAll('circle.prep-hm-land').length >= 2);
+    check('7c. no long colored shot lines (chords removed)',
+      !svg.querySelector('path.prep-hm-shot'));
+    check('7d. subtle dashed tee→green reference',
+      !!svg.querySelector('line.prep-hm-chord'));
     // 6) All-holes button gone; header hole chip is the back nav
     check('8. All holes button removed',
       !body.querySelector('#prepBackHoles'));

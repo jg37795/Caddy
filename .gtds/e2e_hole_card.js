@@ -1,6 +1,5 @@
-/* e2e_hole_card.js — jsdom E2E of the v1.9.0 single-card Prep flow.
-   Correct fixture: front/back as lat/lng POINTS (planGreenInfo measures
-   tee→point), realistic par-4 geometry. Run: node .gtds/e2e_hole_card.js */
+/* e2e_hole_card.js — v1.15.2 update: THE NUMBER box is gone; the number
+   lives inside tapped plan rows. Run: node .gtds/e2e_hole_card.js */
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -22,11 +21,11 @@ global.fetch = async () => { throw new Error('offline'); };
 window.fetch = global.fetch;
 if (!window.crypto) window.crypto = require('crypto').webcrypto;
 
+const latPerYd = 0.9 / 111320;
 const holes = [];
 for (let i = 1; i <= 18; i++) {
-  const mapped = i !== 7;                       // hole 7 = unmapped edge case
-  const yards = 340 + (i % 5) * 20;             // 340–420, par 4
-  const latPerYd = 0.9 / 111320;
+  const mapped = i !== 7;
+  const yards = 340 + (i % 5) * 20;
   holes.push({
     number: i, source: mapped ? 'openstreetmap' : 'manual',
     par: 4, yards: mapped ? yards : undefined,
@@ -41,7 +40,7 @@ for (let i = 1; i <= 18; i++) {
   });
 }
 window.localStorage.setItem('caddy:courseProfiles:v1', JSON.stringify([
-  { id: 'local:t', name: 'Flow Test GC', teeName: 'Blue',
+  { id: 'local:t', name: 'Card Test GC', teeName: 'Red',
     source: 'openstreetmap', location: { lat: 41.593, lng: -93.882 },
     updatedAt: Date.now(), holesCount: 18, holes }]));
 window.localStorage.setItem('caddy:onboarded', '1');
@@ -62,43 +61,39 @@ setTimeout(() => {
   rows[4].click();
   setTimeout(() => {
     const card = window.document.getElementById('prepStrategyCard');
-    const tiles = [...window.document.querySelectorAll('.prep-carry-tile')];
-    const numBlock = window.document.getElementById('prepNumBlock');
+    const body = window.document.getElementById('prepStratBody');
     check('A. single hole card visible', card && !card.hidden);
-    check('B. tiles are buttons with data-point',
-      tiles.length === 3 && tiles.every(t => t.tagName === 'BUTTON' && t.dataset.point),
-      tiles.map(t => t.tagName + ':' + t.dataset.point).join(','));
-    const mid = tiles.find(t => t.dataset.point === 'middle');
-    check('C. middle chosen by default', mid && mid.classList.contains('chosen'));
-    check('D. number visible', numBlock && !numBlock.hidden,
-      window.document.getElementById('prepRecMain').textContent);
+    check('B. THE NUMBER box is gone',
+      !window.document.getElementById('prepNumBlock') &&
+      !body.querySelector('.prep-num-inline'));
+    const planRows = [...body.querySelectorAll('button.prep-plan-shot')];
+    check('C. plan rows present', planRows.length >= 1);
 
-    // 2. tap FRONT tile → number re-solves
-    const front = tiles.find(t => t.dataset.point === 'front');
-    front.click();
+    // 2. tap first plan shot → number appears inside it
+    planRows[0].click();
     setTimeout(() => {
-      const tiles2 = [...window.document.querySelectorAll('.prep-carry-tile')];
-      const f2 = tiles2.find(t => t.dataset.point === 'front');
-      const m2 = tiles2.find(t => t.dataset.point === 'middle');
-      check('E. chosen moved to Front', f2 && f2.classList.contains('chosen') &&
-        !m2.classList.contains('chosen'));
-      const num1 = window.document.getElementById('prepRecMain').textContent;
-      check('F. number updated', /yd/.test(num1), num1);
+      const row0 = [...body.querySelectorAll('button.prep-plan-shot')][0];
+      const inline = row0 && row0.querySelector(':scope > .prep-num-inline');
+      check('D. number expanded inside tapped shot', !!inline);
+      const main = window.document.getElementById('prepRecMain');
+      check('E. number populated', !!main && /yd/.test(main.textContent),
+        main && main.textContent);
 
-      // 3. unmapped hole 7 → honest state
+      // 3. unmapped hole 7 → honest state, no number UI
       const rows2 = window.document.querySelectorAll('.plan-hole-row');
       rows2[6].click();
       setTimeout(() => {
-        const body = window.document.getElementById('prepStratBody').textContent || '';
-        const nb = window.document.getElementById('prepNumBlock');
-        check('G. unmapped hole honest message', body.includes("isn't mapped"));
-        check('H. number block hidden on unmapped', nb && nb.hidden);
+        const txt = window.document.getElementById('prepStratBody').textContent || '';
+        check('F. unmapped hole honest message', txt.includes("isn't mapped"));
+        check('G. no number UI on unmapped',
+          !window.document.querySelector('#prepStratBody .prep-num-inline'));
         // 4. back to mapped hole — flow still works
         const rows3 = window.document.querySelectorAll('.plan-hole-row');
         rows3[4].click();
         setTimeout(() => {
-          const nb2 = window.document.getElementById('prepNumBlock');
-          check('I. returning to mapped hole restores number', nb2 && !nb2.hidden);
+          const body3 = window.document.getElementById('prepStratBody');
+          check('H. returning to mapped hole restores plan rows',
+            body3.querySelectorAll('button.prep-plan-shot').length >= 1);
           console.log(fails ? `${fails} FAILURE(S)` : 'E2E HOLE CARD PASSED');
           process.exit(fails ? 1 : 0);
         }, 350);

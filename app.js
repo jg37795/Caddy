@@ -14692,11 +14692,19 @@ out geom;`;
       return planClubSequence(totalYd);
     },
     // v1.15.0 (shot plan): read-only bag snapshot so Prep can resolve a
-    // club name to its stock carry.
+    // club name to its stock carry + Bag-tab category color.
     clubs() {
-      return (state.clubs || []).map((c) => ({
-        name: c.name, yards: c.yards,
-      }));
+      return (state.clubs || []).map((c) => {
+        // Bag-tab category color: same classification bag.js uses
+        // (inferCat) — mirror it here so the hues always match.
+        const n2 = String(c.name || '').toLowerCase().trim();
+        let cat = 'irons';
+        if (/putt/.test(n2)) cat = 'putter';
+        else if (/wedge|°/.test(n2)) cat = 'wedges';
+        else if (/^(pw|gw|sw|lw|aw)$/.test(n2)) cat = 'wedges';
+        else if (/driver|wood|hybrid|rescue|\bd?\d*h\b/.test(n2)) cat = 'woods';
+        return { name: c.name, yards: c.yards, cat };
+      });
     },
     haptic,
   };

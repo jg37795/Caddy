@@ -303,44 +303,14 @@
         </div>
         <div id="prepStratBody"></div>
 
-        <!-- THE NUMBER — lives inside the hole card, under the target
-             tiles: tap a tile, the number re-solves in place. -->
-        <div class="prep-num-block" id="prepNumBlock">
-          <div class="prep-kicker">The number</div>
-          <div class="prep-rec-main" id="prepRecMain">—</div>
-          <div id="prepEffortWrap"><span class="prep-effort-tag" id="prepEffortTag"></span></div>
-          <div class="prep-reason" id="prepReason">Set a target to see the play.</div>
-          <div class="prep-adj-chips" id="prepAdjChips"></div>
-          <div class="prep-rec-grid" id="prepRecGrid">
-            <div class="prep-rec-cell"><i>Carry to</i><b id="cellCarry">—</b></div>
-            <div class="prep-rec-cell"><i>Release</i><b id="cellRelease">—</b></div>
-            <div class="prep-rec-cell"><i>Total</i><b id="cellTotal">—</b></div>
-          </div>
-          <div class="prep-aim-row" id="prepAimRow">
-            <span class="prep-aim-arrow" id="prepAimArrow">
-              <svg viewBox="0 0 24 24" id="prepAimSvg">
-                <path d="M12 3 L17 13 H14 V21 H10 V13 H7 Z" fill="#fff"/>
-              </svg>
-            </span>
-            <span id="prepAimText">—</span>
-          </div>
-
-          <!-- TWEAKS — the only two inputs that change the number -->
-          <div class="prep-tweaks">
-            <div class="prep-mini-label">Lie</div>
-            <div class="prep-lie-row" id="prepLieRow">
-              ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}
-            </div>
-            <div class="prep-mini-label" style="margin-top: 11px">Intended shape</div>
-            <div class="prep-shape-row" id="prepShapeRow">
-              ${SHAPES.map((s) => `
-                <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">
-                  <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>
-                  <b>${s.name}</b><span>${s.sub}</span>
-                </button>`).join('')}
-            </div>
-          </div>
-        </div>
+        <!-- v1.15.2: THE NUMBER block is REMOVED from the static skeleton.
+             The shot plan rows now carry their own expansion: tapping a
+             shot renders the full number (plays-like, wind chip,
+             carry/release/total, aim) INSIDE the plan row. The number's
+             live elements (prepRecMain/prepReason/prepAdjChips/
+             prepRecGrid/prepAimRow) are created by renderStrategy inside
+             the expanded row via ensureNumberElements(). The lie/shape
+             tweak rows move with it.
 
         <!-- CONDITIONS — collapsed inside the same card; same controls,
              no separate box. Live-weather sync lives at its top. -->
@@ -457,10 +427,14 @@
     const surf = SURFACES.find((s) => s.id === cond.surface) || SURFACES[1];
     $('prepSurfaceNote').textContent = surf.note;
 
-    [...$('prepLieRow').children].forEach((c) =>
+    // v1.15.2: lie/shape rows live inside the number UI (injected into the
+    // selected shot row) — they may not exist yet; paintControls guards.
+    const lieRow = $('prepLieRow');
+    if (lieRow) [...lieRow.children].forEach((c) =>
       c.classList.toggle('active', c.dataset.lie === shot.lie)
     );
-    [...$('prepShapeRow').children].forEach((c) =>
+    const shapeRow = $('prepShapeRow');
+    if (shapeRow) [...shapeRow.children].forEach((c) =>
       c.classList.toggle('active', c.dataset.shape === shot.shape)
     );
   }
@@ -556,42 +530,49 @@
     // in Check location (Move tee), persisted per hole; Prep picks it up
     // through holeInfo on the next bind.
 
-    $('prepLieRow').addEventListener('click', (e) => {
-      const chip = e.target.closest('.prep-lie-chip');
-      if (!chip) return;
-      shot.lie = chip.dataset.lie;
-      haptic(6);
-      persist();
-      [...$('prepLieRow').children].forEach((c) =>
-        c.classList.toggle('active', c === chip)
-      );
-      recompute({ pulse: true });
-    });
-
-    $('prepShapeRow').addEventListener('click', (e) => {
-      const chip = e.target.closest('.prep-shape-btn');
-      if (!chip) return;
-      shot.shape = chip.dataset.shape;
-      haptic(6);
-      persist();
-      [...$('prepShapeRow').children].forEach((c) =>
-        c.classList.toggle('active', c === chip)
-      );
-      recompute({ pulse: true });
+    // v1.15.2: lie/shape rows are created inside the expanded shot row
+    // (see ensureNumberElements), so their handlers are DELEGATED here —
+    // they survive the number UI moving between rows.
+    document.addEventListener('click', (e) => {
+      const lie = e.target.closest('.prep-lie-chip');
+      if (lie && lie.closest('#prepStratBody')) {
+        shot.lie = lie.dataset.lie;
+        haptic(6);
+        persist();
+        [...lie.parentNode.children].forEach((c) =>
+          c.classList.toggle('active', c === lie)
+        );
+        recompute({ pulse: true });
+        return;
+      }
+      const shape = e.target.closest('.prep-shape-btn');
+      if (shape && shape.closest('#prepStratBody')) {
+        shot.shape = shape.dataset.shape;
+        haptic(6);
+        persist();
+        [...shape.parentNode.children].forEach((c) =>
+          c.classList.toggle('active', c === shape)
+        );
+        recompute({ pulse: true });
+      }
     });
 
     // v1.15.1 (tap-a-shot → number): tapping a "How to play it" row loads
     // that shot into THE NUMBER (yardage, club context, aim). Tapping the
     // already-selected shot deselects it — back to the tee/full number.
+    // v1.15.2: the number UI itself is INJECTED into the selected row
+    // (ensureNumberElements) so it appears right where you tapped.
     $('prepStratBody').addEventListener('click', (e) => {
       const row = e.target.closest('.prep-plan-shot');
       if (!row || row.dataset.shot == null) return;
+      if (e.target.closest('.prep-num-inline')) return;   // tweaks/number taps
       const idx = parseInt(row.dataset.shot, 10);
       planShotIdx = planShotIdx === idx ? -1 : idx;
       haptic(6);
       document.querySelectorAll('#prepStratBody .prep-plan-shot')
         .forEach((el) => el.classList.toggle('chosen',
           Number(el.dataset.shot) === planShotIdx));
+      ensureNumberElements();
       recompute({ pulse: true });
     });
 
@@ -730,10 +711,84 @@
     return s;
   }
 
+  // v1.15.2 (James: "what if we get rid of the numbers box"): THE NUMBER
+  // is no longer a fixed block — renderStrategy injects it INSIDE the
+  // selected shot-plan row (expanded in place). This builds/moves the
+  // number's live elements into the expanded row so every existing
+  // $('prepRecMain')-style reference keeps working unchanged.
+  // v1.15.2: the number UI template — built as a FUNCTION so lie/shape
+  // active states reflect the CURRENT shot every injection (a const
+  // template literal froze them at load-time values).
+  function numberTemplateHtml() {
+    return `
+    <div class="prep-num-inline">
+      <div class="prep-rec-main" id="prepRecMain">—</div>
+      <div class="prep-reason" id="prepReason">Set a target to see the play.</div>
+      <div class="prep-adj-chips" id="prepAdjChips"></div>
+      <div class="prep-rec-grid" id="prepRecGrid">
+        <div class="prep-rec-cell"><i>Carry to</i><b id="cellCarry">—</b></div>
+        <div class="prep-rec-cell"><i>Release</i><b id="cellRelease">—</b></div>
+        <div class="prep-rec-cell"><i>Total</i><b id="cellTotal">—</b></div>
+      </div>
+      <div class="prep-aim-row" id="prepAimRow">
+        <span class="prep-aim-arrow" id="prepAimArrow">
+          <svg viewBox="0 0 24 24" id="prepAimSvg">
+            <path d="M12 3 L17 13 H14 V21 H10 V13 H7 Z" fill="#fff"/>
+          </svg>
+        </span>
+        <span id="prepAimText">—</span>
+      </div>
+      <div class="prep-tweaks">
+        <div class="prep-mini-label">Lie</div>
+        <div class="prep-lie-row" id="prepLieRow">
+          ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}
+        </div>
+        <div class="prep-mini-label" style="margin-top: 11px">Intended shape</div>
+        <div class="prep-shape-row" id="prepShapeRow">
+          ${SHAPES.map((s) => `
+            <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">
+              <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>
+              <b>${s.name}</b><span>${s.sub}</span>
+            </button>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+  function ensureNumberElements() {
+    // v1.15.2 (final): NO number UI unless a shot is selected — James
+    // wanted the numbers box GONE, and the plan rows already show every
+    // number at rest. Tapping a shot expands it right there.
+    if (planShotIdx < 0) {
+      document.querySelectorAll('#prepStratBody .prep-num-inline')
+        .forEach((el) => el.remove());
+      const fb = document.getElementById('prepNumberFallback');
+      if (fb) fb.remove();
+      return;
+    }
+    const rows = document.querySelectorAll('#prepStratBody .prep-plan-shot');
+    const host = rows[planShotIdx] || null;
+    if (!host) return;
+    let inline = host.querySelector(':scope > .prep-num-inline');
+    // remove any stray number UI from other rows (move, not duplicate)
+    document.querySelectorAll('#prepStratBody .prep-num-inline')
+      .forEach((el) => { if (el !== inline) el.remove(); });
+    const fb = document.getElementById('prepNumberFallback');
+    if (fb) fb.remove();
+    if (!inline) {
+      host.insertAdjacentHTML('beforeend', numberTemplateHtml());
+      // lie/shape handlers are DELEGATED on document (wireChrome) — no
+      // per-mount wiring needed; the rows just work when they appear.
+    }
+  }
+
   function renderRecommendation(calc, rec) {
     // v1.9.0: the number block lives INSIDE the hole card now — the sweep
     // animation targets it, not a separate card.
-    const card = $('prepNumBlock');
+    // v1.15.2: it lives inside the SELECTED SHOT ROW (tap-a-shot).
+    const card = document.querySelector(
+      '#prepStratBody .prep-plan-shot.chosen .prep-num-inline') ||
+      document.getElementById('prepNumberFallback');
+    if (!card) return;
 
     // Wind-relative tiles (head/tail + cross, relative to the shot line)
     const headTile = $('relHeadTile');
@@ -750,8 +805,13 @@
     // Headline
     const eff = effortInfo(rec.main);
     $('prepRecMain').textContent = `${fmt(calc.playsLikeYd)} yd → ${clubShort(rec.main)}`;
-    $('prepEffortTag').textContent = eff.tag;
-    $('prepEffortWrap').hidden = !eff.tag;
+    // v1.15.2: prepEffortTag/prepEffortWrap were dropped in the inline
+    // template — the effort tag now lives in the reason line instead.
+    if (eff.tag) {
+      const r2 = $('prepReason');
+      if (r2 && eff.tag && !r2.textContent.startsWith(eff.tag))
+        r2.textContent = `${eff.tag} — ${r2.textContent}`;
+    }
 
     // Reasoning sentence — every adjustment named, in golf language.
     const bits = [];
@@ -1292,6 +1352,47 @@
         return e;
       };
       const effShare = Math.min(1, effYd / ydPerPath);   // nudge shortens shots
+      // v1.15.2 (James, with screenshots): the map's hero is the FAIRWAY
+      // SHAPE — the long colored shot chords read as a straight tee→green
+      // line and buried the band. Redesign:
+      //   • fairway band = the hero (brighter, wider);
+      //   • NO long shot lines — one colored LANDING DOT per club at its
+      //     spot along the path, hue = the club's Bag-tab category color
+      //     (woods gold / irons blue / wedges purple / putter green);
+      //   • the tee→green reference is a SMALL dashed line under the
+      //     band (subtle, with the yardage label bottom-right).
+      const bagCats = (typeof api.clubs === 'function' ? api.clubs() : []);
+      const catOf = (name) => {
+        const n2 = String(name || '').toLowerCase().trim();
+        const base = n2.replace(/\s*·.*$/, '').trim();
+        const entry = bagCats.find((c) =>
+          String(c.name || '').toLowerCase().trim() === base);
+        if (entry && entry.cat) return entry.cat;
+        if (/putt/.test(n2)) return 'putter';
+        if (/wedge|°/.test(n2)) return 'wedges';
+        if (/^(pw|gw|sw|lw|aw)$/.test(base)) return 'wedges';
+        if (/driver|wood|hybrid|rescue|\bd?\d*h\b/.test(n2)) return 'woods';
+        return 'irons';
+      };
+      const CAT_HEX = {
+        woods: '#e8a63c', irons: '#5ea8ff',
+        wedges: '#b48bff', putter: '#3ec98a',
+      };
+      // subtle tee→green dashed reference under the band
+      const c0 = P.toXY(h.pathPts[0]);
+      const cN = P.toXY(h.pathPts[h.pathPts.length - 1]);
+      parts.push(
+        `<line class="prep-hm-chord" x1="${P.X(c0.along).toFixed(1)}" y1="${P.Y(c0.cross).toFixed(1)}" x2="${P.X(cN.along).toFixed(1)}" y2="${P.Y(cN.cross).toFixed(1)}"/>`
+      );
+      const pathDbetween = (yd0, yd1) => {
+        let d = '';
+        const steps = Math.max(2, Math.ceil((yd1 - yd0) / 15));
+        for (let k = 0; k <= steps; k++) {
+          const s = ptAlong(yd0 + (yd1 - yd0) * k / steps);
+          d += (k ? 'L' : 'M') + ` ${P.X(s.along).toFixed(1)} ${P.Y(s.cross).toFixed(1)}`;
+        }
+        return d;
+      };
       for (let i = 0; i < n; i++) {
         const d0 = (ydPerPath * i) / n * (effYd / ydPerPath);
         const d1 = (ydPerPath * (i + 1)) / n * Math.min(1, effYd / ydPerPath);
@@ -1299,11 +1400,13 @@
         const p0 = { x: P.X(s0.along), y: P.Y(s0.cross) };
         const p1 = { x: P.X(s1.along), y: P.Y(s1.cross) };
         const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+        // landing dot in the club's bag color + small label beside it
+        const hex = CAT_HEX[catOf(clubs[i])] || '#5ea8ff';
         parts.push(
-          `<path class="prep-hm-shot s${i % 4}" d="M ${p0.x.toFixed(1)} ${p0.y.toFixed(1)} L ${p1.x.toFixed(1)} ${p1.y.toFixed(1)}"/>`
+          `<circle class="prep-hm-land" cx="${p1.x.toFixed(1)}" cy="${p1.y.toFixed(1)}" r="4" fill="${hex}" stroke="rgba(10,14,12,0.9)" stroke-width="1.4"/>`
         );
         parts.push(
-          `<text class="prep-hm-club" x="${mx.toFixed(1)}" y="${(my + (i % 2 === 0 ? -8 : 14)).toFixed(1)}" text-anchor="middle">${escapeHtml(clubs[i])}</text>`
+          `<text class="prep-hm-club" x="${mx.toFixed(1)}" y="${(my + (i % 2 === 0 ? -8 : 14)).toFixed(1)}" text-anchor="middle" fill="${hex}">${escapeHtml(clubs[i])}</text>`
         );
       }
 
@@ -1716,21 +1819,26 @@
     recomputeNow({ pulse });
   }
   function recomputeNow({ pulse = false } = {}) {
+    // v1.15.2: the number UI lives inside the selected shot row. With no
+    // shot selected there IS no number UI (the plan rows show every
+    // number at rest) — writes are skipped.
+    ensureNumberElements();
     const yd = currentTargetYd();
-    if (!yd) {
-      // v1.9.0: honest no-target state inside the single hole card. The
-      // number block stays visible (same card) with a clear why + fix.
-      const num = $('prepNumBlock');
-      if (num) num.hidden = true;
+    const hasUI = planShotIdx >= 0 &&
+      document.getElementById('prepRecMain') != null;
+    if (!yd || !hasUI) {
       renderStrategy();
+      ensureNumberElements();
       return;
     }
-    const num = $('prepNumBlock');
-    if (num) num.hidden = false;
     const calc = solve(yd);
     const rec = api.recommendClub(calc.playsLikeYd);
-    renderRecommendation(calc, rec, pulse);
+    // v1.15.2: renderStrategy rebuilds prepStratBody (plan rows) — run it
+    // FIRST, then ensure the number UI exists in the chosen row, then
+    // write the values (renderRecommendation targets whatever ids exist).
     renderStrategy();
+    ensureNumberElements();
+    renderRecommendation(calc, rec, pulse);
   }
 
   /* ======================================================================

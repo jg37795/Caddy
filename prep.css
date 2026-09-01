@@ -1421,13 +1421,16 @@ button.prep-carry-tile:active { transform: scale(0.96); }
 
 /* v1.10.0 — real-shape mode: the fairway is a STROKED path now, and the
    green is the real OSM outline (path + interior tint). */
+/* v1.15.2: the fairway band is the HERO of the map — brighter fill, a
+   soft edge stroke, so the hole's true shape reads at a glance and the
+   landing dots sit clearly inside it. */
 .prep-holemap path.prep-hm-fairway {
   fill: none;
-  stroke: rgba(24, 164, 91, 0.30);
-  stroke-width: 26;
+  stroke: rgba(46, 186, 108, 0.42);
+  stroke-width: 30;
 }
 body.dark .prep-holemap path.prep-hm-fairway {
-  stroke: rgba(99, 232, 154, 0.22);
+  stroke: rgba(99, 232, 154, 0.34);
 }
 .prep-hm-greenfill {
   fill: rgba(24, 164, 91, 0.20);
@@ -1445,6 +1448,9 @@ body.dark .prep-hm-fairway {
 /* v1.12.0 — tee chips/nudge styles removed with the feature (tee editing
    lives in Check location). */
 
+/* v1.15.2 — map redesign: the fairway band is the hero; shot markers are
+   landing dots colored by the club's Bag-tab category; the tee→green
+   reference is a small dashed line under the band. */
 .prep-hm-shot {
   fill: none;
   stroke-width: 3.2;
@@ -1456,6 +1462,14 @@ body.dark .prep-hm-fairway {
 .prep-hm-shot.s1 { stroke: #7ec8ff; }
 .prep-hm-shot.s2 { stroke: #ffd166; }
 .prep-hm-shot.s3 { stroke: #ff9f7a; }
+
+.prep-hm-chord {
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 1.2;
+  stroke-dasharray: 3 5;
+}
+
+.prep-hm-land { opacity: 0.95; }
 
 .prep-hm-club {
   fill: var(--text);
