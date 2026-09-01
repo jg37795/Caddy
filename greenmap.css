@@ -98,7 +98,7 @@ body:not(.dark) #gm-stage {
 .gm-dock-group {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;               /* v1.14.0 (R6-D4): was 3px — breathing room */
   padding: 3px;
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.28);
@@ -106,8 +106,9 @@ body:not(.dark) #gm-stage {
 }
 
 .gm-dock-group .gm-btn {
-  padding: 7px 13px;
-  font-size: 12px;
+  padding: 6px 10px;      /* v1.14.0 (R6-D4): was 7px 13px — tighter row */
+  font-size: 11.5px;      /* v1.14.0 (R6-D4): was 12px */
+  min-height: 32px;       /* v1.14.0 (R6-D4): touch-target floor (iOS HIG) */
   border: none;
   border-radius: 11px;
   background: transparent;
@@ -134,8 +135,8 @@ body:not(.dark) #gm-stage {
 
 @media (max-width: 560px) {
   #gm-dock { gap: 9px; padding: 10px 10px; padding-bottom: calc(10px + var(--safe-bottom, 0px)); }
-  .gm-dock-row { gap: 8px; }
-  .gm-dock-group .gm-btn { padding: 7px 11px; font-size: 11.5px; }
+  .gm-dock-row { gap: 6px; }   /* v1.14.0 (R6-D4): was 8px — row gap 6px per brief */
+  .gm-dock-group .gm-btn { padding: 6px 10px; font-size: 11.5px; }   /* v1.14.0 (R6-D4): was 7px 11px — narrow screens keep the compact spec */
   #gm-legend { max-width: 200px !important; }
 }
 
@@ -526,7 +527,12 @@ body:not(.dark) #gm-stage {
   .gel-snaphandle-ring { animation: none; }
 }
 
-/* v1.4.0 dock: 3 contextual rows */
+/* v1.4.0 dock: 3 contextual rows.
+   v1.14.0 (R6-D4): the data row (Slope/Elev · Both/Shading/Arrows ·
+   Stylized/Photo) overflowed 390 px at 3x DPR and wrapped awkwardly.
+   One row, horizontally SCROLLABLE instead of wrapping; hidden scrollbar
+   (iOS), momentum scrolling. Groups keep the shared pill background so
+   Stylized/Photo reads as attached to the same instrument bar. */
 #gm-dock {
   flex-direction: column;
   gap: 6px;
@@ -539,12 +545,26 @@ body:not(.dark) #gm-stage {
   gap: 6px;
   width: 100%;
 }
-.gm-dock-row .gm-dock-group { flex: none; }
+/* v1.14.0 (R6-D4): the DATA row (row 2: Slope/Elev · Both/Shading/Arrows ·
+   Stylized/Photo) overflowed 390 px at 3x DPR and wrapped awkwardly.
+   ONE row, horizontally SCROLLABLE instead of wrapping — hidden scrollbar
+   (iOS), momentum scrolling. Rows 1/3 stay centred (they never overflow).
+   Groups keep the shared .gm-dock-group pill background, so Stylized/Photo
+   reads as attached to the same instrument bar. */
+#gm-data-row {
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;              /* Firefox */
+}
+#gm-data-row::-webkit-scrollbar { display: none; }   /* iOS Safari */
+.gm-dock-row .gm-dock-group { flex: none; }   /* groups never shrink mid-scroll */
 #gm-exag-wrap { display: inline-flex; align-items: center; }
 #gm-exag { width: 96px; }
 @media (max-width: 560px) {
   #gm-exag { width: 78px; }
-  .gm-dock-row { gap: 5px; }
+  .gm-dock-row { gap: 6px; }   /* v1.14.0 (R6-D4): row gap 6px on narrow */
 }
 
 /* v1.5.0 putt-read card — glass, right-centre, spring-in.

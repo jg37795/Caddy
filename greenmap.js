@@ -545,6 +545,22 @@
     return cam.dist + x * cam.fwd[0] + y * cam.fwd[1] + z * cam.fwd[2];
   };
 
+  // v1.14.0 (R6-D3): marker depth test with a zbuf-cell tolerance. Markers
+  // (tee flag, green disc) sit ON the surface; the coarse 3-px-per-cell
+  // depth buffer plus the 6%-of-distance eps reclassified them as buried
+  // at 1x exaggeration (pole test height ~1 m was below the terrain read
+  // at pitch 26°), so the flag/disc never drew while their labels did.
+  // The caller samples the depth buffer within a ±2-cell window and passes
+  // the NEAREST (minimum) rasterized depth; the marker still draws when
+  // that nearest surface depth would pass the plain eps test. Effect: a
+  // marker only disappears when terrain 2+ zbuf cells wide sits strictly
+  // in front of it — never from own-cell raster noise at its base.
+  GreenMapCore.markerDepthOK = function (depth, nearestZbuf, eps) {
+    if (!Number.isFinite(depth)) return false;
+    if (!Number.isFinite(nearestZbuf)) return true;   // nothing rasterized there
+    return depth <= nearestZbuf + eps;
+  };
+
   // Perspective projection of a target-relative point to screen px.
   // cam needs .f (focal px), .ox, .oy set by the renderer.
   GreenMapCore.projectPt = function (cam, x, y, z) {
@@ -797,6 +813,58 @@
     return [w, s, e, n];
   };
 
+  // v1.14.0 (R6-D2): oriented-corridor GEOMETRY mask. corridorBbox returns
+  // the axis-aligned envelope of the rotated tee→green rectangle — for a
+  // diagonal hole that envelope is nearly square again (521 m wide for a
+  // 388 m hole), and the USGS fetch of a square bbox gives a SQUARE mesh.
+  // The mesh IS the frame (the photo is just its texture), so the hole view
+  // must cut the mesh quads to the oriented rectangle the fetch intended:
+  // within halfLen (= half the tee→green span + marginM end margins) along
+  // the axis AND within halfWidth perpendicular. Interaction keeps the full
+  // square (ds.mask) — only the mesh shrinks. Half-width clamps to halfLen
+  // for very short holes, mirroring corridorBbox. No tee / degenerate axis
+  // → every valid cell (the square IS correct when there is nothing to aim
+  // along).
+  GreenMapCore.corridorMaskRect = function (eg, centerLL, greenLL, teeLL,
+                                            marginM = 30, halfWidthM = 50) {
+    const grid = eg.grid, W = eg.W, H = eg.H;
+    const m = new Uint8Array(W * H);
+    const valid = (i) => Number.isFinite(grid[i]) &&
+      (!eg.validMask || eg.validMask[i]);
+    if (!teeLL || !Number.isFinite(teeLL.lat) || !Number.isFinite(teeLL.lng)) {
+      for (let i = 0; i < m.length; i++) if (valid(i)) m[i] = 1;
+      return m;
+    }
+    const mLat = 110540;
+    const mLng = 111320 * Math.cos(centerLL[1] * Math.PI / 180);
+    const gx = (greenLL.lng - centerLL[0]) * mLng;
+    const gy = (greenLL.lat - centerLL[1]) * mLat;
+    const tx = (teeLL.lng - centerLL[0]) * mLng;
+    const ty = (teeLL.lat - centerLL[1]) * mLat;
+    const L = Math.hypot(gx - tx, gy - ty);
+    if (!(L > 1e-6)) {
+      for (let i = 0; i < m.length; i++) if (valid(i)) m[i] = 1;
+      return m;
+    }
+    const ux = (gx - tx) / L, uy = (gy - ty) / L;   // tee→green axis unit
+    const halfLen = L / 2 + marginM;
+    const hw = Math.min(halfWidthM, halfLen);
+    const cx = (gx + tx) / 2, cy = (gy + ty) / 2;   // rect centre (grid-local)
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (!valid(i)) continue;
+        // Cell centre in grid-local metres — the SAME convention as
+        // zoneMask/arrows: mx east, my north.
+        const mx = (x + 0.5 - W / 2) * eg.cellSizeM;
+        const my = (H / 2 - y - 0.5) * eg.cellSizeM;
+        const dx = mx - cx, dy = my - cy;
+        if (Math.abs(dx * ux + dy * uy) <= halfLen &&   // along-axis extent
+            Math.abs(dx * -uy + dy * ux) <= hw) m[i] = 1;  // perpendicular
+      }
+    return m;
+  };
+
   // Build the 3D mesh once per grid load / exaggeration change.
   // Quad (x,y) spans cells (x,y)..(x+1,y+1); kept only when all four cells
   // are inside the mask with finite heights. Vertex world coords:
@@ -1018,6 +1086,46 @@
       }
     }
     return stops[stops.length - 1][1];
+  };
+
+  // v1.14.0 (R6-D1): stylized-mode course-illustration palette for the hole
+  // corridor — extracted as a pure function so the verify harness
+  // (.gtds/r6_palette_check.js) can assert the art direction headlessly.
+  //   • FAIRWAY ribbon WIDER: within 20 m of the green zone (was 14) plus a
+  //     low-slope corridor out to 35 m (was 26) — a visible maintained lane.
+  //   • Contrast UP: rough base [96,116,92] vs fairway base [170,188,142] —
+  //     a clear step between maintained and unmaintained grass.
+  //   • Elevation banding ±10% (was ±7%): visible at 15x under glancing sun.
+  //   • Mottle COARSER + GREENER: hash sampled at (ix>>1, iy>>1) so blobs
+  //     cover 2x2 cells (per-cell noise shimmered into grey at 0.3–4 m/cell),
+  //     amplitude 0.10–0.16, GREEN channel modulated ~1.6x more than R/B —
+  //     vegetative variation, not grey noise.
+  // The green-zone slope ramp stays in buildHoleScene (untouched — it reads).
+  GreenMapCore.stylizedCourseColor = function (cellsToZone, slpPct,
+    zMid, lo, hi, ix, iy, cellSizeM) {
+    const cs = cellSizeM || 1;
+    const isFairway = cellsToZone <= Math.round(20 / cs) ||
+      (cellsToZone <= Math.round(35 / cs) && slpPct < 6);
+    const t = Math.max(-1, Math.min(1,
+      (zMid - (lo + hi) / 2) / Math.max(0.5, hi - lo)));
+    const band = 1 + t * 0.10;
+    if (isFairway) {
+      // Warm light green — clearly maintained corridor.
+      return [Math.round(170 * band),
+              Math.round(188 * band),
+              Math.round(142 * band)];
+    }
+    // Coarse deterministic mottle: same hash family as v1.13, sampled per
+    // 2x2 cell block so it never shimmers between frames.
+    const hash = (((ix >> 1) * 73856093) ^
+                  ((iy >> 1) * 19349663)) & 1023;
+    const blob = 0.90 + (hash / 1023) * 0.16;   // 0.90–1.06 (span 0.16)
+    const mottle = 1 + (blob - 1) * 0.50;       // R/B: ±8% band
+    const mottleG = 1 + (blob - 1) * 0.80;      // G: ±12.8% — greener, not grey
+    // Cool darker rough, green-led mottle.
+    return [Math.round(96 * band * mottle),
+            Math.round(116 * band * mottleG),
+            Math.round(92 * band * mottle)];
   };
 
   // Nice contour interval from the actual elevation range: range/10 snapped
@@ -1834,6 +1942,13 @@
         mesh: null, arrows: [],
         eg, zoneMask, spanM, centerLL: [(w + e) / 2, (s + n) / 2],
         gOff: [gOffX, gOffY],
+        // v1.14.0 (R6-D2): oriented GEOMETRY mask for the mesh — the hole
+        // view frames the mesh, and the fetch intent was the oriented
+        // tee→green rectangle, not its square envelope. ds.mask stays the
+        // full square for interaction (tap/pick/sample); ds.meshMask
+        // shrinks the mesh so fitHoleView frames the corridor itself.
+        meshMask: GreenMapCore.corridorMaskRect(eg, [(w + e) / 2, (s + n) / 2],
+          { lat: state.lat, lng: state.lng }, state.teeLL, 30, 50),
         failed: false, msg: ''
       };
       state.datasets.hole = ds;
@@ -2024,7 +2139,7 @@
         // built at exag A renders while walls/arrows sample exag B).
         ds.meshExag = state.v3.exag;
     ds.mesh = GreenMapCore.buildMesh3D(g, ds.eg.W, ds.eg.H,
-      ds.eg.cellSizeM, ds.mask, ds.elevRange, state.v3.exag, state.mode,
+      ds.eg.cellSizeM, ds.meshMask, ds.elevRange, state.v3.exag, state.mode,
       {
         smooth: true, ao: true, aoRadius: 4,
         elevColorFn: (t) => GreenMapCore.elevationColorRainbow(t),
@@ -2089,29 +2204,12 @@
           }
           const cells = dGreen[i];   // ~1 cell = cs metres
 
-          // FAIRWAY ribbon: within ~12 m of the green edge or a smooth
-          // corridor (low slope) close to it; ROUGH: everything else.
-          const isFairway = cells <= Math.round(14 / cs) ||
-            (cells <= Math.round(26 / cs) && slp < 6);
-          // Relative elevation banding (two gentle tones per class).
-          const t = Math.max(-1, Math.min(1,
-            (zMid - (lo + hi) / 2) / Math.max(0.5, hi - lo)));
-          const band = 1 + t * 0.07;
-          // Fine mottle in the rough: slope-driven, deterministic (hash of
-          // the cell index) so it never shimmers between frames.
-          const hash = ((ix * 73856093) ^ (iy * 19349663)) & 1023;
-          const mottle = isFairway ? 1 : 0.92 + (hash / 1023) * 0.13 +
-            Math.min(0.06, slp * 0.004);
-          if (isFairway) {
-            // Warm light green — clearly maintained corridor.
-            return [Math.round(158 * band * mottle),
-                    Math.round(176 * band * mottle),
-                    Math.round(134 * band * mottle)];
-          }
-          // Cool darker rough.
-          return [Math.round(106 * band * mottle),
-                  Math.round(126 * band * mottle),
-                  Math.round(100 * band * mottle)];
+          // v1.14.0 (R6-D1): the rough/fairway palette lives in the pure
+          // helper GreenMapCore.stylizedCourseColor (headless-testable via
+          // .gtds/r6_palette_check.js). The green-zone ramp above is
+          // untouched (it reads well).
+          return GreenMapCore.stylizedCourseColor(
+            cells, slp, zMid, lo, hi, ix, iy, cs);
         }
       });
     if (ds.mesh) ds.mesh.gridRef = state.meshGrid;
@@ -2668,6 +2766,11 @@
   // v1.1.4(hole-silhouette): true when no geometry was rasterized at the
   // pixel — set per frame next to dressingOcclusion.
   let dressingOffSurface = null;
+  // v1.14.0 (R6-D3): per-frame marker depth-visibility test (tee flag,
+  // green disc) with the ±2 zbuf-cell tolerance. Assigned by render3D next
+  // to dressingOcclusion; module-level so drawEdgeLabels (sibling scope)
+  // can depth-test the green disc with the same rule.
+  let markerVis = null;
 
   // Thin semi-transparent iso-lines at fixed elevation intervals
   // (marching-squares along the live grid), projected onto the surface.
@@ -2701,7 +2804,11 @@
     }
   }
 
-  function drawContours3D(cam, clipRing) {
+  // v1.14.0 (R6-D1): texMode passed in from the caller — contour strokes
+  // darken ~35% in STYLIZED mode only (RGB ×0.65, alpha 0.32→0.43): with no
+  // photo texture the contours are a major part of the illustration read.
+  // Photo mode keeps the original stroke exactly as before.
+  function drawContours3D(cam, clipRing, texMode) {
     const g = state.grid, M = state.mesh;
     if (!g || !M || !state.mask) return;
     const [lo, hi] = state.elevRange || [0, 1];
@@ -2713,7 +2820,9 @@
     if (!segs.length) return;
     ctx.lineCap = 'round';
     ctx.lineWidth = Math.max(0.7, (window.devicePixelRatio || 1) * 0.55);
-    ctx.strokeStyle = 'rgba(16,26,20,0.32)';
+    ctx.strokeStyle = texMode === 'stylized'
+      ? 'rgba(10,17,13,0.43)'         // v1.14.0 (R6-D1): ~35% darker ink
+      : 'rgba(16,26,20,0.32)';
     ctx.beginPath();
     for (const s of segs) {
       // v1.4.1: clip to the inset green polygon (midpoint test) — dashes
@@ -3179,6 +3288,28 @@
         let sx = 0, sy = 0;
         for (const p of bpts) { sx += p[0]; sy += p[1]; }
         greenM = [sx / bpts.length, sy / bpts.length];
+        // v1.14.0 (R6-D3): green disc marker. The 'Green' text label drew
+        // but the disc never existed on this path — add it, depth-tested
+        // with the same ±2 zbuf-cell tolerance as the tee flag so surface
+        // raster noise at 1x exaggeration can't reject it. Drawn in BOTH
+        // tex modes (nothing here reads texMode). Size ∝ depth with a
+        // visible floor, same pattern as the pin/ball markers.
+        const gp = GreenMapCore.projectPt(cam, greenM[0], greenM[1],
+          surfZ3(greenM[0], greenM[1]) + 0.05);
+        if (gp && markerVis(gp)) {
+          const gr = Math.max(5 * dpr, cam.f / gp[2] * 0.022);
+          ctx.beginPath();
+          ctx.ellipse(gp[0], gp[1], gr, gr * 0.45, 0, 0, 7);
+          ctx.fillStyle = 'rgba(24,32,27,0.35)';       // soft contact shadow
+          ctx.fill();
+          ctx.beginPath();
+          ctx.ellipse(gp[0], gp[1] - gr * 0.12, gr, gr * 0.45, 0, 0, 7);
+          ctx.fillStyle = 'rgba(122,200,128,0.95)';    // the green disc
+          ctx.fill();
+          ctx.lineWidth = Math.max(1, dpr * 0.9);
+          ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+          ctx.stroke();
+        }
         label('Green', greenM[0], greenM[1]);
       }
       // v1.1.4: tee→green aim line + yardage readout (only when a real tee
@@ -3585,6 +3716,35 @@
       if (gx < 0 || gy < 0 || gx >= zw || gy >= zh) return true;
       return !Number.isFinite(zbuf[gy * zw + gx]);
     };
+    // v1.14.0 (R6-D3): NEAREST rasterized depth within ±2 zbuf cells of the
+    // sample point. The zbuf's own-cell depth at a marker's base is often
+    // the far side of the coarse 3-px cell — sampling the window and taking
+    // the minimum gives the surface depth the eye actually sees at the
+    // marker's base. Pure logic in GreenMapCore.markerDepthOK (unit-tested).
+    const markerNearestDepth = (px, py) => {
+      const gx = Math.floor(px / ZCELL), gy = Math.floor(py / ZCELL);
+      let best = Infinity;
+      for (let dy = -2; dy <= 2; dy++)
+        for (let dx = -2; dx <= 2; dx++) {
+          const x = gx + dx, y = gy + dy;
+          if (x < 0 || y < 0 || x >= zw || y >= zh) continue;
+          const zb = zbuf[y * zw + x];
+          if (Number.isFinite(zb) && zb < best) best = zb;
+        }
+      return best;
+    };
+    // v1.14.0 (R6-D3): assign to the module slot (NOT a local const —
+    // drawEdgeLabels reads this from module scope to depth-test the green
+    // disc, exactly like dressingOcclusion).
+    markerVis = (p) => {
+      if (!p) return false;
+      if (!dressingOcclusion || !dressingOcclusion(p[0], p[1], p[2]))
+        return true;
+      // Occluded by the plain test — allow when the nearest surface within
+      // the tolerance window would still pass the eps test (own-cell noise).
+      return GreenMapCore.markerDepthOK(p[2], markerNearestDepth(p[0], p[1]),
+        eps);
+    };
 
     for (const q of vis) {
       ctx.beginPath();
@@ -3675,9 +3835,13 @@
     // floating dark dashes (the "teeth" misdiagnosed twice).
     if (state.polyLocal && state.polyLocal.length > 2) {
       const contourRing = growPolyLocal(state.polyLocal, -0.05);
-      drawContours3D(cam, contourRing);
+      drawContours3D(cam, contourRing,
+        state.viewMode === 'hole' && state.datasets.hole
+          ? state.datasets.hole.texMode : null);   // v1.14.0 (R6-D1): mode-aware ink
     } else {
-      drawContours3D(cam, null);
+      drawContours3D(cam, null,
+        state.viewMode === 'hole' && state.datasets.hole
+          ? state.datasets.hole.texMode : null);
     }
     // v1.4.1: the second drawGridFloor call HERE (after the surface) was
     // re-painting translucent floor lines OVER the near wall — the actual
@@ -3689,23 +3853,30 @@
     if (state.active === 'hole' && state.datasets.hole &&
         !state.datasets.hole.failed && state.datasets.hole.zoneMask) {
       // Tee marker: blue flag where a tee position is known.
-            // v-fix(tee-occ): depth-tested like all dressing — the pole used to be
-            // drawn unconditionally, floating in mid-air when the tee sat behind a
-            // hill. The flagpole is 3 m tall: test at ~1 m height on the pole.
-            if (state.teeLL) {
-              const dsH = state.datasets.hole;
-              const mLat = 110540;
-              const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
-              const tmx = (state.teeLL.lng - dsH.centerLL[0]) * mLng;
-              const tmy = (state.teeLL.lat - dsH.centerLL[1]) * mLat;
-              const base = GreenMapCore.projectPt(cam, tmx, tmy, surfZ3(tmx, tmy));
-              const top = GreenMapCore.projectPt(cam, tmx, tmy, surfZ3(tmx, tmy) + 3);
-              const pole = GreenMapCore.projectPt(cam, tmx, tmy,
-                surfZ3(tmx, tmy) + 1);
-              const occluded = pole && dressingOcclusion &&
-                dressingOcclusion(pole[0], pole[1], pole[2]);
-              if (base && top && !occluded) {
-                ctx.strokeStyle = '#ffffff';
+      // v1.14.0 (R6-D3): the flag WAS depth-rejected at 1x exaggeration —
+      // the pole test sampled ~1 m up, below the terrain read at pitch 26°
+      // (pole base z = terrain, 3 m pole × 1x = 3 m, camera at dist ~200
+      // sees the surface over the pole's lower half). Two-part fix:
+      // (a) test at 2.5 m on the pole — above the terrain read at the fit
+      //     camera's angle; and (b) even when the plain depth test fails,
+      //     keep the flag when the NEAREST surface depth within ±2 zbuf
+      //     cells would pass the eps test (own-cell raster noise, not real
+      //     occlusion). Real occlusion (a hill 2+ cells wide in front)
+      //     still hides the flag.
+      if (state.teeLL) {
+        const dsH = state.datasets.hole;
+        const mLat = 110540;
+        const mLng = 111320 * Math.cos(dsH.centerLL[1] * Math.PI / 180);
+        const tmx = (state.teeLL.lng - dsH.centerLL[0]) * mLng;
+        const tmy = (state.teeLL.lat - dsH.centerLL[1]) * mLat;
+        const zTee = surfZ3(tmx, tmy);
+        const base = GreenMapCore.projectPt(cam, tmx, tmy, zTee);
+        const top = GreenMapCore.projectPt(cam, tmx, tmy, zTee + 3);
+        const pole = GreenMapCore.projectPt(cam, tmx, tmy, zTee + 2.5);
+        // Mode-agnostic by construction: markers draw in BOTH tex modes
+        // (stylized + photo) — nothing in this block reads texMode.
+        if (base && top && markerVis(pole)) {
+          ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = Math.max(1.5, dpr * 1.0);
           ctx.beginPath(); ctx.moveTo(base[0], base[1]);
           ctx.lineTo(top[0], top[1]); ctx.stroke();

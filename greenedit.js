@@ -100,12 +100,18 @@
     //   Prep, Round and hole view all agree.
     let teeLL = boot.tee;          // current tee (null = not set)
     let teeMode = false;           // armed by "Move tee"
-    const teeMarker = teeLL ? L.marker([teeLL.lat, teeLL.lng], {
+    // v1.14.0 (R6-D5): teeMarker must be REBINDABLE. It was `const`, so
+    // setTee removed the old marker but the freshly created one was never
+    // tracked — every "Move tee" placement stacked ANOTHER marker on the
+    // map (only the last stayed draggable/removable). One factory, one
+    // `let` slot: boot and setTee are the only creators and both assign.
+    const makeTeeMarker = (ll) => L.marker([ll.lat, ll.lng], {
       draggable: true,
       icon: L.divIcon({ className: 'gel-tee',
         html: '<div class="gel-tee-dot"></div>',
         iconSize: [14, 14], iconAnchor: [7, 7] }),
-    }).addTo(map) : null;
+    });
+    let teeMarker = teeLL ? makeTeeMarker(teeLL).addTo(map) : null;
     const syncTeeUI = () => {
       const btn = sheet.querySelector('#gelTee');
       if (!btn) return;
@@ -121,23 +127,20 @@
     };
     const setTee = (ll) => {
       teeLL = ll;
-      if (teeMarker) { map.removeLayer(teeMarker); }
+      // v1.14.0 (R6-D5): ALWAYS tear down the tracked marker and rebuild
+      // exactly one. The old code removed `teeMarker` (never reassigned —
+      // const) and created an untracked replacement, so placements stacked.
+      if (teeMarker) { map.removeLayer(teeMarker); teeMarker = null; }
       if (ll) {
-        L.marker([ll.lat, ll.lng], {
-          draggable: true,
-          icon: L.divIcon({ className: 'gel-tee',
-            html: '<div class="gel-tee-dot"></div>',
-            iconSize: [14, 14], iconAnchor: [7, 7] }),
-        }).addTo(map)
-          .on('click', () => {
-            // Two-tap remove: tapping the tee itself while armed removes it.
-            if (teeMode) {
-              setTee(null);
-              teeMode = false;
-              syncTeeUI();
-            }
-          })
-          .on('dragend', (ev) => { teeLL = ev.target.getLatLng(); });
+        teeMarker = makeTeeMarker(ll).addTo(map);
+        teeMarker.on('click', () => {
+          // Two-tap remove: tapping the tee itself while armed removes it.
+          if (teeMode) {
+            setTee(null);
+            teeMode = false;
+            syncTeeUI();
+          }
+        }).on('dragend', (ev) => { teeLL = ev.target.getLatLng(); });
       }
       teeMode = false;
       syncTeeUI();
@@ -430,6 +433,27 @@
     if (!btn) return;
     btn.textContent = 'Check location';
     btn.addEventListener('click', openEditor);
+    // v1.14.0 (R6-D6): Prep's "Tee" shortcut (greenmap.html?…&armtee=1)
+    // landed on the 3D green with tee mode pre-armed but NO editor
+    // visible — armtee only set a flag that mattered once the sheet was
+    // already open, and nothing opened it. Now: ?armtee=1 opens the
+    // editor automatically, exactly once, then the param is stripped via
+    // history.replaceState so a manual refresh (or a later "Check
+    // location" tap) never re-triggers the auto-open. Double rAF = the
+    // sheet's map container is laid out before Leaflet measures it (same
+    // contract as the invalidateSize rAF in openEditor — a 0x0 container
+    // makes the map dead).
+    if (new URLSearchParams(location.search).get('armtee') === '1') {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        openEditor();
+        try {
+          const u = new URL(location.href);
+          u.searchParams.delete('armtee');
+          history.replaceState(null, '', u.toString());
+        } catch (e) { /* file:// or privacy mode — worst case a refresh
+                          re-arms the editor; harmless */ }
+      }));
+    }
   }
 
   if (document.readyState === 'loading') {
