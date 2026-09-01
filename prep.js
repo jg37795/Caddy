@@ -1077,7 +1077,14 @@
       const tgt = en(h.greenLatLng);
       const L = Math.hypot(tgt.x, tgt.y) || 1e-9;
       const ux = tgt.x / L, uy = tgt.y / L;        // unit toward green
-      const px = -uy, py = ux;                      // perpendicular (right)
+      // v1.14.1 (bunker mirror — James: "the bunker on this hole is on the
+      // left side?"): the old basis px=-uy, py=ux made cross POSITIVE to
+      // the golfer's LEFT, while the hazard text (planHazardsFor →
+      // crossTrackYd) is right-positive — the map drew every hazard
+      // mirrored across the fairway line. Now +cross = golfer's RIGHT in
+      // both, and P.Y maps right = DOWN the screen (viewer sees the hole
+      // as if standing on the tee).
+      const px = uy, py = -ux;                      // perpendicular (right)
       const toXY = (ll) => {
         const p = en(ll);
         const along = p.x * ux + p.y * uy;

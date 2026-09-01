@@ -1853,6 +1853,27 @@
         state.teeLL ? state.teeLL.lat : NaN,
         state.teeLL ? state.teeLL.lng : NaN,
         30, HOLE_SPAN_CAP_M);
+      // v1.14.1 (R6 follow-up — "hole view doesn't work"): corridorBbox
+      // now returns a RECTANGLE (v1.13) for the oriented corridor, but
+      // fetchElevGrid requests size=sz,sz — a SQUARE raster regardless of
+      // bbox aspect. A 100 m × 445 m bbox got 160×160 cells of ~0.62 m ×
+      // 2.8 m (anisotropic) while the pipeline averages both into one
+      // cellSizeM — every mesh position stretched ~4.5:1 on one axis (the
+      // ragged trapezoid strip in James's screenshot). Fix: square the
+      // envelope to its long side BEFORE the fetch (data cost identical to
+      // v1.12), and let ds.meshMask cut the visible shape back to the
+      // oriented corridor.
+      {
+        const [w0, s0, e0, n0] = bb;
+        const mLat0 = 110540;
+        const mLng0 = 111320 * Math.cos(((s0 + n0) / 2) * Math.PI / 180);
+        const wM = (e0 - w0) * mLng0, hM = (n0 - s0) * mLat0;
+        const side = Math.max(wM, hM);
+        const cx = (w0 + e0) / 2, cy = (s0 + n0) / 2;
+        const hx = side / 2 / mLng0, hy = side / 2 / mLat0;
+        bb[0] = cx - hx; bb[1] = cy - hy;
+        bb[2] = cx + hx; bb[3] = cy + hy;
+      }
       {
         const [w0, s0, e0, n0] = bb;
         const mLat0 = 110540;
@@ -2399,8 +2420,36 @@
     // don't turn into a thicket.
     const hs = Math.max(4.2, state.view.scale * 0.085);
     ctx.lineCap = 'round';
+    // v1.14.1 (R6 follow-up — 2D arrows "aren't clear which way they're
+    // pointing" + "can hang off the edge"): two changes.
+    // (1) DIRECTION: the head now dwarfs the shaft — bigger triangles,
+    //     and the shaft stops short of the tip so the triangle reads as
+    //     the arrow's end, not a line through it.
+    // (2) EDGES: arrows whose shaft crosses the boundary ring are dropped
+    //     (same inset-ring gate the 3D view uses) — no more half-arrows
+    //     hanging off the green outline.
+    if (state.polyLocal && state.polyLocal.length > 2) {
+      if (arrowRingSrc !== state.polyLocal || arrowRingInset !== 0.35) {
+        arrowRingSrc = state.polyLocal;
+        arrowRingInset = 0.35;
+        arrowRing = growPolyLocal(state.polyLocal, -0.35);
+      }
+      let inside = true;
+      for (let s2 = 0; s2 <= 4 && inside; s2++) {
+        const t = s2 / 4;
+        const px2 = (mx - dxm * lenM / 2) +
+          (mx + dxm * lenM / 2 - (mx - dxm * lenM / 2)) * t;
+        const py2 = (my - dym * lenM / 2) +
+          (my + dym * lenM / 2 - (my - dym * lenM / 2)) * t;
+        if (!GreenMapCore.pointInPoly(px2, py2, arrowRing)) inside = false;
+      }
+      if (!inside) return;
+    }
+    ctx.lineCap = 'round';
     // shaft: dark halo underneath, light stroke on top — legible on any fill
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+    const shaftEndX = x2 - Math.cos(ang) * hs * 0.6;
+    const shaftEndY = y2 - Math.sin(ang) * hs * 0.6;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(shaftEndX, shaftEndY);
     ctx.strokeStyle = 'rgba(12,18,15,0.9)';
     ctx.lineWidth = Math.max(4.0, state.view.scale * 0.065);
     ctx.stroke();
@@ -2416,8 +2465,8 @@
       ctx.lineTo(x2 - size * Math.cos(ang + 0.55), y2 - size * Math.sin(ang + 0.55));
       ctx.closePath(); ctx.fill();
     };
-    drawHead(hs * 1.45, 'rgba(12,18,15,0.9)');
-    drawHead(hs, 'rgba(246,251,247,0.98)');
+    drawHead(hs * 1.9, 'rgba(12,18,15,0.9)');
+    drawHead(hs * 1.35, 'rgba(246,251,247,0.98)');
   }
 
   function drawPin() {
@@ -2626,6 +2675,12 @@
           : null });
     if (state.mesh) state.mesh.gridRef = state.meshGrid;
     ds.mesh = state.mesh;
+    // v1.14.1 (R6 follow-up — exag drift on view switch): the green path
+    // never recorded meshExag, so the render3D drift check (which keys on
+    // it) never fired for the green dataset: after changing Exag in hole
+    // view, the 3D green kept its old-exag surface while arrows/skirt/
+    // floor (live surfZ3) moved — the "arrows and base at 1×" mismatch.
+    ds.meshExag = state.v3.exag;
     rebuildMeshArrows();
   }
 
@@ -2856,7 +2911,7 @@
   const RING_M = 0.25;
   // Cached boundary ring INSET 0.15 m for the arrow silhouette gate
   // (v-fix arrow-silhouette); re-derived whenever state.polyLocal changes.
-  let arrowRing = null, arrowRingSrc = null;
+  let arrowRing = null, arrowRingSrc = null, arrowRingInset = null;
 
   // v-fix(skirt-grow): offset the boundary polygon OUTWARD by h metres along
   // each vertex's outward bisector. Wall tops built on the grown ring always
@@ -3993,11 +4048,27 @@
       // rim). Gate every arrow sample (mid + both ends) inside the boundary
       // ring INSET 0.15 m so tips land on real drawn surface, never the
       // trimmed margin.
+      // v1.14.1 (R6 follow-up — "the arrows stick out"): the drawn arrow is
+      // a SCREEN-SPACE overlay (~len px plus a head 1.55× the half-shaft)
+      // around the projected centre, but the ring gate only tested the
+      // WORLD-space segment — a centre 1 px inside the rim still rendered
+      // half the overlay past the silhouette (top/left rim in James's
+      // screenshot). Fix: inset the gate ring by a world margin that
+      // GUARANTEES the whole overlay stays on the surface — the overlay
+      // half-length (len px) converted to world metres via the surface
+      // scale at the arrow's centre. The screen arrow length is len px =
+      // (worldLen px at that depth) → metres-per-px = 2·lenM / (2·len px)
+      // is unavailable pre-projection, so use the cam: world-per-px at
+      // depth d ≈ d / (f) (pinhole). inset = (len + head) px · d / f.
       if (state.active === 'green' &&
           state.polyLocal && state.polyLocal.length > 2) {
-        if (arrowRingSrc !== state.polyLocal) {
+        const mPerPx = pC[2] > 0 ? pC[2] / cam.f : 0;
+        const insetM = 0.15 + (len * 2.6) * mPerPx + 0.6;
+        if (arrowRingSrc !== state.polyLocal ||
+            arrowRingInset !== insetM) {
           arrowRingSrc = state.polyLocal;
-          arrowRing = growPolyLocal(state.polyLocal, -0.15);
+          arrowRingInset = insetM;
+          arrowRing = growPolyLocal(state.polyLocal, -insetM);
         }
         // v-fix(arrow-chord): 3-point tests (mid + ends) fail on CONCAVE
         // ring sections — a chord between two inside points exits the
@@ -4210,6 +4281,29 @@
     const dpr = window.devicePixelRatio || 1;
     const r2max = (26 * dpr) * (26 * dpr);
     let best = null, bd = r2max;
+    for (let y = 1; y < g.H - 1; y++)
+      for (let x = 1; x < g.W - 1; x++) {
+        const i = y * g.W + x;
+        if (!state.mask[i] || !state.field.valid[i]) continue;
+        const mx = (x + 0.5 - g.W / 2) * g.cellSizeM;
+        const my = (g.H / 2 - y - 0.5) * g.cellSizeM;
+        const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my));
+        if (!p) continue;
+        const d2 = (p[0] - px) * (p[0] - px) + (p[1] - py) * (p[1] - py);
+        if (d2 < bd) { bd = d2; best = { i, mx, my }; }
+      }
+    return best;
+  }
+
+  // v1.14.1 (drop-ball follow-up): unlimited-radius variant — nearest
+  // masked cell to the tap, however far. Used ONLY when the ball is
+  // armed and the strict 26 px pick missed, so an imprecise tap still
+  // lands the ball on the green honestly (nearest surface point).
+  function pickCell3DAny(px, py) {
+    const g = state.grid;
+    if (!g || !state.mesh) return null;
+    const cam = currentCam();
+    let best = null, bd = Infinity;
     for (let y = 1; y < g.H - 1; y++)
       for (let x = 1; x < g.W - 1; x++) {
         const i = y * g.W + x;
@@ -4468,11 +4562,29 @@
 
   // Tap: 1st tap sets ball (if putt mode armed), else shows tooltip anchor.
   // In 3D, a tap always shows the slope/fall tooltip at the picked quad.
+  // v1.14.1 (R6 follow-up — "drop ball doesn't work"): with the ball armed,
+  // a tap that missed every mesh cell (background/skirt, or tiny green at
+  // the default camera) returned SILENTLY — the button stayed armed, the
+  // status line still said "Tap a spot…", nothing ever happened. Now an
+  // armed tap retries with an UNLIMITED pick radius (nearest masked cell
+  // wins), and if there is genuinely nothing under the tap it says so.
   function handleTap([px, py], clientX = null, clientY = null) {
-    const s = (state.viewMode === '3d' || state.viewMode === 'hole')
+    let s = (state.viewMode === '3d' || state.viewMode === 'hole')
       ? pickCell3D(px, py)
       : sampleAtScreen(px, py);
-    if (!s || !state.mask[s.i] || !state.field.valid[s.i]) return;
+    if ((!s || !state.mask[s.i] || !state.field?.valid?.[s.i]) &&
+        armBallNext && state.active === 'green') {
+      s = pickCell3DAny(px, py);          // tolerant: nearest masked cell
+    }
+    if (!s || !state.mask[s.i] || !state.field.valid[s.i]) {
+      if (armBallNext) {
+        armBallNext = false;
+        setStatus('No green surface there — tap directly on the green, or tap Drop ball again to cancel');
+        if (window.__syncBallBtn) window.__syncBallBtn();
+        render();
+      }
+      return;
+    }
     if (state.viewMode === '3d' || state.viewMode === 'hole') {
       tip.innerHTML = tipReadout(s);
       tip.style.display = 'block';
@@ -4771,7 +4883,13 @@
         document.querySelectorAll('.gm-mode-btn').forEach(b =>
           b.classList.toggle('active', b === btn));
         buildHeatImage();
-        if (state.viewMode !== '2d') buildScene();   // recolor 3D/hole mesh too
+        // v1.14.1 (R6 follow-up — mode didn't carry 2D→3D): the old
+        // guard skipped buildScene in 2D, so the 3D/hole MESH still
+        // held the previous mode's vertex colours when you switched
+        // views — the ramp looked unchanged while the button stayed
+        // lit. Rebuild unconditionally: the green mesh rebuild is
+        // cheap, and hole view rebuilds from its own dataset anyway.
+        buildScene();
         updateLegend();
         render();
         setStatus(state.mode === 'elev' ? 'Elevation ramp — low=blue → high=red'

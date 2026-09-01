@@ -194,15 +194,21 @@ body:not(.dark) #gm-stage {
    clash with the bar on any width or font scale. Right-aligned under
    the bar (matches his 15:19 screenshot's intent, without the overlap). */
 #gm-legend {
-  border-radius: 18px;
-  padding: 9px 11px;
+  border-radius: 0;
+  padding: 5px 12px 6px;
   width: auto !important;
-  max-width: 240px !important;
+  max-width: none !important;
   top: auto !important;
   bottom: auto !important;
   left: auto !important;
   right: auto !important;
+  background: transparent;
+  border: none;
+  border-top: 0.5px solid var(--glass-stroke);
 }
+/* v1.14.1: the old floating legend box (h4 + stacked rows) is replaced by
+   the seamless inline row in greenmap.html; these legacy selectors remain
+   harmless (the inline styles carry the layout). */
 #gm-legend h4 { margin: 2px 0 6px; font-size: 10.5px; color: var(--muted); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 #gm-rampbar { height: 8px; border-radius: 4px; border: 0.5px solid var(--glass-stroke); }
 #gm-ramplabels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 3px; }
@@ -230,16 +236,14 @@ body:not(.dark) #gm-stage {
 #gm-tip .tip-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
 @media (max-width: 560px) {
-  #gm-legend {
-    width: 148px;
-    font-size: 12px;
-    padding: 8px 10px;
-    max-height: min(40vh, calc(100dvh - 150px));
-  }
-  #gm-legend h4 { font-size: 9.5px; margin: 1px 0 4px; }
-  #gm-rampbar { height: 7px; }
+  /* v1.14.1: legend is a seamless topbar row now (see greenmap.html) —
+     the old floating-box overrides here fought the new layout; strip
+     them so the inline flex row is the single source of truth. */
+  #gm-legend { width: auto; padding: 5px 12px 6px; max-height: none; }
+  #gm-legend h4 { font-size: 9.5px; margin: 0; }
+  #gm-rampbar { height: 6px; }
   #gm-ramplabels { font-size: 9px; letter-spacing: -0.02em; gap: 4px; }
-  #gm-legend .row { font-size: 10px; margin-top: 4px; }
+  #gm-legend .row { font-size: 10px; margin: 0; }
   #gm-legend .swatch { width: 10px; height: 10px; }
   .gm-select { max-width: 130px; }
 }
