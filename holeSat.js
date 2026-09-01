@@ -55,12 +55,20 @@
 
     sheet = document.createElement('div');
     sheet.id = 'prep-sat-sheet';
+    // v1.17.0 premium pass: a stats strip under the header (distance /
+    // par / elevation), halo ribbon, labeled landing dots, styled pills.
+    const meta = [];
+    if (hole.par) meta.push(`Par ${hole.par}`);
+    if (hole.yards) meta.push(`${Math.round(hole.yards)} yd`);
     sheet.innerHTML =
       '<div class="psh-head">' +
       '  <button class="psh-btn" id="pshDone">‹ Done</button>' +
       `  <div class="psh-title">Hole ${boot.hole || '—'} — satellite</div>` +
       '  <span class="psh-btn psh-spacer"></span>' +
       '</div>' +
+      (meta.length
+        ? `<div class="psh-stats">${meta.map((m) =>
+            `<span>${m}</span>`).join('<i>·</i>')}</div>` : '') +
       '<div class="psh-map" id="pshMap"></div>' +
       // v1.16.1: Move tee + 3D Green live HERE (James) — the card's
       // buttons are gone; the sheet is where hole actions happen.
@@ -89,11 +97,11 @@
     L.tileLayer(TILES, { attribution: '', maxZoom: 21 })
       .addTo(map);
 
-    // v1.16.1 (James: "the hole should be in the middle of the satellite
-    // view"): fit the bounds to the hole's own geometry — path + green +
-    // tee — with padding, so the hole sits centred at the widest zoom
-    // that contains it (not pinned to the green at z17).
-    {
+    // v1.16.1/v1.17.0 (James: "the hole doesn't center when I open that
+    // satellite view"): the original fit ran while the map container was
+    // still 0-height → fitBounds computed a degenerate viewport. Fit
+    // AFTER layout settles (double rAF), from the hole's full geometry.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       const b = L.latLngBounds([]);
       let any = false;
       (Array.isArray(hole.pathPts) ? hole.pathPts : []).forEach((p) => {
@@ -105,23 +113,31 @@
       if (hole.teePoint && Number.isFinite(hole.teePoint.lat)) {
         b.extend([hole.teePoint.lat, hole.teePoint.lng]); any = true;
       }
-      if (any) map.fitBounds(b, { padding: [48, 48] });
-    }
+      if (any) map.fitBounds(b, { padding: [56, 56] });
+      map.invalidateSize();
+    }));
 
     const dpr = window.devicePixelRatio || 1;
 
     // --- overlays from the STORED course (instant, offline-friendly) ---
     // Fairway ribbon: the same simplified path the cartoon uses.
+    // v1.17.0 premium pass: halo underlay (dark rim makes the green pop
+    // off the satellite imagery, Play-tab style).
     if (Array.isArray(hole.pathPts) && hole.pathPts.length >= 2) {
       const ll = hole.pathPts.map((p) => [p.lat, p.lng]);
-      // soft wide underlay
+      // dark halo rim
       L.polyline(ll, {
-        color: 'rgba(46, 186, 108, 0.30)', weight: 26,
+        color: 'rgba(6, 12, 9, 0.55)', weight: 30,
+        lineCap: 'round', lineJoin: 'round', interactive: false,
+      }).addTo(map);
+      // soft wide body
+      L.polyline(ll, {
+        color: 'rgba(46, 186, 108, 0.38)', weight: 26,
         lineCap: 'round', lineJoin: 'round', interactive: false,
       }).addTo(map);
       // crisp centre line
       L.polyline(ll, {
-        color: 'rgba(122, 232, 160, 0.85)', weight: 2.5,
+        color: 'rgba(140, 240, 175, 0.9)', weight: 2.5,
         interactive: false,
       }).addTo(map);
     }
@@ -173,16 +189,26 @@
     });
 
     // Landing dots from the live plan (bag-colored, matching the cartoon).
+    // v1.17.0 premium pass: white halo + a club/yardage label beside each
+    // dot so the map reads without the card.
     try {
       const plan = window.__prepPlanLanding || [];
       plan.forEach((p) => {
         if (!p || !Number.isFinite(p.lat)) return;
         L.circleMarker([p.lat, p.lng], {
-          radius: 6,
-          color: 'rgba(10,14,12,0.9)', weight: 1.6,
+          radius: 7,
+          color: 'rgba(255,255,255,0.95)', weight: 2,
           fillColor: p.hex || '#5ea8ff', fillOpacity: 0.95,
           interactive: false,
         }).addTo(map);
+        if (p.label) {
+          L.marker([p.lat, p.lng], {
+            interactive: false,
+            icon: L.divIcon({ className: 'psh-land-tag',
+              html: `<div class="psh-land-pill">${p.label}${p.yd ? ` · ${p.yd} yd` : ''}</div>`,
+              iconSize: null }),
+          }).addTo(map);
+        }
       });
     } catch (e) { /* plan dots are garnish */ }
 
@@ -219,11 +245,14 @@
       window.__pshMap = null;
     });
 
-    // v1.16.1 (James): Move tee → jumps into Check location with tee
-    // mode pre-armed (same deep-link Prep's old button used). 3D Green →
-    // re-launches greenmap.html from this hole's green + tee.
+    // v1.17.0 (James: "the buttons kick me out and break the prep tab"):
+    // the old handlers did location.replace on the PREP page (the sheet
+    // lives in index.html, not greenmap.html) — that reloaded Prep with
+    // green-tool params and broke the tab. Both actions now navigate to
+    // greenmap.html explicitly, carrying lat/lng/tee/course/hole, exactly
+    // like the old card buttons did (which worked).
     sheet.querySelector('#pshMoveTee').addEventListener('click', () => {
-      const u = new URLSearchParams(location.search);
+      const u = new URLSearchParams();
       if (boot.lat != null) {
         u.set('lat', boot.lat.toFixed(6));
         u.set('lng', boot.lng.toFixed(6));
@@ -232,11 +261,13 @@
         u.set('teelat', hole.teePoint.lat.toFixed(6));
         u.set('teelng', hole.teePoint.lng.toFixed(6));
       }
+      if (boot.courseId) u.set('course', boot.courseId);
+      if (boot.hole) u.set('hole', String(boot.hole));
       u.set('armtee', '1');
-      location.replace('?' + u.toString());
+      location.assign('greenmap.html?' + u.toString());
     });
     sheet.querySelector('#psh3d').addEventListener('click', () => {
-      const u = new URLSearchParams(location.search);
+      const u = new URLSearchParams();
       if (boot.lat != null) {
         u.set('lat', boot.lat.toFixed(6));
         u.set('lng', boot.lng.toFixed(6));
@@ -245,9 +276,10 @@
         u.set('teelat', hole.teePoint.lat.toFixed(6));
         u.set('teelng', hole.teePoint.lng.toFixed(6));
       }
-      // Full re-boot of the green tool at this hole (same contract as
-      // greenedit's "Load this green").
-      location.replace('?r=' + Date.now() + '&' + u.toString());
+      if (boot.courseId) u.set('course', boot.courseId);
+      if (boot.hole) u.set('hole', String(boot.hole));
+      u.set('view', '3d');
+      location.assign('greenmap.html?' + u.toString());
     });
   }
 

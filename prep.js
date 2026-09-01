@@ -312,73 +312,10 @@
              the expanded row via ensureNumberElements(). The lie/shape
              tweak rows move with it.
 
-        <!-- CONDITIONS — collapsed inside the same card; same controls,
-             no separate box. Live-weather sync lives at its top. -->
-        <details class="prep-cond-details" id="prepCondDetails">
-        <summary>
-        <div class="card-title">
-          <h2>Conditions</h2>
-          <span class="chip" id="prepCondChip">${compass16(cond.windFromDeg)} · ${Math.round(cond.windMph)} mph</span>
-        </div>
-        </summary>
-        <div class="prep-cond-body">
-        <button class="ghost-btn prep-live-btn" id="prepLiveBtn" type="button" style="margin-bottom: 12px">Use live weather & elevation</button>
-        <div class="prep-cond-grid">
-          <div class="prep-dial-wrap">${dialSvg()}</div>
-          <div class="prep-cond-side">
-            <div class="prep-wind-rel">
-              <div class="prep-rel-tile" id="relHeadTile"><i>Head / tail</i><b id="relHeadVal">—</b></div>
-              <div class="prep-rel-tile" id="relCrossTile"><i>Crosswind</i><b id="relCrossVal">—</b></div>
-            </div>
-            <div>
-              <div class="prep-slider-row">
-                <label for="prepWindRange">Wind speed</label>
-                <input type="range" class="prep-range" id="prepWindRange" min="0" max="30" step="1" value="${clamp(Math.round(cond.windMph), 0, 30)}"/>
-                <span class="prep-slider-val" id="prepWindVal">${Math.round(cond.windMph)} mph</span>
-              </div>
-              <div class="prep-preset-row" id="prepWindPresets">
-                ${WIND_PRESETS.map((p) => `<button type="button" class="prep-preset${Math.abs(cond.windMph - p.mph) <= 1 ? ' active' : ''}" data-mph="${p.mph}">${p.name}</button>`).join('')}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div style="margin-top: 10px">
-          <div class="prep-slider-row">
-            <label for="prepTempRange">Temperature</label>
-            <input type="range" class="prep-range" id="prepTempRange" min="30" max="110" step="1" value="${clamp(Math.round(cond.tempF), 30, 110)}"/>
-            <span class="prep-slider-val" id="prepTempVal">${Math.round(cond.tempF)}°F</span>
-          </div>
-        </div>
-
-        <div class="prep-cond-line section-gap" style="margin-top: 12px">
-          <label>Course altitude</label>
-          <div class="prep-stepper">
-            <button type="button" class="prep-step-btn" data-step="alt" data-dir="-1">−</button>
-            <span class="prep-step-val" id="prepAltVal">${fmt(cond.altFt)}<small>feet</small></span>
-            <button type="button" class="prep-step-btn" data-step="alt" data-dir="1">+</button>
-          </div>
-        </div>
-
-        <div class="prep-cond-line" style="margin-top: 10px">
-          <label>Green vs ball</label>
-          <div class="prep-stepper">
-            <button type="button" class="prep-step-btn" data-step="elev" data-dir="-1">−</button>
-            <span class="prep-step-val" id="prepElevVal">${sgn(cond.elevFt, 0)}<small>feet</small></span>
-            <button type="button" class="prep-step-btn" data-step="elev" data-dir="1">+</button>
-          </div>
-        </div>
-
-        <div class="section-gap" style="margin-top: 13px">
-          <div class="prep-mini-label">Ground</div>
-          <div class="prep-seg" id="prepSurfaceSeg" style="--n:${SURFACES.length}">
-            <span class="prep-seg-thumb"></span>
-            ${SURFACES.map((s) => `<button type="button" class="prep-seg-opt" data-surface="${s.id}">${s.name}</button>`).join('')}
-          </div>
-          <div class="prep-surface-note" id="prepSurfaceNote"></div>
-        </div>
-        </div>
-        </details>
+        <!-- v1.17.0 (James, discussed): the CONDITIONS box is REMOVED —
+             Prep is course prep (yardage + elevation + slope, which
+             don't change overnight); solves run at neutral conditions.
+             Live weather belongs to Play on the day. -->
       </div>
     `;
   }
@@ -404,31 +341,8 @@
   }
 
   function paintControls() {
-    paintDial();
-    $('prepCondChip').textContent = `${compass16(cond.windFromDeg)} · ${Math.round(cond.windMph)} mph`;
-
-    const wr = $('prepWindRange');
-    wr.value = clamp(Math.round(cond.windMph), 0, 30);
-    setSliderFill(wr);
-    $('prepWindVal').textContent = `${Math.round(cond.windMph)} mph`;
-    [...$('prepWindPresets').children].forEach((b) =>
-      b.classList.toggle('active', Math.abs(cond.windMph - Number(b.dataset.mph)) <= 1)
-    );
-
-    const tr = $('prepTempRange');
-    tr.value = clamp(Math.round(cond.tempF), 30, 110);
-    setSliderFill(tr);
-    $('prepTempVal').textContent = `${Math.round(cond.tempF)}°F`;
-
-    $('prepAltVal').innerHTML = `${fmt(cond.altFt, 0)}<small>feet</small>`;
-    $('prepElevVal').innerHTML = `${sgn(cond.elevFt, 0)}<small>feet</small>`;
-
-    paintSeg('prepSurfaceSeg', 'surface', cond.surface);
-    const surf = SURFACES.find((s) => s.id === cond.surface) || SURFACES[1];
-    $('prepSurfaceNote').textContent = surf.note;
-
-    // v1.15.2: lie/shape rows live inside the number UI (injected into the
-    // selected shot row) — they may not exist yet; paintControls guards.
+    // v1.17.0: the Conditions box is gone — only the lie/shape rows
+    // (inside the expanded shot) still paint here. Guards included.
     const lieRow = $('prepLieRow');
     if (lieRow) [...lieRow.children].forEach((c) =>
       c.classList.toggle('active', c.dataset.lie === shot.lie)
@@ -440,76 +354,22 @@
   }
 
   function paintTarget() {
-    // v1.9.0: ONE hole card. The carry tiles in the brief ARE the target
-    // picker; the number block lives in the same card. No separate boxes.
-    const condCard = $('prepCondDetails');
+    // v1.17.0: the Conditions card is gone; the hole card visibility is
+    // the whole story.
+    const card = $('prepStrategyCard');
     if (!boundHole) {
-      const card = $('prepStrategyCard');
       if (card) card.hidden = true;
-      if (condCard) condCard.closest('.card').hidden = true;
       syncPrepChrome();
       return;
     }
-    if (condCard) condCard.closest('.card').hidden = false;
+    if (card) card.hidden = false;
     syncPrepChrome();
   }
 
   function wireControls() {
-    wireDial();
-
-    const onSlider = (el, fn) => {
-      el.addEventListener('input', () => {
-        setSliderFill(el);
-        fn(Number(el.value));
-      });
-      el.addEventListener('change', () => haptic(5));
-    };
-    onSlider($('prepWindRange'), (v) => {
-      cond.windMph = v;
-      persist();
-      paintDial();
-      syncPresetChips();
-      recompute({ pulse: false });
-    });
-    onSlider($('prepTempRange'), (v) => {
-      cond.tempF = v;
-      persist();
-      recompute({ pulse: false });
-    });
-
-    $('prepWindPresets').addEventListener('click', (e) => {
-      const btn = e.target.closest('.prep-preset');
-      if (!btn) return;
-      cond.windMph = Number(btn.dataset.mph);
-      haptic(5);
-      persist();
-      paintControls();
-      recompute({ pulse: true });
-    });
-
-    studio.querySelectorAll('.prep-step-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const dir = Number(btn.dataset.dir);
-        const kind = btn.dataset.step;
-        if (kind === 'alt') cond.altFt = clamp(cond.altFt + dir * 250, 0, 12000);
-        if (kind === 'elev') cond.elevFt = clamp(cond.elevFt + dir * 5, -200, 200);
-        haptic(4);
-        persist();
-        paintControls();
-        paintTarget();
-        recompute({ pulse: true });
-      });
-    });
-
-    $('prepSurfaceSeg').addEventListener('click', (e) => {
-      const opt = e.target.closest('.prep-seg-opt');
-      if (!opt) return;
-      cond.surface = opt.dataset.surface;
-      haptic(6);
-      persist();
-      paintControls();
-      recompute({ pulse: true });
-    });
+    // v1.17.0: the Conditions box is gone — no dial, sliders, presets,
+    // surface seg, or live-weather sync to wire. Only the delegated
+    // lie/shape/plan-row handlers (below) remain.
 
     // v1.9.0: the carry tiles in the hole brief ARE the target picker —
     // tap Front/Middle/Back on a tile, the number re-solves in place.
@@ -525,6 +385,7 @@
       recompute({ pulse: true });
       return;
     });
+    void wireControls;
 
     // v1.12.0: the tee chips/nudge handlers are gone — tee editing lives
     // in Check location (Move tee), persisted per hole; Prep picks it up
@@ -575,35 +436,6 @@
       ensureNumberElements();
       recompute({ pulse: true });
     });
-
-    $('prepLiveBtn').addEventListener('click', () => {
-      const w = api.weather();
-      const e = api.elevation();
-      if (w && Number.isFinite(w.tempF)) cond.tempF = Math.round(clamp(w.tempF, 30, 110));
-      if (w && Number.isFinite(w.windMph)) cond.windMph = Math.round(clamp(w.windMph, 0, 30));
-      if (w && Number.isFinite(w.windFromDeg)) cond.windFromDeg = Math.round(norm360(w.windFromDeg));
-      if (e) {
-        const mid = (num(e.userFt) + num(e.targetFt)) / 2;
-        if (mid > 0) cond.altFt = Math.round(clamp(mid, 0, 12000));
-        cond.elevFt = Math.round(clamp(num(e.targetFt) - num(e.userFt), -200, 200));
-      }
-      haptic(9);
-      persist();
-      paintControls();
-      paintTarget();
-      recompute({ pulse: true });
-      const btn = $('prepLiveBtn');
-      btn.textContent = '✓ Live conditions loaded';
-      setTimeout(() => {
-        btn.textContent = 'Use live weather & elevation';
-      }, 1600);
-    });
-  }
-
-  function syncPresetChips() {
-    [...$('prepWindPresets').children].forEach((b) =>
-      b.classList.toggle('active', Math.abs(cond.windMph - Number(b.dataset.mph)) <= 1)
-    );
   }
 
   /* ======================================================================
@@ -643,32 +475,39 @@
   // misses and recomputes). LRU 64.
   const _solveMemo = new Map();   // key -> result (LRU, oldest evicted)
   function solve(yd) {
-    const w = api.weather();
+    // v1.17.0 (James, discussed: "get rid of the conditions box fully…
+    // I'll be using it to get ready for a course I'm playing the next
+    // day"): Prep solves at NEUTRAL conditions — no wind, standard temp,
+    // sea-level. Prep numbers are COURSE intelligence (yardage + elevation
+    // + slope), which doesn't change overnight; live conditions belong to
+    // Play on the day. The tee→green elevation delta is still real (USGS
+    // via the ELEV chip), and the green brief still feeds slope advice —
+    // only the weather/temp/altitude inputs are neutralized.
+    const neutral = {
+      tempF: 70, windMph: 0, windFromDeg: 0,
+      rh: 50, pressureHpa: NaN, gustMph: NaN, shearAlpha: 0.143,
+    };
+    const elevFt = num(cond.elevFt, 0);   // real USGS delta when loaded
     const key = [
       Math.round(yd * 2), currentBearing(),
-      Math.round(num(cond.elevFt, 0)), Math.round(num(cond.altFt, 0) / 25),
-      Math.round(num(cond.tempF, 70)), Math.round(num(cond.windMph, 0) * 2),
-      Math.round(norm360(num(cond.windFromDeg, 0)) / 3),
+      Math.round(elevFt),
       cond.surface,
       Math.round(num(liePenalty(), 0) * 10),
-      Math.round(num(w.rh, 50) / 5), Math.round(num(w.pressureHpa, 0)),
-      Math.round(num(w.shearAlpha, 0.143) * 100),
-      Math.round(num(w.gustMph, 0) * 2), Math.round(num(api.locLat(), 40))
     ].join('|');
     const hit = _solveMemo.get(key);
     if (hit) return hit;
     const out = api.playsLike({
       horizontalYd: yd,
       bearingDeg: currentBearing(),
-      elevDiffFt: cond.elevFt,
-      courseAltitudeFt: cond.altFt,
-      tempF: cond.tempF,
-      rh: w.rh,
-      windMph: cond.windMph,
-      windFromDeg: cond.windFromDeg,
-      pressureHpa: w.pressureHpa,
-      shearAlpha: w.shearAlpha,
-      gustMph: w.gustMph,
+      elevDiffFt: elevFt,
+      courseAltitudeFt: 0,
+      tempF: neutral.tempF,
+      rh: neutral.rh,
+      windMph: neutral.windMph,
+      windFromDeg: neutral.windFromDeg,
+      pressureHpa: neutral.pressureHpa,
+      shearAlpha: neutral.shearAlpha,
+      gustMph: neutral.gustMph,
       latDeg: api.locLat(),
       lieYd: liePenalty(),
       firmness: cond.surface,
@@ -790,17 +629,8 @@
       document.getElementById('prepNumberFallback');
     if (!card) return;
 
-    // Wind-relative tiles (head/tail + cross, relative to the shot line)
-    const headTile = $('relHeadTile');
-    $('relHeadVal').textContent =
-      Math.abs(calc.headwindMph) < 0.05
-        ? 'calm'
-        : `${fmt(Math.abs(calc.headwindMph), 1)} mph ${calc.headwindMph >= 0 ? 'head' : 'tail'}`;
-    headTile.classList.toggle('warn', Math.abs(calc.headwindMph) >= 10);
-    $('relCrossVal').textContent =
-      Math.abs(calc.crosswindMph) < 1
-        ? 'calm'
-        : `${fmt(Math.abs(calc.crosswindMph), 1)} mph from the ${calc.crosswindMph > 0 ? 'right' : 'left'}`;
+    // v1.17.0: wind-relative tiles lived in the removed Conditions box —
+    // with neutral solves they're always calm; nothing to render.
 
     // Headline
     const eff = effortInfo(rec.main);
@@ -1795,39 +1625,65 @@
       body.push(`<div class="prep-plan">${lines.join('')}</div>`);
     }
 
-    // v1.16.1 (James: "I liked the green box that had the overall advice
-    // for what we should do on the hole") — restored, condition-aware.
+    // v1.17.0 (James: "that green advice box… it's so generic"): a real
+    // caddie read — flowing sentences built from the data we already
+    // hold: the tee→green delta (USGS), the dogleg shape (path), the
+    // green's slope feed (LiDAR brief), green depth, and the surface.
+    // Deduped against the plan rows (no repeating their notes).
     {
       const g2 = h.green || {};
-      const tips = [];
-      const depth2 = g2.depth;
-      if (depth2 != null) {
-        if (depth2 >= 26) tips.push(`Deep green (~${Math.round(depth2)} yd) — space to be aggressive.`);
-        else if (depth2 <= 14) tips.push(`Shallow green (~${Math.round(depth2)} yd) — distance control decides it; favour the middle.`);
-      }
-      if (cond.surface === 'soft') {
-        tips.push('Soft turf gives nothing back — trust carry, never bounce.');
-      } else if (cond.surface === 'firm') {
-        tips.push('Firm ground rewards landing short of your spot and letting it release.');
-      }
-      if (h.par === 5) tips.push('Decide the layup number NOW, not off the second shot.');
-      else if (h.par === 3) tips.push('One clean strike — commit fully to the conditioned number.');
-      // Carry danger callout: water near the tee carry line.
-      if (h.yards && cond.windMph >= 1 && teeCalc) {
-        const danger = (Array.isArray(h.hazards) ? h.hazards : []).find(
-          (hz) => hz.type === 'water' && (() => {
-            const along = Number.isFinite(hz.along)
-              ? hz.along : hazardAlongYd(hz.sub);
-            return along != null &&
-              Math.abs(along - teeCalc.playsLikeYd) <= 12;
-          })());
-        if (danger) {
-          const along = Number.isFinite(danger.along)
-            ? danger.along : hazardAlongYd(danger.sub);
-          tips.push(`Water sits right at your carry zone (~${Math.round(along || 0)} yd) — take enough club or lay back.`);
+      const s = [];
+      // 1. The hole shape: length + dogleg turn (path midpoint vs chord).
+      let turnTxt = '';
+      if (Array.isArray(h.pathPts) && h.pathPts.length >= 3 &&
+          h.greenLatLng && h.pathPts[0]) {
+        const mid = h.pathPts[Math.floor(h.pathPts.length / 2)];
+        const mLat = 110540;
+        const mLng = 111320 * Math.cos(h.pathPts[0].lat * Math.PI / 180);
+        const ax = (h.greenLatLng.lng - h.pathPts[0].lng) * mLng;
+        const ay = (h.greenLatLng.lat - h.pathPts[0].lat) * mLat;
+        const L = Math.hypot(ax, ay) || 1e-9;
+        const mxp = (mid.lng - h.pathPts[0].lng) * mLng;
+        const myp = (mid.lat - h.pathPts[0].lat) * mLat;
+        // + = left of the chord (perp rotated -90° of the tee→green axis)
+        const side = (mxp * (ay / L) - myp * (ax / L)) * -1;
+        if (Math.abs(side) > 18) {
+          const d = Math.round(Math.abs(side) / 0.9144);
+          turnTxt = `turns ${side > 0 ? 'left' : 'right'} (~${d} yd of bend at the apex)`;
         }
       }
-      body.push(`<div class="prep-strat-advice">${tips.map(escapeHtml).join(' ') || 'Study the plan above and commit before you step on the tee.'}</div>`);
+      // 2. The elevation story (USGS delta chip).
+      const elevFt = Number(cond.elevFt) || 0;
+      // 3. The green's slope feed (LiDAR brief).
+      const br = (() => {
+        const b = readGreenBrief(h);
+        const zones = b && Array.isArray(b.zones) ? b.zones : [];
+        const z = zones.find((zz) => zz && zz.id === 'middle') || null;
+        return z && Number.isFinite(z.breakIn) ? z.breakIn : null;
+      })();
+      if (effYd) {
+        const open = `You're playing ${Math.round(effYd)} yd${
+          turnTxt ? `, a hole that ${turnTxt}` : ''}.`;
+        s.push(open);
+      }
+      if (elevFt !== 0) {
+        s.push(`Tee to green you're ${Math.abs(Math.round(elevFt))} ft ${
+          elevFt > 0 ? 'uphill — take one more club than the card says' :
+          'downhill — the ball will run, club down'}.`);
+      }
+      if (br != null && Math.abs(br) >= 1.5) {
+        s.push(`The green feeds ${br > 0 ? 'right' : 'left'} ~${Math.round(Math.abs(br))} in from the middle — miss on the ${
+          br > 0 ? 'left' : 'right'} and the slope brings you back.`);
+      }
+      if (g2.depth != null) {
+        if (g2.depth >= 26) s.push(`It's a deep target (~${Math.round(g2.depth)} yd) — you can fire at the pin.`);
+        else if (g2.depth <= 14) s.push(`It's shallow (~${Math.round(g2.depth)} yd) — the number matters more than the line.`);
+      }
+      if (cond.surface === 'soft') s.push('Soft turf: trust the carry, expect no run-out.');
+      else if (cond.surface === 'firm') s.push('Firm turf: land it short of your spot and let it release.');
+      body.push(`<div class="prep-strat-advice">${
+        s.length ? s.map(escapeHtml).join(' ') :
+        'Nothing fancy on this one — pick a line and swing.'}</div>`);
     }
 
     // v1.16.1 (James: 3D Green + Move tee live inside the satellite
@@ -1875,10 +1731,18 @@
             }
             const hex = (window.PrepHoleCatHex &&
               window.PrepHoleCatHex[clubCatOf(nm)]) || '#5ea8ff';
-            landing.push({ lat: best.lat, lng: best.lng, hex });
+            landing.push({
+              lat: best.lat, lng: best.lng, hex,
+              label: clubShort(nm),
+              yd: Math.round(d1 * (effYd / total) / share) ||
+                Math.round(d1),
+            });
           });
         }
       } catch (e) { /* dots are garnish */ }
+      // v1.17.0: the sheet reads this — the earlier build computed the
+      // dots but never handed them over (they never drew).
+      window.__prepPlanLanding = landing;
       window.PrepHoleSat.open({
         greenLatLng: boundHole.greenLatLng,
         courseId: boundHole.courseId,
