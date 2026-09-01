@@ -58,9 +58,9 @@ window.fetch = async (url) => {
         { type: 'relation', id: 16, tags: { natural: 'water' },
           members: [
             { role: 'outer', geometry: ring(41.5931 - 260 * latPerYd,
-              -93.8828, 0.0003, 0.0004) },
+              -93.88322, 0.0003, 0.0004) },
             { role: 'outer', geometry: ring(41.5931 - 260 * latPerYd,
-              -93.8825, 0.0003, 0.0004) },
+              -93.88292, 0.0003, 0.0004) },
           ] },
         { type: 'way', id: 14, tags: { golf: 'tee' },
           geometry: ring(41.5931, -93.88325, 0.00015, 0.0002) },
@@ -149,6 +149,14 @@ setTimeout(() => {
                 const d = s.getAttribute('d') || '';
                 return /^M -?[\d.]+ -?[\d.]+ L -?[\d.]+ -?[\d.]+$/.test(d);
               }), shots.length && shots[0].getAttribute('d'));
+            // v1.19.2: water-carry detection in the caddie read — the
+            // fixture water sits on the tee→pin line, so the advice box
+            // must call the carry out.
+            const advice = (window.document.querySelector(
+              '.prep-strat-advice') || {}).textContent || '';
+            check('5c. water carry called out in the caddie read',
+              /carries water from ~\d+ yd out/.test(advice),
+              advice.slice(0, 110));
             // 6: sheet receives shapes
             let captured = null;
             window.PrepHoleSat.open = (o) => { captured = o; };

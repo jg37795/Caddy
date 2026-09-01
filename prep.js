@@ -1696,6 +1696,53 @@
       }
       // 2. The elevation story (USGS delta chip).
       const elevFt = Number(cond.elevFt) || 0;
+      // 2b. v1.19.2 (James: "does it know that I'm going to be hitting
+      // over it?"): WATER CARRY CHECK — walk the straight tee→pin line
+      // and test the water polygons. If the line crosses, the read says
+      // where the carry starts and what must be cleared. Real course
+      // intelligence from the shapes we now store.
+      const carryTxt = (() => {
+        if (!h.teeLatLng || !h.greenLatLng || !h.shapes ||
+            !Array.isArray(h.shapes.water) || !h.shapes.water.length) {
+          return '';
+        }
+        const t = h.teeLatLng, g = h.greenLatLng;
+        const mLat = 110540;
+        const mLng = 111320 * Math.cos(t.lat * Math.PI / 180);
+        const pointInRing = (lat, lng, ring) => {
+          let inside = false;
+          for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const yi = ring[i].lat, xi = ring[i].lng;
+            const yj = ring[j].lat, xj = ring[j].lng;
+            if (((yi > lat) !== (yj > lat)) &&
+                (lng < (xj - xi) * (lat - yi) / ((yj - yi) || 1e-12) + xi)) {
+              inside = !inside;
+            }
+          }
+          return inside;
+        };
+        let firstYd = null, lastYd = null;
+        for (let yy = 3; yy <= effYd; yy += 3) {
+          const fr = yy / effYd;
+          const lat = t.lat + (g.lat - t.lat) * fr;
+          const lng = t.lng + (g.lng - t.lng) * fr;
+          const over = h.shapes.water.some((ring) =>
+            Array.isArray(ring) && ring.length >= 3 &&
+            pointInRing(lat, lng, ring));
+          if (over) {
+            if (firstYd == null) firstYd = yy;
+            lastYd = yy;
+          }
+        }
+        if (firstYd == null) return '';
+        const runLen = lastYd - firstYd;
+        if (runLen < 8) {
+          // grazing the edge — not a forced carry worth calling out
+          return '';
+        }
+        const clearYd = lastYd + 8;
+        return `Your line carries water from ~${Math.round(firstYd)} yd out — take the club that clears ~${Math.round(clearYd)} yd with room to spare`;
+      })();
       // 3. The green's slope feed (LiDAR brief).
       const br = (() => {
         const b = readGreenBrief(h);
@@ -1713,6 +1760,9 @@
           elevFt > 0 ? 'uphill — take one more club than the card says' :
           'downhill — the ball will run, club down'}.`);
       }
+      // v1.19.2: the water-carry sentence leads if present — it changes
+      // club selection more than anything else on the card.
+      if (carryTxt) s.push(`${carryTxt}.`);
       if (br != null && Math.abs(br) >= 1.5) {
         s.push(`The green feeds ${br > 0 ? 'right' : 'left'} ~${Math.round(Math.abs(br))} in from the middle — miss on the ${
           br > 0 ? 'left' : 'right'} and the slope brings you back.`);

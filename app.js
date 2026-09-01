@@ -14474,12 +14474,67 @@ out geom;`;
   // v1.19.0: uniform resample of a closed ring to ≤ maxPts vertices
   // (module-level so buildAutoCourse can budget polygon storage; the
   // per-hole simplify inside the hole pass stays as-is).
+  // v1.19.2: index-resampling broke shared edges — adjacent water rings
+  // kept DIFFERENT vertices along their common border (cracks/gaps).
+  // Douglas-Peucker to a metre tolerance keeps geometrically necessary
+  // vertices, so shared nodes survive on BOTH rings and shared edges
+  // simplify identically. Hard cap via iterative tolerance increase.
+  const SIMPLIFY_TOL_M = 4;
   function osmSimplifyRing(pts, maxPts) {
     if (!Array.isArray(pts) || pts.length <= maxPts) return pts || null;
-    const out = [];
-    const step = pts.length / maxPts;
-    for (let k = 0; k < maxPts; k++) {
-      out.push(pts[Math.min(pts.length - 1, Math.round(k * step))]);
+    const dp = (tol) => {
+      // Douglas-Peucker on a closed ring: anchor at the two farthest-
+      // apart vertices, then recurse.
+      const sqSegDist = (p, a, b) => {
+        let dx = b.lng - a.lng, dy = b.lat - a.lat;
+        if (!dx && !dy) {
+          dx = p.lng - a.lng; dy = p.lat - a.lat;
+          return dx * dx + dy * dy;
+        }
+        let t = ((p.lng - a.lng) * dx + (p.lat - a.lat) * dy) /
+          (dx * dx + dy * dy);
+        t = Math.max(0, Math.min(1, t));
+        const ex = a.lng + t * dx - p.lng, ey = a.lat + t * dy - p.lat;
+        return ex * ex + ey * ey;
+      };
+      const refLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+      const K = 111320 * Math.cos(refLat * Math.PI / 180);
+      const toXY = (p) => ({ x: p.lng * K, y: p.lat * 111320 });
+      const ptsXY = pts.map(toXY);
+      const n = pts.length;
+      let aIdx = 0, bIdx = Math.floor(n / 2), bestD = -1;
+      for (let i = 0; i < n; i++) {
+        const d = Math.hypot(ptsXY[i].x - ptsXY[0].x, ptsXY[i].y - ptsXY[0].y);
+        if (d > bestD) { bestD = d; bIdx = i; }
+      }
+      const keep = new Uint8Array(n);
+      keep[0] = 1; keep[bIdx] = 1;
+      const tolSq = tol * tol;
+      const stack = [[0, bIdx], [bIdx, n - 1]];
+      while (stack.length) {
+        const [s, e] = stack.pop();
+        let maxD = 0, maxI = -1;
+        for (let i = s + 1; i < e; i++) {
+          const d = sqSegDist(
+            { lng: ptsXY[i].x, lat: ptsXY[i].y },
+            { lng: ptsXY[s].x, lat: ptsXY[s].y },
+            { lng: ptsXY[e % n].x, lat: ptsXY[e % n].y });
+          if (d > maxD) { maxD = d; maxI = i; }
+        }
+        if (maxD > tolSq && maxI > 0) {
+          keep[maxI] = 1;
+          stack.push([s, maxI], [maxI, e]);
+        }
+      }
+      const out = [];
+      for (let i = 0; i < n; i++) if (keep[i]) out.push(pts[i]);
+      return out;
+    };
+    let tol = SIMPLIFY_TOL_M;
+    let out = dp(tol);
+    while (out.length > maxPts && tol < 60) {
+      tol *= 1.6;
+      out = dp(tol);
     }
     return out;
   }
