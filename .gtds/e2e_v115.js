@@ -149,7 +149,10 @@ setTimeout(() => {
       window.document.getElementById('prepStratTitle').tagName === 'BUTTON' &&
       !!window.document.getElementById('prepStratTitleText'));
     // 7) Move tee button labelled properly
-    check('10. Move tee button labelled', /Move tee/.test(body.innerHTML));
+    // v1.16.1: the Move tee button moved INTO the satellite sheet — the
+    // card has no tee button anymore.
+    check('10. no Move tee button on the card (lives in the sheet)',
+      !body.querySelector('#prepTeeBtn'));
     console.log(fails ? `${fails} FAILURE(S)` : 'E2E v1.15 PASSED');
     process.exit(fails ? 1 : 0);
   }, 400);

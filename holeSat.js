@@ -62,6 +62,12 @@
       '  <span class="psh-btn psh-spacer"></span>' +
       '</div>' +
       '<div class="psh-map" id="pshMap"></div>' +
+      // v1.16.1: Move tee + 3D Green live HERE (James) — the card's
+      // buttons are gone; the sheet is where hole actions happen.
+      '<div class="psh-actions">' +
+      `  <button class="psh-act" id="pshMoveTee">✛ Move tee</button>` +
+      `  <button class="psh-act psh-act-primary" id="psh3d">⛳ 3D Green</button>` +
+      '</div>' +
       '<div class="psh-hint">Your hole on the ground — fairway ribbon, landing spots, green &amp; hazards (OSM)</div>';
 
     document.body.appendChild(sheet);
@@ -82,6 +88,25 @@
     window.__pshMap = map;
     L.tileLayer(TILES, { attribution: '', maxZoom: 21 })
       .addTo(map);
+
+    // v1.16.1 (James: "the hole should be in the middle of the satellite
+    // view"): fit the bounds to the hole's own geometry — path + green +
+    // tee — with padding, so the hole sits centred at the widest zoom
+    // that contains it (not pinned to the green at z17).
+    {
+      const b = L.latLngBounds([]);
+      let any = false;
+      (Array.isArray(hole.pathPts) ? hole.pathPts : []).forEach((p) => {
+        if (Number.isFinite(p.lat)) { b.extend([p.lat, p.lng]); any = true; }
+      });
+      if (hole.greenCenter && Number.isFinite(hole.greenCenter.lat)) {
+        b.extend([hole.greenCenter.lat, hole.greenCenter.lng]); any = true;
+      }
+      if (hole.teePoint && Number.isFinite(hole.teePoint.lat)) {
+        b.extend([hole.teePoint.lat, hole.teePoint.lng]); any = true;
+      }
+      if (any) map.fitBounds(b, { padding: [48, 48] });
+    }
 
     const dpr = window.devicePixelRatio || 1;
 
@@ -192,6 +217,37 @@
       sheet.remove();
       sheet = null;
       window.__pshMap = null;
+    });
+
+    // v1.16.1 (James): Move tee → jumps into Check location with tee
+    // mode pre-armed (same deep-link Prep's old button used). 3D Green →
+    // re-launches greenmap.html from this hole's green + tee.
+    sheet.querySelector('#pshMoveTee').addEventListener('click', () => {
+      const u = new URLSearchParams(location.search);
+      if (boot.lat != null) {
+        u.set('lat', boot.lat.toFixed(6));
+        u.set('lng', boot.lng.toFixed(6));
+      }
+      if (hole.teePoint) {
+        u.set('teelat', hole.teePoint.lat.toFixed(6));
+        u.set('teelng', hole.teePoint.lng.toFixed(6));
+      }
+      u.set('armtee', '1');
+      location.replace('?' + u.toString());
+    });
+    sheet.querySelector('#psh3d').addEventListener('click', () => {
+      const u = new URLSearchParams(location.search);
+      if (boot.lat != null) {
+        u.set('lat', boot.lat.toFixed(6));
+        u.set('lng', boot.lng.toFixed(6));
+      }
+      if (hole.teePoint) {
+        u.set('teelat', hole.teePoint.lat.toFixed(6));
+        u.set('teelng', hole.teePoint.lng.toFixed(6));
+      }
+      // Full re-boot of the green tool at this hole (same contract as
+      // greenedit's "Load this green").
+      location.replace('?r=' + Date.now() + '&' + u.toString());
     });
   }
 

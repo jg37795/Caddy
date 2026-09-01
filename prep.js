@@ -1778,27 +1778,60 @@
         );
         prev = toYd;
       });
-      body.push(`<div class="prep-plan">${lines.join('')}</div>`);
-      // v1.16.0 (James: "get rid of everything underneath the suggested
-      // off the tee"): the standalone tee box is gone — its content
-      // lives in the FIRST plan row's sub note (plays-like delta +
-      // recommended swing). The plan IS the suggestion now.
+      // v1.16.1 (James: "I'm seeing duplicates of the clubs"): the tee-box
+      // fold-in pushed the plan TWICE — once at the original push (line
+      // above) and again after mutating lines[0]. Push once.
       if (teeCalc && lines.length) {
         const teeRec = api.recommendClub(teeCalc.playsLikeYd);
         const delta = Math.round(teeCalc.playsLikeYd - effYd);
         const why = Math.abs(delta) >= 2
           ? `${delta >= 0 ? '+' : ''}${delta} yd — ${clubShort(teeRec.main)}`
-          : clubShort(teeRec.main);
+          : `${clubShort(teeRec.main)} — plays true`;
         const first = lines[0];
         lines[0] = first.replace(
           /(<span class="prep-plan-sub">)[^<]*(<\/span>)/,
           `$1${escapeHtml(why)}$2`);
-        body.push(`<div class="prep-plan">${lines.join('')}</div>`);
       }
+      body.push(`<div class="prep-plan">${lines.join('')}</div>`);
     }
 
-    body.push(green3dButtonHtml(h));
+    // v1.16.1 (James: "I liked the green box that had the overall advice
+    // for what we should do on the hole") — restored, condition-aware.
+    {
+      const g2 = h.green || {};
+      const tips = [];
+      const depth2 = g2.depth;
+      if (depth2 != null) {
+        if (depth2 >= 26) tips.push(`Deep green (~${Math.round(depth2)} yd) — space to be aggressive.`);
+        else if (depth2 <= 14) tips.push(`Shallow green (~${Math.round(depth2)} yd) — distance control decides it; favour the middle.`);
+      }
+      if (cond.surface === 'soft') {
+        tips.push('Soft turf gives nothing back — trust carry, never bounce.');
+      } else if (cond.surface === 'firm') {
+        tips.push('Firm ground rewards landing short of your spot and letting it release.');
+      }
+      if (h.par === 5) tips.push('Decide the layup number NOW, not off the second shot.');
+      else if (h.par === 3) tips.push('One clean strike — commit fully to the conditioned number.');
+      // Carry danger callout: water near the tee carry line.
+      if (h.yards && cond.windMph >= 1 && teeCalc) {
+        const danger = (Array.isArray(h.hazards) ? h.hazards : []).find(
+          (hz) => hz.type === 'water' && (() => {
+            const along = Number.isFinite(hz.along)
+              ? hz.along : hazardAlongYd(hz.sub);
+            return along != null &&
+              Math.abs(along - teeCalc.playsLikeYd) <= 12;
+          })());
+        if (danger) {
+          const along = Number.isFinite(danger.along)
+            ? danger.along : hazardAlongYd(danger.sub);
+          tips.push(`Water sits right at your carry zone (~${Math.round(along || 0)} yd) — take enough club or lay back.`);
+        }
+      }
+      body.push(`<div class="prep-strat-advice">${tips.map(escapeHtml).join(' ') || 'Study the plan above and commit before you step on the tee.'}</div>`);
+    }
 
+    // v1.16.1 (James: 3D Green + Move tee live inside the satellite
+    // sheet now) — buttons removed from the mapped card too.
     $('prepStratBody').innerHTML = body.join('');
     wireBackButton();
     wireHoleMapTap();
