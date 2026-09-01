@@ -1318,22 +1318,30 @@ body.dark .prep-strat-advice {
   gap: 8px;
   margin-top: 8px;
 }
+/* v1.15.5 (James: "the individual shots are spaced weirdly when I open
+   them"): the expanded number panel inflated the row's first grid column
+   (auto tracks size to the widest item in the column), squeezing the
+   advice text into a sliver. The row is now a wrapping flex: club left,
+   yardage right, note full-width below, number panel full-width under
+   that. No grid column sizing traps. */
 .prep-plan-shot {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
+  display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
-  padding: 9px 12px;
+  gap: 4px 10px;
+  padding: 10px 12px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  /* v1.15.1: rows are buttons now (tap → THE NUMBER) */
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+.prep-plan-shot > .prep-plan-num { margin-left: auto; }
+.prep-plan-shot > .prep-plan-sub { flex-basis: 100%; }
+.prep-plan-shot > .prep-num-inline { flex-basis: 100%; }
 .prep-plan-shot.chosen {
   background: linear-gradient(135deg, rgba(24, 164, 91, 0.22), rgba(24, 164, 91, 0.10));
   border-color: rgba(24, 164, 91, 0.55);
@@ -1382,7 +1390,7 @@ body.dark .prep-strat-advice {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 10px;
   padding-top: 12px;
   border-top: 1px dashed rgba(255, 255, 255, 0.12);
 }
@@ -1392,6 +1400,12 @@ body.dark .prep-strat-advice {
   border-top: 1px dashed rgba(255, 255, 255, 0.10);
   padding-top: 10px;
 }
+/* baseline alignment: the injected panel is block-level; the flex row's
+   baseline alignment must not stretch it */
+.prep-plan-shot { align-items: flex-start; }
+.prep-plan-shot > .prep-plan-club,
+.prep-plan-shot > .prep-plan-num,
+.prep-plan-shot > .prep-plan-sub { align-self: baseline; }
 
 /* v1.9.0 — the single hole card: number block, tiles-as-picker, tweaks */
 .prep-num-block {
