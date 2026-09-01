@@ -14654,7 +14654,13 @@ out geom;`;
           along = alongTrackYd(tee, green, raw);
           cross = crossTrackYd(tee, green, raw);
         }
-        return { type: hz.type, label: hz.label, sub: hz.sub, along, cross };
+        // v1.18.0: raw coords ride along so the satellite sheet can draw
+        // hazard markers without re-reading the course profile.
+        const hazLL = raw && Number.isFinite(raw.lat) &&
+          Number.isFinite(raw.lng)
+          ? { lat: raw.lat, lng: raw.lng } : null;
+        return { type: hz.type, label: hz.label, sub: hz.sub, along, cross,
+          lat: hazLL ? hazLL.lat : null, lng: hazLL ? hazLL.lng : null };
       });
       // v1.10.0 (real-shape maps + tee switcher): expose the simplified
       // path/green ring (may be null on pre-v1.10 courses), the full tee
@@ -14702,6 +14708,24 @@ out geom;`;
     // v1.12.0: setTeeSet removed from the bridge — tee editing lives in
     // Check location ("Move tee"), persisted per hole as a manual
     // teePoint; named-set switching wasn't what James wanted.
+    // v1.18.0: per-axis 1σ dispersion for a club (along/cross) — shot-log
+    // posterior when the club has samples, else the same prior Play uses.
+    clubSigmas(name) {
+      const base = String(name || '').replace(/\s*·.*$/, '').trim();
+      const club = sortedClubsDesc().find((c) =>
+        String(c.name || '').trim().toLowerCase() === base.toLowerCase());
+      if (!club) return null;
+      return {
+        along: Math.round(clubSigmaDistYd(club) * 10) / 10,
+        cross: Math.round(clubSigmaLatYd(club) * 10) / 10,
+        n: (() => {
+          try {
+            const log = loadShotLog()[club.id] || [];
+            return Array.isArray(log) ? log.length : 0;
+          } catch (e) { return 0; }
+        })(),
+      };
+    },
     // Pure bag sequence for a hole length. Same helper the planner uses;
     // no writes, no UI. null when yards or bag are missing.
     clubSequence(totalYd) {

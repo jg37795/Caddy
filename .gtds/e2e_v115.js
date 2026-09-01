@@ -115,18 +115,14 @@ setTimeout(() => {
       const d = fw.getAttribute('d');
       const bx2 = parseFloat(bz.getAttribute('cx'));
       const by2 = parseFloat(bz.getAttribute('cy'));
-      // path y at bx2: sample the path 'd' points, find the two
-      // surrounding x's, lerp y. Points are flat [x0,y0,x1,y1,…].
+      // path y at bx2: nearest-point sampling (the path bends back in x,
+      // so a monotonic-x lerp hits the wrong leg on dogleg fixtures).
       const nums = d.match(/-?[\d.]+/g).map(Number);
-      let pyAt = null;
-      for (let i = 0; i + 3 < nums.length; i += 2) {
-        const ax = nums[i], ay = nums[i + 1];
-        const bx3 = nums[i + 2], by3 = nums[i + 3];
-        if (bx2 >= Math.min(ax, bx3) && bx2 <= Math.max(ax, bx3)) {
-          const t = (bx2 - ax) / ((bx3 - ax) || 1e-9);
-          pyAt = ay + (by3 - ay) * t;
-          break;
-        }
+      let pyAt = null, bd2 = Infinity;
+      for (let i = 0; i < nums.length; i += 2) {
+        const dx = nums[i] - bx2, dy = nums[i + 1] - by2;
+        const dd = dx * dx + dy * dy;
+        if (dd < bd2) { bd2 = dd; pyAt = nums[i + 1]; }
       }
       check('6b. bunker drawn on the text side (left=above path)',
         pyAt != null && by2 < pyAt,

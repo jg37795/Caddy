@@ -10,7 +10,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#07100b" id="themeColorMeta" />
-  <script>window.CADDY_VERSION = 'v1.17.0';</script>
+  <script>window.CADDY_VERSION = 'v1.18.0';</script>
   <meta name="color-scheme" content="light dark" />
   <meta name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -1457,6 +1457,10 @@
   <!-- v1.16.0: tap-the-hole-map satellite sheet (Prep) — must load after
        leaflet (it uses L) and before prep.js (prep opens it). -->
   <script src="./holeSat.js"></script>
+  <!-- v1.18.0: headless green-brief builder (USGS + putt sim without the
+       3D tool) — needs caddy-elev.js + greenmap.js GreenMapCore; prep.js
+       triggers it on sheet open. -->
+  <script src="./greenBriefCore.js"></script>
   <script defer src="./stats.js"></script>
   <script defer src="./bag.js"></script>
   <script defer src="./prep.js"></script>

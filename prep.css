@@ -1461,6 +1461,28 @@ body.dark .prep-strat-advice {
   font-size: 14px;
 }
 .psh-act:active { transform: scale(0.97); }
+.psh-act.armed {
+  border-color: #ffd166;
+  color: #ffd166;
+}
+.psh-tee-banner {
+  padding: 9px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #ffd166;
+  background: rgba(10, 14, 12, 0.94);
+  border-top: 1px solid rgba(255, 209, 102, 0.4);
+}
+.psh-tee-banner .psh-tee-cancel {
+  background: none;
+  border: none;
+  color: #ffd166;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  padding: 0 2px;
+}
+.psh-tee-banner .psh-tee-ok { color: #7dff9b; }
 .psh-act-primary {
   background: linear-gradient(135deg, #1aa45b, #0e8c4d);
   border-color: transparent;

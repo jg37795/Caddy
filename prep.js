@@ -1731,11 +1731,23 @@
             }
             const hex = (window.PrepHoleCatHex &&
               window.PrepHoleCatHex[clubCatOf(nm)]) || '#5ea8ff';
+            // v1.17.1 (James: "driver says 194yd and gw 387?"): the tag
+            // must show the SHOT'S CARRY (the plan row number), not the
+            // from-tee distance. _planShotYds[i] is exactly that.
+            const carryYd = Array.isArray(_planShotYds) &&
+              Number.isFinite(_planShotYds[i]) ? _planShotYds[i] : null;
+            // dispersion: per-axis 1σ from the bag bridge (shot-log
+            // posterior when the club has samples, prior otherwise).
+            const sig = clubSigmas(nm);
             landing.push({
               lat: best.lat, lng: best.lng, hex,
               label: clubShort(nm),
-              yd: Math.round(d1 * (effYd / total) / share) ||
-                Math.round(d1),
+              yd: carryYd,
+              sigAlongYd: sig ? sig.along : null,
+              sigCrossYd: sig ? sig.cross : null,
+              bearingDeg: (i === 0)
+                ? (boundHole.bearing || null)
+                : segBearing(best, i),
             });
           });
         }
@@ -1743,17 +1755,86 @@
       // v1.17.0: the sheet reads this — the earlier build computed the
       // dots but never handed them over (they never drew).
       window.__prepPlanLanding = landing;
+      // v1.17.1: DIRECT hole payload — no localStorage round-trip (that
+      // was the first-tap-empty/second-tap-loaded bug).
       window.PrepHoleSat.open({
         greenLatLng: boundHole.greenLatLng,
         courseId: boundHole.courseId,
         hole: boundHole.number,
+        holeData: {
+          par: boundHole.par || null,
+          yards: boundHole.yards || null,
+          pathPts: boundHole.pathPts || null,
+          greenRingPts: boundHole.greenRingPts || null,
+          teePoint: boundHole.teeLatLng
+            ? { lat: boundHole.teeLatLng.lat,
+                lng: boundHole.teeLatLng.lng } : null,
+          greenCenter: boundHole.greenLatLng
+            ? { lat: boundHole.greenLatLng.lat,
+                lng: boundHole.greenLatLng.lng } : null,
+          hazards: (Array.isArray(boundHole.hazards)
+            ? boundHole.hazards : []).filter((hz) =>
+              hz && Number.isFinite(hz.lat) && Number.isFinite(hz.lng)),
+        },
+        teeLL: boundHole.teeLatLng,
       });
       haptic(6);
+      // v1.18.0 (James: "why rely on me opening the 3d green?"): run the
+      // FULL green-brief pipeline invisibly — USGS patch → gradient
+      // field → putt sim → persist in the 3D-tool's exact schema. One
+      // fetch per green, cached; later opens instant.
+      runGreenBriefAuto(boundHole);
     };
     tap.addEventListener('click', open);
     tap.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
     });
+  }
+
+  // v1.18.0: per-axis 1σ for a club — along/cross, from the shot-log
+  // posterior when the club has samples, else the same prior Play uses.
+  // Read through the bag bridge so prep never touches app state.
+  function clubSigmas(name) {
+    if (typeof api.clubSigmas !== 'function') return null;
+    try { return api.clubSigmas(name); } catch (e) { return null; }
+  }
+
+  // Initial bearing (deg) from point a to point b — for ellipse rotation
+  // of approach-shot landing zones.
+  function segBearing(toLL, idx) {
+    void idx;
+    if (!toLL || !boundHole || !boundHole.greenLatLng) return null;
+    const mLat = 110540;
+    const mLng = 111320 * Math.cos(toLL.lat * Math.PI / 180);
+    const de = (boundHole.greenLatLng.lng - toLL.lng) * mLng;
+    const dn = (boundHole.greenLatLng.lat - toLL.lat) * mLat;
+    if (Math.hypot(de, dn) < 1e-6) return null;
+    return (Math.atan2(de, dn) * 180 / Math.PI + 360) % 360;
+  }
+
+  // v1.18.0: invisible green-brief pipeline. Runs the whole 3D-Green
+  // data path (USGS patch → gradient field → putt sim → persist in the
+  // tool's exact schema) WITHOUT opening the tool. Skips if a fresh
+  // brief already exists (< 30 days) or a build is in flight.
+  let _briefInFlight = null;
+  function runGreenBriefAuto(h) {
+    if (!h || !h.greenLatLng || typeof window.GreenBriefCore ===
+      'undefined') return;
+    const existing = window.GreenBriefCore.briefFor(h.greenLatLng);
+    const FRESH_MS = 30 * 24 * 3600 * 1000;
+    if (existing && Date.now() - (existing.savedAt || 0) < FRESH_MS) return;
+    if (_briefInFlight) return;
+    _briefInFlight = (async () => {
+      try {
+        await window.GreenBriefCore.build({
+          teeLL: h.teeLatLng,
+          centerLL: h.greenLatLng,
+          radiusM: 18,
+          polyLL: Array.isArray(h.greenRingPts) ? h.greenRingPts : null,
+        });
+      } catch (e) { /* silent: advice falls back to slope-free wording */ }
+      _briefInFlight = null;
+    })();
   }
 
   function wireBackButton() {

@@ -27,6 +27,8 @@
   const OUTLINE_KEY = 'caddy:greenOutline:v1';
 
   let sheet = null;
+  let teeArmed = false;   // v1.17.1: two-tap tee placement state
+  let teeMarker = null;   // the current tee marker layer
 
   function bootValues(opts) {
     return {
@@ -37,21 +39,19 @@
     };
   }
 
-  function courseHole(courseId, holeNum) {
-    try {
-      const profiles = JSON.parse(
-        localStorage.getItem('caddy:courseProfiles:v1') || '[]');
-      const c = profiles.find((p) => p && p.id === courseId);
-      if (!c || !Array.isArray(c.holes)) return null;
-      return c.holes[holeNum - 1] || null;
-    } catch (e) { return null; }
-  }
+  // v1.17.1: the caller passes holeData directly; the localStorage
+  // re-read is gone (it was the flaky first-tap/second-tap source).
 
   function openEditor(opts) {
     if (sheet) return;
     const boot = bootValues(opts);
     if (boot.lat == null) return;
-    const hole = courseHole(boot.courseId, boot.hole) || {};
+    // v1.17.1 (James: first tap dots-only, second tap ribbon): the sheet
+    // no longer re-reads the course from localStorage by id — the caller
+    // passes the hole's real geometry. Direct payload, always.
+    const hole = opts.holeData || {};
+    boot.courseId = opts.courseId || null;
+    boot.hole = opts.hole || null;
 
     sheet = document.createElement('div');
     sheet.id = 'prep-sat-sheet';
@@ -70,8 +70,12 @@
         ? `<div class="psh-stats">${meta.map((m) =>
             `<span>${m}</span>`).join('<i>·</i>')}</div>` : '') +
       '<div class="psh-map" id="pshMap"></div>' +
+      // v1.17.1: tap-to-place tee banner (hidden until Move tee armed).
+      '<div class="psh-tee-banner" id="pshTeeBanner" hidden>Tap your tee box on the map · <button type="button" class="psh-tee-cancel" id="pshTeeCancel">Cancel</button></div>' +
       // v1.16.1: Move tee + 3D Green live HERE (James) — the card's
       // buttons are gone; the sheet is where hole actions happen.
+      // v1.17.1: Move tee = in-sheet two-tap placement (no navigation);
+      // 3D Green keeps its (working) deep-link.
       '<div class="psh-actions">' +
       `  <button class="psh-act" id="pshMoveTee">✛ Move tee</button>` +
       `  <button class="psh-act psh-act-primary" id="psh3d">⛳ 3D Green</button>` +
@@ -159,15 +163,52 @@
         color: '#7dff9b', weight: 2, fillOpacity: 0.25,
         interactive: false,
       }).addTo(map);
+      // v1.18.0: green tint from the (auto-built) green brief — the high
+      // side half is brighter, the feed side dimmed. Read via briefFor
+      // (sync); if the brief isn't built yet the ring stays neutral and
+      // the invisible pipeline fills it in for next time.
+      try {
+        const brief = typeof window.GreenBriefCore !== 'undefined'
+          ? window.GreenBriefCore.briefFor({ lat: boot.lat, lng: boot.lng })
+          : null;
+        if (brief && Array.isArray(brief.zones) &&
+            Number.isFinite(brief.zones[1] && brief.zones[1].breakIn)) {
+          const brg = Number.isFinite(brief.highSideDirDeg)
+            ? brief.highSideDirDeg
+            : (Number.isFinite(brief.zones[1].dirDeg)
+              ? (brief.zones[1].dirDeg + 180) % 360 : null);
+          if (Number.isFinite(brg)) {
+            // split the ring into the high half vs feed half relative to
+            // the green centre and draw two tinted polygons.
+            const cx = boot.lng, cy = boot.lat;
+            const hi = [], lo = [];
+            ring.forEach((pt) => {
+              const de = (pt[1] - cx) * 111320 * Math.cos(cy * Math.PI / 180);
+              const dn = (pt[0] - cy) * 111320;
+              const ang = (Math.atan2(de, dn) * 180 / Math.PI + 360) % 360;
+              const rel = ((ang - brg) + 360) % 360;
+              (rel <= 180 ? hi : lo).push(pt);
+            });
+            if (hi.length >= 3) L.polygon(hi, {
+              color: 'rgba(125,255,155,0.0)', weight: 0,
+              fillColor: 'rgba(125,255,155,0.28)', interactive: false,
+            }).addTo(map);
+            if (lo.length >= 3) L.polygon(lo, {
+              color: 'rgba(125,255,155,0.0)', weight: 0,
+              fillColor: 'rgba(125,255,155,0.08)', interactive: false,
+            }).addTo(map);
+          }
+        }
+      } catch (e) { /* tint is garnish */ }
     }
 
-    // Tee marker (white dot) + flag pole chip.
-    if (hole.teePoint) {
-      L.circleMarker([hole.teePoint.lat, hole.teePoint.lng], {
-        radius: 6, color: '#fff', weight: 2,
-        fillColor: '#fff', fillOpacity: 0.9, interactive: false,
-      }).addTo(map);
-    }
+      // v1.17.1: tee marker tracked so Move-tee can move it in place.
+      if (hole.teePoint) {
+        teeMarker = L.circleMarker([hole.teePoint.lat, hole.teePoint.lng], {
+          radius: 6, color: '#fff', weight: 2,
+          fillColor: '#fff', fillOpacity: 0.9, interactive: false,
+        }).addTo(map);
+      }
     if (hole.greenCenter) {
       L.marker([hole.greenCenter.lat, hole.greenCenter.lng], {
         interactive: false,
@@ -191,10 +232,53 @@
     // Landing dots from the live plan (bag-colored, matching the cartoon).
     // v1.17.0 premium pass: white halo + a club/yardage label beside each
     // dot so the map reads without the card.
+    // v1.18.0: DISPERSION ELLIPSES — 1σ along/cross per club (shot-log
+    // posterior or prior), rotated to the shot bearing, in the club's
+    // color. Plus the target LINE tying tee → landings → green.
     try {
       const plan = window.__prepPlanLanding || [];
+      // target line: tee → each landing → green centre
+      const lineLL = [];
+      if (hole.teePoint) lineLL.push([hole.teePoint.lat, hole.teePoint.lng]);
+      plan.forEach((p) => {
+        if (p && Number.isFinite(p.lat)) lineLL.push([p.lat, p.lng]);
+      });
+      if (hole.greenCenter) {
+        lineLL.push([hole.greenCenter.lat, hole.greenCenter.lng]);
+      }
+      if (lineLL.length >= 2) {
+        L.polyline(lineLL, {
+          color: 'rgba(255,255,255,0.55)', weight: 2, dashArray: '2 7',
+          interactive: false,
+        }).addTo(map);
+      }
       plan.forEach((p) => {
         if (!p || !Number.isFinite(p.lat)) return;
+        // dispersion ellipse first (under the dot)
+        if (Number.isFinite(p.sigAlongYd) && p.sigAlongYd > 1 &&
+            Number.isFinite(p.bearingDeg)) {
+          const aM = p.sigAlongYd * 0.9144;
+          const bM = Math.max(2, Number.isFinite(p.sigCrossYd)
+            ? p.sigCrossYd : p.sigAlongYd * 0.55) * 0.9144;
+          const sinB = Math.sin(p.bearingDeg * Math.PI / 180);
+          const cosB = Math.cos(p.bearingDeg * Math.PI / 180);
+          const pts = [];
+          for (let t = 0; t < 48; t++) {
+            const th = 2 * Math.PI * t / 48;
+            const a = Math.cos(th) * aM, b = Math.sin(th) * bM;
+            const e = a * sinB - b * cosB;
+            const n = a * cosB + b * sinB;
+            pts.push([
+              p.lat + n / 111320,
+              p.lng + e / (111320 * Math.cos(p.lat * Math.PI / 180)),
+            ]);
+          }
+          L.polygon(pts, {
+            color: p.hex || '#5ea8ff', weight: 1.6, opacity: 0.9,
+            fillColor: p.hex || '#5ea8ff', fillOpacity: 0.13,
+            interactive: false,
+          }).addTo(map);
+        }
         L.circleMarker([p.lat, p.lng], {
           radius: 7,
           color: 'rgba(255,255,255,0.95)', weight: 2,
@@ -245,27 +329,25 @@
       window.__pshMap = null;
     });
 
-    // v1.17.0 (James: "the buttons kick me out and break the prep tab"):
-    // the old handlers did location.replace on the PREP page (the sheet
-    // lives in index.html, not greenmap.html) — that reloaded Prep with
-    // green-tool params and broke the tab. Both actions now navigate to
-    // greenmap.html explicitly, carrying lat/lng/tee/course/hole, exactly
-    // like the old card buttons did (which worked).
+    // v1.17.1 (James: "the move tee button kicks me out… opens the verify
+    // green location screen… back takes me to the 3d green"): Move tee no
+    // longer navigates at all — tap-to-place ON THE SHEET, two-tap
+    // contract (same as Round/greenedit): arm → tap the map → the tee
+    // marker moves there and saves to the course profile. Cancel link in
+    // the banner. Saving goes through the same per-course profile the
+    // editor used, so Prep/cartoon/numbers pick it up on the next bind.
     sheet.querySelector('#pshMoveTee').addEventListener('click', () => {
-      const u = new URLSearchParams();
-      if (boot.lat != null) {
-        u.set('lat', boot.lat.toFixed(6));
-        u.set('lng', boot.lng.toFixed(6));
-      }
-      if (hole.teePoint) {
-        u.set('teelat', hole.teePoint.lat.toFixed(6));
-        u.set('teelng', hole.teePoint.lng.toFixed(6));
-      }
-      if (boot.courseId) u.set('course', boot.courseId);
-      if (boot.hole) u.set('hole', String(boot.hole));
-      u.set('armtee', '1');
-      location.assign('greenmap.html?' + u.toString());
+      if (teeArmed) { disarmTee(); return; }
+      teeArmed = true;
+      const bar = document.getElementById('pshTeeBanner');
+      if (bar) bar.hidden = false;
+      sheet.querySelector('#pshMoveTee').classList.add('armed');
     });
+    sheet.querySelector('#pshTeeCancel').addEventListener('click',
+      disarmTee);
+
+    // v1.17.1: 3D Green keeps its deep-link (the 3D tool is a separate
+    // page; this worked before and James only flagged the TEE flow).
     sheet.querySelector('#psh3d').addEventListener('click', () => {
       const u = new URLSearchParams();
       if (boot.lat != null) {
@@ -278,9 +360,51 @@
       }
       if (boot.courseId) u.set('course', boot.courseId);
       if (boot.hole) u.set('hole', String(boot.hole));
-      u.set('view', '3d');
       location.assign('greenmap.html?' + u.toString());
     });
+
+    map.on('click', (e) => {
+      if (!teeArmed) return;
+      const lat = e.latlng.lat, lng = e.latlng.lng;
+      disarmTee();
+      // move the marker immediately
+      if (teeMarker) { map.removeLayer(teeMarker); teeMarker = null; }
+      teeMarker = L.circleMarker([lat, lng], {
+        radius: 6, color: '#fff', weight: 2,
+        fillColor: '#fff', fillOpacity: 0.9, interactive: false,
+      }).addTo(map);
+      // persist to the course profile (same store greenedit wrote)
+      try {
+        const profiles = JSON.parse(
+          localStorage.getItem('caddy:courseProfiles:v1') || '[]');
+        const c = profiles.find((p) => p && p.id === boot.courseId);
+        if (c && Array.isArray(c.holes) && boot.hole >= 1 &&
+            boot.hole <= c.holes.length) {
+          const h = c.holes[boot.hole - 1];
+          h.teePoint = { lat, lng };
+          h.teeSource = 'player';
+          c.updatedAt = Date.now();
+          localStorage.setItem('caddy:courseProfiles:v1',
+            JSON.stringify(profiles));
+          const done = document.getElementById('pshTeeBanner');
+          if (done) {
+            done.innerHTML = '<span class="psh-tee-ok">✓ Tee saved — Prep updates on the next bind</span>';
+            done.hidden = false;
+            setTimeout(() => { done.hidden = true; }, 2600);
+          }
+          try { if (window.__prepRebind) window.__prepRebind(); } catch (e2) {}
+        }
+      } catch (err) { /* storage failure: marker still moved visually */ }
+    });
+  }
+
+  function disarmTee() {
+    teeArmed = false;
+    if (!sheet) return;
+    const bar = document.getElementById('pshTeeBanner');
+    if (bar) bar.hidden = true;
+    const btn = sheet.querySelector('#pshMoveTee');
+    if (btn) btn.classList.remove('armed');
   }
 
   function mount() {
