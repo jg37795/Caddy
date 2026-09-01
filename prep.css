@@ -1376,6 +1376,23 @@ body.dark .prep-strat-advice {
 }
 .prep-hole-back svg { opacity: 0.75; }
 
+/* v1.15.4 — expanded shot row spacing: the injected number UI breathes
+   inside the plan row (padding rhythm, divider before tweaks). */
+.prep-num-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+}
+.prep-num-inline .prep-rec-main { font-size: 30px; }
+.prep-num-inline .prep-rec-grid { margin: 2px 0; }
+.prep-num-inline .prep-tweaks {
+  border-top: 1px dashed rgba(255, 255, 255, 0.10);
+  padding-top: 10px;
+}
+
 /* v1.9.0 — the single hole card: number block, tiles-as-picker, tweaks */
 .prep-num-block {
   margin-top: 14px;

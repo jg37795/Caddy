@@ -1224,6 +1224,22 @@
 
     if (P) {
       // ---- REAL SHAPE MODE ----
+      // v1.15.4 (draw-time defense): courses saved before the import-side
+      // path trim can still carry looped ways (green→tee→…→green). Trim
+      // the drawn path to the journey: stop at the point closest to the
+      // green. Prevents the faint straight return leg across the band.
+      {
+        let bi = 0, bd = Infinity;
+        h.pathPts.forEach((p, i) => {
+          // distance to the green in metres (local approximation)
+          const dM = Math.hypot(
+            (p.lng - h.greenLatLng.lng) * 111320 *
+              Math.cos(p.lat * Math.PI / 180),
+            (p.lat - h.greenLatLng.lat) * 110540);
+          if (dM < bd) { bd = dM; bi = i; }
+        });
+        if (bi < h.pathPts.length - 1) h.pathPts = h.pathPts.slice(0, bi + 1);
+      }
       // Fairway = the actual path.
       const d = h.pathPts.map((ll, i) => {
         const { along, cross } = P.toXY(ll);
@@ -1687,17 +1703,42 @@
         const windTxt = Math.abs(delta) >= 2
           ? `plays ${fmt(calc.playsLikeYd)} (${delta > 0 ? '+' : ''}${delta})`
           : 'plays true';
-        const note = (isLast && approachFavor) ||
-          landingNotes(prev, toYd) ||
-          (isLast && g0.depth != null && g0.depth <= 14
-            ? 'shallow green — favour the middle, distance control over line'
-            : '');
+        // v1.15.4 (James: "expand more on the advice given"): richer
+        // per-shot reasoning, layered:
+        //   1. approach → green-favor from LiDAR + depth
+        //   2. hazards in this shot's landing window
+        //   3. dogleg shape context for the tee shot
+        //   4. wind already shown via plays-like delta
+        let note = '';
+        if (isLast) {
+          if (approachFavor) note = approachFavor;
+          if (g0.depth != null && g0.depth >= 26) {
+            note = note ? note + '; deep green — attack the pin' :
+              'Deep green (~' + Math.round(g0.depth) + ' yd) — attack the pin';
+          }
+        }
+        if (!note) note = landingNotes(prev, toYd);
+        if (!note && idx === 0 && h.pathPts && h.pathPts.length >= 3) {
+          // dogleg direction from the path: lateral offset of the
+          // midpoint relative to the tee→green chord (+ = right)
+          const mid = h.pathPts[Math.floor(h.pathPts.length / 2)];
+          const mLat = 110540;
+          const mLng = 111320 * Math.cos(h.pathPts[0].lat * Math.PI / 180);
+          const ax = (h.greenLatLng.lng - h.pathPts[0].lng) * mLng;
+          const ay = (h.greenLatLng.lat - h.pathPts[0].lat) * mLat;
+          const L = Math.hypot(ax, ay) || 1e-9;
+          const ux = ax / L, uy = ay / L;
+          const mxp = (mid.lng - h.pathPts[0].lng) * mLng;
+          const myp = (mid.lat - h.pathPts[0].lat) * mLat;
+          const side = mxp * uy - myp * ux;   // + = left of chord (rot -90)
+          const leftish = side > 0;
+          note = `dogleg ${leftish ? 'left' : 'right'} — play the ${
+            leftish ? 'left' : 'right'} edge for the short turn-in`;
+        }
         // v1.15.1 (James: "the number box is useless — let users tap the
         // shots caddy recommends and that's what the number reflects"):
-        // each plan row is a BUTTON. Tapping it loads that shot into THE
-        // NUMBER block below — the big number becomes the carry for that
-        // shot's yardage, lie/shape/aim solve for it. The selected shot
-        // stays highlighted.
+        // each plan row is a BUTTON. Tapping it loads that shot into the
+        // inline number (expanded in place).
         lines.push(
           `<button type="button" class="prep-plan-shot${planShotIdx === idx ? ' chosen' : ''}" data-shot="${idx}">` +
           `<span class="prep-plan-club">${escapeHtml(clubShort(shotName))}</span>` +

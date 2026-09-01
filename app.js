@@ -5752,8 +5752,24 @@
           out.push(pts[pts.length - 1]);
           return out;
         };
+        // v1.15.4 (James: "faint straight green line from tee to green"):
+        // some OSM hole ways run green→tee→…→green (closed/looped ways)
+        // or extend past the green. Drawing the raw way drew the RETURN
+        // leg — a faint straight line cutting across the fairway. Trim
+        // the journey to the golf: walk from the tee end and stop at the
+        // point CLOSEST to the green centre; discard everything after.
+        const trimToJourney = (pts, gRef) => {
+          if (!Array.isArray(pts) || pts.length < 3 || !gRef) return pts;
+          let bi = 0, bd = Infinity;
+          pts.forEach((p, i) => {
+            const d = osmDistM(p, gRef);
+            if (d < bd) { bd = d; bi = i; }
+          });
+          return pts.slice(0, bi + 1);
+        };
         if (Array.isArray(r.path) && r.path.length > 2)
-          h.pathPts = simplify(r.path, 28);
+          h.pathPts = simplify(
+            trimToJourney(r.path, r.greenCenter), 28);
         if (Array.isArray(r.greenRing) && r.greenRing.length > 2)
           h.greenRingPts = simplify(r.greenRing, 20);
 
