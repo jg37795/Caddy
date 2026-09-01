@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.15.5'; // EXPANDED SHOT LAYOUT FIX (James screenshot: advice text squeezed into a sliver): the plan row was a 3-column GRID (club | yardage | note) and the injected number panel landed in column 1, inflating the auto column and crushing the note. Row is now a wrapping flex: club left, yardage right (margin-left auto), note full-width below, number panel full-width under that; baseline alignment per item; no grid column traps.
+const CACHE_VERSION = 'v1.16.0'; // PREP LEAN CARD + TAP-THE-MAP SATELLITE (James, screenshots): (1) EVERYTHING under Suggested-off-the-tee REMOVED - Green F/M/B tiles, green-feed hint, deep-green note, advisory paragraph, standalone tee box; the tee box info (plays-like delta + recommended swing) folded into the FIRST plan row's sub. Card is now: header / map / hazards / how-to-play-it (tappable rows) / Move tee + 3D Green / Conditions. (2) Hazards in play moved DIRECTLY under the hole map (location info up top). (3) TAP THE HOLE MAP -> full-screen satellite sheet (holeSat.js, Play-tab look): dark glass header, satellite tiles, the real OSM path as a green ribbon + crisp centre line, green outline (stored ring or traced or live OSM), tee dot, flag pill, hazard dots, plan landing dots in bag colors, neighbouring OSM greens/hole lines like Check location. Read-only; Done closes. Wired via #prepHoleMapTap + window.PrepHoleSat + PrepHoleCatHex. holeSat.js added to index.html precache order (after leaflet, before prep.js).
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
@@ -17,6 +17,7 @@ const APP_SHELL = [
   './bag.js',
   './prep.css',
   './prep.js',
+  './holeSat.js',
   './elev.css',
   './caddy-elev.js',
   './green-detect.js',

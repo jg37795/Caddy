@@ -1527,6 +1527,9 @@
     woods: '#e8a63c', irons: '#5ea8ff',
     wedges: '#b48bff', putter: '#3ec98a',
   };
+  // v1.16.0: holeSat.js reads this to color landing dots the same as the
+  // cartoon's segments.
+  window.PrepHoleCatHex = CLUB_CAT_HEX;
 
   function seqChipsHtml(names) {
     if (!names.length) {
@@ -1626,8 +1629,12 @@
     if (map) {
       // v1.8.0: ELEV chip rides the map's top-right corner — one glance
       // shows tee→green rise/fall next to the yardage.
+      // v1.16.0 (James: "allow the user to tap the hole map which would
+      // bring up a satellite view of the hole, kind of like check
+      // location, but it would look similar to the play tab"): the map
+      // is TAPPABLE — tap opens the satellite sheet (prepHoleSatSheet).
       body.push('<div class="prep-section-gap"><div class="prep-mini-label">Hole map</div>');
-      body.push('<div class="prep-hm-wrap">' + map +
+      body.push('<div class="prep-hm-wrap" id="prepHoleMapTap" role="button" tabindex="0" aria-label="Open satellite view of this hole">' + map +
         (geDeltaHole === h.number ? `<div class="prep-hm-elev">${deltaChipHtml()}</div>` : '') +
         '</div>');
       body.push('</div>');
@@ -1636,6 +1643,29 @@
       body.push('<div class="prep-section-gap"><div class="prep-mini-label">Elevation</div>' +
         deltaChipHtml() + '</div>');
     }
+
+    // v1.16.0: Hazards moved DIRECTLY under the hole map (James) —
+    // they're location info, not decision info; the plan below stays lean.
+    // (haz is declared later, just before the plan, in the mapped branch —
+    // hoist a local read here for unmapped holes.)
+    const hzHere = Array.isArray(h.hazards) ? h.hazards : [];
+    body.push('<div class="prep-section-gap"><div class="prep-mini-label">Hazards in play</div>');
+    if (hzHere.length) {
+      body.push(
+        `<div class="prep-hz-list">${hzHere
+          .map(
+            (hz) =>
+              `<div class="prep-hz${hz.type === 'water' ? ' water' : ''}">` +
+              `<span class="prep-hz-dot"></span><span>${escapeHtml(hz.label)}</span>` +
+              (hz.sub ? `<span class="prep-hz-sub">${escapeHtml(hz.sub)}</span>` : '') +
+              '</div>'
+          )
+          .join('')}</div>`
+      );
+    } else {
+      body.push('<div class="prep-empty">None marked for this hole — swing free.</div>');
+    }
+    body.push('</div>');
 
     body.push('<div class="prep-section-gap"><div class="prep-mini-label">How to play it</div>');
     body.push(seqChipsHtml(names));
@@ -1749,123 +1779,84 @@
         prev = toYd;
       });
       body.push(`<div class="prep-plan">${lines.join('')}</div>`);
-      if (teeCalc) {
+      // v1.16.0 (James: "get rid of everything underneath the suggested
+      // off the tee"): the standalone tee box is gone — its content
+      // lives in the FIRST plan row's sub note (plays-like delta +
+      // recommended swing). The plan IS the suggestion now.
+      if (teeCalc && lines.length) {
         const teeRec = api.recommendClub(teeCalc.playsLikeYd);
         const delta = Math.round(teeCalc.playsLikeYd - effYd);
         const why = Math.abs(delta) >= 2
-          ? `${delta >= 0 ? '+' : ''}${delta} yd vs the ${effYd} yd you're playing`
-          : 'plays true to the number';
-        body.push(`
-          <div class="prep-tee-box">
-            <div class="prep-mini-label">Suggested off the tee</div>
-            <div class="prep-tee-main">${escapeHtml(clubShort(teeRec.main))}</div>
-            <div class="prep-tee-sub">Plays ${fmt(teeCalc.playsLikeYd)} of ${effYd} — ${why}.</div>
-          </div>`);
+          ? `${delta >= 0 ? '+' : ''}${delta} yd — ${clubShort(teeRec.main)}`
+          : clubShort(teeRec.main);
+        const first = lines[0];
+        lines[0] = first.replace(
+          /(<span class="prep-plan-sub">)[^<]*(<\/span>)/,
+          `$1${escapeHtml(why)}$2`);
+        body.push(`<div class="prep-plan">${lines.join('')}</div>`);
       }
     }
 
-    // Hazards (haz declared above for the shot plan)
-    body.push('<div class="prep-section-gap"><div class="prep-mini-label">Hazards in play</div>');
-    if (haz.length) {
-      body.push(
-        `<div class="prep-hz-list">${haz
-          .map(
-            (hz) =>
-              `<div class="prep-hz${hz.type === 'water' ? ' water' : ''}">` +
-              `<span class="prep-hz-dot"></span><span>${escapeHtml(hz.label)}</span>` +
-              (hz.sub ? `<span class="prep-hz-sub">${escapeHtml(hz.sub)}</span>` : '') +
-              '</div>'
-          )
-          .join('')}</div>`
-      );
-    } else {
-      body.push('<div class="prep-empty">None marked for this hole — swing free.</div>');
-    }
-    body.push('</div>');
-
-    // Conditioned carries to each green point — v1.9.0: these tiles ARE
-    // the target picker (data-point + tap-to-choose + disabled when the
-    // point isn't mapped). One control instead of two.
-    // v1.12.0: carries measure from the PLAYER'S tee (manual teePoint) —
-    // holeInfo's green.front/center/back were measured from the stored
-    // tee, so after a Move-tee re-bind they're already correct. No shift.
-    const g = h.green || {};
-    const pts = [
-      ['Front', 'front', g.front],
-      ['Middle', 'middle', g.center],
-      ['Back', 'back', g.back],
-    ];
-    const mapped = pts.filter(([, , v]) => v != null);
-    if (mapped.length) {
-      // v1.15.0 (James: "tap to play it is kind of dumb… why?"): the
-      // F/M/B row is now a CONTEXT read, not a picker — all three
-      // pin yardages at a glance, middle highlighted (the default
-      // aiming point). Tapping a tile still moves the pin for the
-      // number below, but it's no longer presented as a required
-      // choice. The Number section header states what it targets.
-      body.push('<div class="prep-section-gap"><div class="prep-mini-label">Green — front / middle / back</div><div class="prep-carry-strip">');
-      for (const [label, key, dist] of pts) {
-        if (dist == null) {
-          body.push(`<div class="prep-carry-tile" data-point="${key}" disabled><i>${label}</i>—</div>`);
-          continue;
-        }
-        const c = solve(dist);
-        body.push(
-          `<button type="button" class="prep-carry-tile${shot.greenPoint === key ? ' chosen' : ''}" data-point="${key}"><i>${label}</i>${fmt(c.playsLikeYd)} yd</button>`
-        );
-      }
-      body.push('</div></div>');
-    }
-
-    const brief = readGreenBrief(h);
-    const feed = greenFeedLine(brief, shot.greenPoint);
-    if (feed) {
-      body.push(
-        `<div class="prep-green-feed"><div class="prep-mini-label">Green</div>${escapeHtml(feed)}</div>`
-      );
-    } else {
-      body.push(
-        '<div class="prep-green-feed missing">Open 3D Green once to load slope — then advice knows which way the ball feeds.</div>'
-      );
-    }
-
-    // Advisory paragraph — conditions-aware course management.
-    const tips = [];
-    const depth = g.depth;
-    if (depth != null) {
-      if (depth >= 26) tips.push(`Deep green (~${Math.round(depth)} yd) — space to be aggressive.`);
-      else if (depth <= 14) tips.push(`Shallow green (~${Math.round(depth)} yd) — distance control decides it; favour the middle.`);
-    }
-    if (cond.surface === 'soft') {
-      tips.push('Soft turf gives nothing back — trust carry, never bounce.');
-    } else if (cond.surface === 'firm') {
-      if (shot.greenPoint === 'front') tips.push('Firm release will run through front pins — consider targeting the middle.');
-      else tips.push('Firm ground rewards landing short of your spot and letting it release.');
-    }
-    if (h.par === 5) tips.push('Decide the layup number NOW, not off the second shot.');
-    else if (h.par === 3) tips.push('One clean strike — commit fully to the conditioned number.');
-
-    // Carry danger callout: water near the required carry line.
-    if (h.yards && cond.windMph >= 1) {
-      const danger = haz.find(
-        (hz) =>
-          hz.type === 'water' &&
-          (() => {
-            const along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
-            return along != null && teeCalc && Math.abs(along - teeCalc.playsLikeYd) <= 12;
-          })()
-      );
-      if (danger) {
-        const along = Number.isFinite(danger.along) ? danger.along : hazardAlongYd(danger.sub);
-        tips.push(`Water sits right at your carry zone (~${Math.round(along || 0)} yd) — take enough club or lay back.`);
-      }
-    }
-
-    body.push(`<div class="prep-strat-advice">${tips.map(escapeHtml).join(' ') || 'Study the carries above and pick your target before you step on the tee.'}</div>`);
     body.push(green3dButtonHtml(h));
 
     $('prepStratBody').innerHTML = body.join('');
     wireBackButton();
+    wireHoleMapTap();
+  }
+
+  // v1.16.0 (James: tap the hole map → satellite view of the hole):
+  // exposes the plan's landing points (lat/lng + bag color) so the
+  // satellite sheet can draw them, and wires the cartoon as the tap
+  // target. Requires holeSat.js (window.PrepHoleSat).
+  function wireHoleMapTap() {
+    const tap = document.getElementById('prepHoleMapTap');
+    if (!tap) return;
+    const open = () => {
+      if (!boundHole || typeof window.PrepHoleSat === 'undefined') return;
+      // landing dots: walk the plan splits against the real path
+      const landing = [];
+      try {
+        if (Array.isArray(boundHole.pathPts) && boundHole.pathPts.length >= 2) {
+          const mLat = 110540;
+          const mLng = 111320 *
+            Math.cos(boundHole.pathPts[0].lat * Math.PI / 180);
+          const acc = [0];
+          for (let i = 1; i < boundHole.pathPts.length; i++) {
+            const a = boundHole.pathPts[i - 1], b = boundHole.pathPts[i];
+            acc.push(acc[i - 1] + Math.hypot(
+              (b.lng - a.lng) * mLng, (b.lat - a.lat) * mLat) / 0.9144);
+          }
+          const names = seqNames(boundHole);
+          const total = acc[acc.length - 1] || 1;
+          const effYd = Number(boundHole.yards) || total;
+          const share = Math.min(1, effYd / total);
+          names.forEach((nm, i) => {
+            const d0 = (total * i) / names.length * share;
+            const d1 = (total * (i + 1)) / names.length * share;
+            // landing = path point at d1
+            let best = boundHole.pathPts[boundHole.pathPts.length - 1];
+            let bd = Infinity;
+            for (let k = 0; k < boundHole.pathPts.length; k++) {
+              const dd = Math.abs(acc[k] - d1);
+              if (dd < bd) { bd = dd; best = boundHole.pathPts[k]; }
+            }
+            const hex = (window.PrepHoleCatHex &&
+              window.PrepHoleCatHex[clubCatOf(nm)]) || '#5ea8ff';
+            landing.push({ lat: best.lat, lng: best.lng, hex });
+          });
+        }
+      } catch (e) { /* dots are garnish */ }
+      window.PrepHoleSat.open({
+        greenLatLng: boundHole.greenLatLng,
+        courseId: boundHole.courseId,
+        hole: boundHole.number,
+      });
+      haptic(6);
+    };
+    tap.addEventListener('click', open);
+    tap.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
   }
 
   function wireBackButton() {

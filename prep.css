@@ -1384,6 +1384,68 @@ body.dark .prep-strat-advice {
 }
 .prep-hole-back svg { opacity: 0.75; }
 
+/* v1.16.0 — tap-the-hole-map satellite sheet (Play-tab look: dark glass
+   header over a full-bleed satellite map). Styled like greenedit's
+   sheet but with the app's chrome language. */
+#prep-sat-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  background: #0e1411;
+  padding-top: var(--safe-top, 0px);
+}
+.psh-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(10, 14, 12, 0.92);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border-bottom: 0.5px solid var(--glass-stroke, rgba(255,255,255,0.14));
+}
+.psh-btn {
+  background: rgba(127, 127, 127, 0.14);
+  border: none;
+  color: var(--text, #e8efe9);
+  font: inherit;
+  font-weight: 800;
+  font-size: 14px;
+  padding: 8px 14px;
+  border-radius: 11px;
+}
+.psh-btn:active { transform: scale(0.96); }
+.psh-spacer { visibility: hidden; }
+.psh-title {
+  flex: 1;
+  text-align: center;
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--text, #e8efe9);
+}
+.psh-map { flex: 1; min-height: 0; background: #0a0f0c; }
+.psh-hint {
+  padding: 9px 14px;
+  padding-bottom: calc(9px + var(--safe-bottom, 0px));
+  font-size: 11px;
+  color: var(--muted, #9db3a6);
+  background: rgba(10, 14, 12, 0.92);
+  border-top: 0.5px solid var(--glass-stroke, rgba(255,255,255,0.14));
+}
+/* map tap cursor affordance on the cartoon */
+.prep-hm-wrap[role="button"] { cursor: pointer; }
+.prep-hm-wrap[role="button"]:active svg { opacity: 0.85; }
+/* satellite sheet flag pill */
+.psh-flag .psh-flag-pill {
+  font-size: 16px;
+  color: #ffd166;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  transform: translate(-50%, -100%);
+  display: inline-block;
+}
+
 /* v1.15.4 — expanded shot row spacing: the injected number UI breathes
    inside the plan row (padding rhythm, divider before tweaks). */
 .prep-num-inline {
