@@ -1963,6 +1963,22 @@
         mesh: null, arrows: [],
         eg, zoneMask, spanM, centerLL: [(w + e) / 2, (s + n) / 2],
         gOff: [gOffX, gOffY],
+        // v1.15.0: the real hole path (when Prep passes it) — the hole
+        // view uses it to suppress the straight tee→green chord line.
+        pathPts: (() => {
+          try {
+            const profiles = JSON.parse(
+              localStorage.getItem('caddy:courseProfiles:v1') || '[]');
+            const courseId = qs.get('course');
+            const holeNum = parseInt(qs.get('hole'), 10);
+            const c = courseId
+              ? profiles.find((p) => p && p.id === courseId) : null;
+            const hz = c && Array.isArray(c.holes) && holeNum >= 1 &&
+              holeNum <= c.holes.length ? c.holes[holeNum - 1] : null;
+            return hz && Array.isArray(hz.pathPts) &&
+              hz.pathPts.length >= 2 ? hz.pathPts : null;
+          } catch (e) { return null; }
+        })(),
         // v1.14.0 (R6-D2): oriented GEOMETRY mask for the mesh — the hole
         // view frames the mesh, and the fetch intent was the oriented
         // tee→green rectangle, not its square envelope. ds.mask stays the
@@ -3369,7 +3385,15 @@
       }
       // v1.1.4: tee→green aim line + yardage readout (only when a real tee
       // is known — no fake numbers, same rule as everywhere else).
-      if (teeM && greenM) {
+      // v1.15.0 (James: "ignore the straight line from the tee to the
+      // green or at least not show it visually"): on a dogleg the straight
+      // chord cuts across the corner and reads as a fake shot line. When
+      // the course carries the real path, draw the YARDAGE READOUT only —
+      // no dashed chord. (Hole view without path data keeps the line:
+      // it's the only distance cue there.)
+      if (teeM && greenM && !(state.datasets.hole &&
+          Array.isArray(state.datasets.hole.pathPts) &&
+          state.datasets.hole.pathPts.length >= 2)) {
         const a = GreenMapCore.projectPt(cam, teeM[0], teeM[1],
           surfZ3(teeM[0], teeM[1]) + 0.3);
         const b = GreenMapCore.projectPt(cam, greenM[0], greenM[1],

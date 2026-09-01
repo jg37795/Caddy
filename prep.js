@@ -282,15 +282,17 @@
     studio.innerHTML = `
       <!-- ============ THE HOLE CARD (v1.9.0) ============
            One card when a hole is selected. Top-to-bottom:
-           header → map → TARGET TILES (the picker) → THE NUMBER →
-           tweaks (lie/shape) → caddy notes → conditions (collapsed).
-           The old Pre-shot / The-shot / Conditions boxes are merged in. -->
+           header (hole number = back nav, v1.15.0) → map →
+           shot plan → THE NUMBER → tweaks (lie/shape) → caddy notes →
+           conditions (collapsed). The old Pre-shot / The-shot /
+           Conditions boxes are merged in. -->
       <div class="card" id="prepStrategyCard" hidden>
         <div class="prep-hole-brief-head">
-          <div>
-            <div class="prep-kicker" style="color: var(--muted); margin-bottom: 2px">Hole brief</div>
-            <h3 id="prepStratTitle" style="margin: 0">Hole strategy</h3>
-          </div>
+          <button type="button" class="prep-hole-back" id="prepStratTitle"
+            title="Back to all holes" aria-label="Back to all holes">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M14.5 6l-6 6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span id="prepStratTitleText">Hole strategy</span>
+          </button>
           <span class="chip" id="prepStratChip">—</span>
         </div>
         <div id="prepStratBody"></div>
@@ -1041,6 +1043,30 @@
     return names;
   }
 
+  // v1.15.0 (shot plan): the hole's shot sequence as concrete shots.
+  // Returns full club names (with "% swing" partials intact) so each
+  // plan line can show a real target number.
+  function planSequenceFor(totalYd, names) {
+    if (!names || !names.length) return [];
+    return names;
+  }
+
+  // Stock carry for a club name (matches "7 Iron" and "7 Iron · 85% swing"
+  // — partial swings use their percentage of the stock number). Reads the
+  // bag through the bridge (api.clubSequence-style access).
+  function clubYardsFor(name) {
+    const bag = typeof api.clubs === 'function' ? api.clubs() : [];
+    if (!Array.isArray(bag)) return null;
+    const base = String(name || '').replace(/\s*·.*$/, '').trim()
+      .toLowerCase();
+    const club = bag.find((c) =>
+      String(c.name || '').trim().toLowerCase() === base);
+    if (!club || !Number.isFinite(club.yards)) return null;
+    const pctM = /(\d+)%\s*swing/.exec(String(name || ''));
+    const pct = pctM ? Number(pctM[1]) / 100 : 1;
+    return Math.round(club.yards * pct);
+  }
+
   // v1.10.0 (real-shape maps): the map draws the hole's TRUE geometry
   // when the course was imported after this shipped — pathPts (the OSM
   // hole way, simplified) + greenRingPts (the OSM green outline).
@@ -1067,12 +1093,15 @@
     let P = null;   // {toXY(latlngOrAlongCross)} when real geometry exists
     if (Array.isArray(h.pathPts) && h.pathPts.length >= 3 &&
         h.teeLatLng && h.greenLatLng) {
-      // Local EN plane anchored at the ACTIVE tee point (it moves with
-      // tee sets), yards, rotated so tee→green is +X.
-      const mLat = 111320, mLng = 111320 * Math.cos(h.teeLatLng.lat * Math.PI / 180);
+      // v1.15.0: anchor the EN plane at the PATH's first point — the hole
+      // way start, which is on the hole line (the stored teePoint may be
+      // a tee-set node tens of yards off the line; the tee dot is then
+      // drawn at the path start and never floats).
+      const anchor = h.pathPts[0];
+      const mLat = 111320, mLng = 111320 * Math.cos(anchor.lat * Math.PI / 180);
       const en = (ll) => ({
-        x: ((ll.lng - h.teeLatLng.lng) * mLng) / 0.9144,
-        y: ((ll.lat - h.teeLatLng.lat) * mLat) / 0.9144,
+        x: ((ll.lng - anchor.lng) * mLng) / 0.9144,
+        y: ((ll.lat - anchor.lat) * mLat) / 0.9144,
       });
       const tgt = en(h.greenLatLng);
       const L = Math.hypot(tgt.x, tgt.y) || 1e-9;
@@ -1126,12 +1155,66 @@
       }
 
       // Hazards: project real positions when lat/lng present.
+      // v1.15.0 (path-relative — James: the cartoon was still wrong on
+      // doglegs): hazards now measure against the FAIRWAY PATH, not the
+      // tee→green chord. For each hazard: nearest path point (walked
+      // cumulative distance = along) and the signed perpendicular from
+      // the LOCAL path direction there (= cross, +right of play). On a
+      // dogleg this is what the eye expects; the chord put bunkers
+      // bunching near the green, detached from the line.
+      const pathAlong = (() => {
+        // cumulative path distance (yd) per pathPts index
+        const acc = [0];
+        for (let i = 1; i < h.pathPts.length; i++) {
+          const a = P.toXY(h.pathPts[i - 1]);
+          const b = P.toXY(h.pathPts[i]);
+          acc.push(acc[i - 1] + Math.hypot(b.along - a.along, b.cross - a.cross));
+        }
+        return acc;
+      })();
+      const pathProject = (ll) => {
+        let best = null;
+        for (let i = 1; i < h.pathPts.length; i++) {
+          const a = P.toXY(h.pathPts[i - 1]);
+          const b = P.toXY(h.pathPts[i]);
+          const dx = b.along - a.along, dy = b.cross - a.cross;
+          const len2 = dx * dx + dy * dy || 1e-9;
+          const p = P.toXY(ll);
+          let tt = ((p.along - a.along) * dx + (p.cross - a.cross) * dy) / len2;
+          tt = Math.max(0, Math.min(1, tt));
+          const projAlong = a.along + tt * dx;
+          const projCross = a.cross + tt * dy;
+          const d2 = (p.along - projAlong) * (p.along - projAlong) +
+            (p.cross - projCross) * (p.cross - projCross);
+          if (!best || d2 < best.d2) {
+            // v1.15.0: return the projection point in GLOBAL chord coords
+            // (draw position is honest on doglegs — the dot sits on the
+            // drawn path) plus the PATH-RELATIVE side for the label:
+            // signed perpendicular from the LOCAL segment direction,
+            // + = golfer's right of play (viewer-behind-tee convention).
+            const segLen = Math.sqrt(len2) || 1e-9;
+            const ux = dx / segLen, uy = dy / segLen;
+            const relA = (p.along - projAlong) * ux +
+              (p.cross - projCross) * uy;          // (unused, kept for debug)
+            const side = (p.along - projAlong) * uy -
+              (p.cross - projCross) * ux;          // + = right of local play
+            best = {
+              d2,
+              along: pathAlong[i - 1] + tt * segLen,  // walked path yd
+              gx: projAlong, gy: projCross,           // global draw coords
+              side,
+            };
+          }
+        }
+        return best;
+      };
       const haz = Array.isArray(h.hazards) ? h.hazards : [];
       for (const hz of haz) {
         let ax = null, ay = null;
         if (Number.isFinite(hz.lat) && Number.isFinite(hz.lng) && h.teeLatLng) {
-          const pr = P.toXY(hz);
-          ax = P.X(pr.along); ay = P.Y(pr.cross);
+          const pr = pathProject(hz);
+          if (!pr) continue;
+          ax = P.X(pr.gx); ay = P.Y(pr.gy);
         } else {
           const along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
           if (along == null || along <= 0 || along >= effYd) continue;
@@ -1191,8 +1274,9 @@
         );
       }
 
-      // Tee + flag at the path's real ends.
-      const teeP = P.toXY(h.teeLatLng);
+      // v1.15.0: tee dot AT the path's first point (never floating off the
+      // line on a tee-set offset); flag at the path's real end.
+      const teeP = P.toXY(h.pathPts[0]);
       const teeXY = { x: P.X(teeP.along), y: P.Y(teeP.cross) };
       parts.push(`<circle class="prep-hm-tee" cx="${teeXY.x.toFixed(1)}" cy="${teeXY.y.toFixed(1)}" r="5.5"/>`);
       const gEnd = P.toXY(h.greenLatLng);
@@ -1311,7 +1395,7 @@
       href2 += `&hole=${h.number}&armtee=1`;
     }
     const teeBtn = href2
-      ? `<a class="ghost-btn prep-tee-btn" id="prepTeeBtn" href="${href2}" title="Place your tee box on a map">Tee</a>`
+      ? `<a class="ghost-btn prep-tee-btn" id="prepTeeBtn" href="${href2}" title="Place your tee box on a map"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v3.4M12 17.8v3.4M2.8 12h3.4M17.8 12h3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Move tee</a>`
       : '';
     return `${teeBtn}<a class="primary-btn prep-3d-btn" id="prep3dGreenBtn" href="${href}">` +
       '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">' +
@@ -1330,7 +1414,7 @@
     }
     const h = boundHole;
     card.hidden = false;
-    $('prepStratTitle').textContent = `Hole ${h.number}`;
+    $('prepStratTitleText').textContent = `Hole ${h.number}`;
     $('prepStratChip').textContent = h.par ? `Par ${h.par}` : 'Par —';
 
     const body = [];
@@ -1344,7 +1428,6 @@
         `<div class="prep-strat-advice">Hole ${h.number} isn't mapped — no yardage, green, or hazards on record.</div>`
       );
       body.push(green3dButtonHtml(h));
-      body.push('<button type="button" class="ghost-btn prep-back-holes" id="prepBackHoles">All holes</button>');
       $('prepStratBody').innerHTML = body.join('');
       wireBackButton();
       return;
@@ -1383,31 +1466,79 @@
     body.push(seqChipsHtml(names));
     body.push('</div>');
 
-    // Off-the-tee recommendation under current conditions
-    // v-fix(dedupe-tee-solve) v1.5.3 (audit #20): the tee solve ran here AND
-    // again in the water-danger check below; one call, reused.
-    // v1.12.0: the tee is the player's placed tee (manual teePoint) —
-    // the card's yardage already reflects it via the importer/planHoleYardage.
+    // v1.15.0 (shot plan — James: the advice "is so basic it just says
+    // lay up"): the plan walks the ACTUAL shot sequence and gives each
+    // shot a job — target number, plays-like, and the WHY (hazards near
+    // the landing zone, dogleg shape, green depth, conditions). The tee
+    // box and approach each get their own reasoning.
     let teeCalc = null;
     const effYd = h.yards ? Math.round(h.yards) : 0;
+    const haz = Array.isArray(h.hazards) ? h.hazards : [];
+    const hzAlong = (hz) => Number.isFinite(hz.along)
+      ? hz.along : hazardAlongYd(hz.sub);
     if (effYd) {
       teeCalc = solve(effYd);
-      const teeRec = api.recommendClub(teeCalc.playsLikeYd);
-      const eff = effortInfo(teeRec.main);
-      const delta = Math.round(teeCalc.playsLikeYd - effYd);
-      const why = Math.abs(delta) >= 2
-        ? `${delta >= 0 ? '+' : ''}${delta} yd vs the ${effYd} yd you're playing`
-        : 'plays true to the number';
-      body.push(`
-        <div class="prep-tee-box">
-          <div class="prep-mini-label">Suggested off the tee</div>
-          <div class="prep-tee-main">${escapeHtml(clubShort(teeRec.main))}</div>
-          <div class="prep-tee-sub">Plays ${fmt(teeCalc.playsLikeYd)} of ${effYd} — ${why}. ${eff.note ? escapeHtml(eff.note.charAt(0).toUpperCase() + eff.note.slice(1)) + '.' : ''}</div>
-        </div>`);
+      const seq = planSequenceFor(effYd, names);
+      const landingNotes = (fromYd, toYd) => {
+        // hazards whose along sits within the landing window
+        const near = haz.filter((hz) => {
+          const a = hzAlong(hz);
+          return a != null && a >= fromYd - 12 && a <= toYd + 12;
+        });
+        if (!near.length) return '';
+        const w = near.find((x) => x.type === 'water');
+        const b = near.find((x) => x.type !== 'water');
+        const hz = w || b;
+        const a = hzAlong(hz);
+        const side = /right/.test(hz.sub || '') ? 'right'
+          : /left/.test(hz.sub || '') ? 'left' : 'on the line';
+        return `${w ? 'Water' : 'Bunker'} ${side} at ~${Math.round(a)} yd — ${
+          w ? 'take enough club to clear it or lay back short'
+            : 'keep your line away from it'}`;
+      };
+      const lines = [];
+      let prev = 0;
+      seq.forEach((shotName, idx) => {
+        const isLast = idx === seq.length - 1;
+        const segYd = isLast ? effYd - prev : Math.min(
+          clubYardsFor(shotName) || effYd - prev, effYd - prev);
+        const toYd = prev + segYd;
+        const calc = solve(segYd);
+        const rec = api.recommendClub(calc.playsLikeYd);
+        const delta = Math.round(calc.playsLikeYd - segYd);
+        const windTxt = Math.abs(delta) >= 2
+          ? `plays ${fmt(calc.playsLikeYd)} (${delta > 0 ? '+' : ''}${delta})`
+          : 'plays true';
+        const note = landingNotes(prev, toYd) ||
+          (isLast && g0.depth != null && g0.depth <= 14
+            ? 'shallow green — favour the middle, distance control over line'
+            : '');
+        lines.push(
+          `<div class="prep-plan-shot">` +
+          `<span class="prep-plan-club">${escapeHtml(clubShort(shotName))}</span>` +
+          `<span class="prep-plan-num">${fmt(segYd)} yd</span>` +
+          `<span class="prep-plan-sub">${windTxt}${note ? ' · ' + escapeHtml(note) : ''}</span>` +
+          `</div>`
+        );
+        prev = toYd;
+      });
+      body.push(`<div class="prep-plan">${lines.join('')}</div>`);
+      if (teeCalc) {
+        const teeRec = api.recommendClub(teeCalc.playsLikeYd);
+        const delta = Math.round(teeCalc.playsLikeYd - effYd);
+        const why = Math.abs(delta) >= 2
+          ? `${delta >= 0 ? '+' : ''}${delta} yd vs the ${effYd} yd you're playing`
+          : 'plays true to the number';
+        body.push(`
+          <div class="prep-tee-box">
+            <div class="prep-mini-label">Suggested off the tee</div>
+            <div class="prep-tee-main">${escapeHtml(clubShort(teeRec.main))}</div>
+            <div class="prep-tee-sub">Plays ${fmt(teeCalc.playsLikeYd)} of ${effYd} — ${why}.</div>
+          </div>`);
+      }
     }
 
-    // Hazards
-    const haz = Array.isArray(h.hazards) ? h.hazards : [];
+    // Hazards (haz declared above for the shot plan)
     body.push('<div class="prep-section-gap"><div class="prep-mini-label">Hazards in play</div>');
     if (haz.length) {
       body.push(
@@ -1440,7 +1571,13 @@
     ];
     const mapped = pts.filter(([, , v]) => v != null);
     if (mapped.length) {
-      body.push('<div class="prep-section-gap"><div class="prep-mini-label">Target — tap to play it</div><div class="prep-carry-strip">');
+      // v1.15.0 (James: "tap to play it is kind of dumb… why?"): the
+      // F/M/B row is now a CONTEXT read, not a picker — all three
+      // pin yardages at a glance, middle highlighted (the default
+      // aiming point). Tapping a tile still moves the pin for the
+      // number below, but it's no longer presented as a required
+      // choice. The Number section header states what it targets.
+      body.push('<div class="prep-section-gap"><div class="prep-mini-label">Green — front / middle / back</div><div class="prep-carry-strip">');
       for (const [label, key, dist] of pts) {
         if (dist == null) {
           body.push(`<div class="prep-carry-tile" data-point="${key}" disabled><i>${label}</i>—</div>`);
@@ -1500,14 +1637,16 @@
 
     body.push(`<div class="prep-strat-advice">${tips.map(escapeHtml).join(' ') || 'Study the carries above and pick your target before you step on the tee.'}</div>`);
     body.push(green3dButtonHtml(h));
-    body.push('<button type="button" class="ghost-btn prep-back-holes" id="prepBackHoles">All holes</button>');
 
     $('prepStratBody').innerHTML = body.join('');
     wireBackButton();
   }
 
   function wireBackButton() {
-    const back = $('prepBackHoles');
+    // v1.15.0: the "All holes" button is gone — the hole number in the
+    // card header IS the back navigation (bigger tap target, one less
+    // button). The id is kept so the wiring stays in one place.
+    const back = $('prepStratTitle') || $('prepBackHoles');
     if (!back) return;
     back.addEventListener('click', () => {
       boundHole = null;

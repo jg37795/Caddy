@@ -1303,12 +1303,67 @@ body.dark .prep-strat-advice {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   padding: 10px 16px;
   border-radius: 12px;
   font-weight: 800;
   font-size: 14px;
   margin-right: 8px;
 }
+
+/* v1.15.0 — shot plan rows + header back-nav */
+.prep-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.prep-plan-shot {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.prep-plan-club {
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--text, #e8efe9);
+}
+.prep-plan-num {
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--green, #2ecc71);
+  white-space: nowrap;
+}
+.prep-plan-sub {
+  font-size: 12px;
+  color: var(--muted, #9db3a6);
+  line-height: 1.35;
+}
+.prep-hole-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  color: var(--text, #e8efe9);
+  font: inherit;
+  font-weight: 800;
+  font-size: 20px;
+  padding: 6px 10px 6px 4px;
+  margin: -6px 0 -6px -4px;
+  border-radius: 10px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.prep-hole-back:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+.prep-hole-back svg { opacity: 0.75; }
 
 /* v1.9.0 — the single hole card: number block, tiles-as-picker, tweaks */
 .prep-num-block {

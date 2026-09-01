@@ -493,7 +493,7 @@
             ? rawHoles[index]
             : {};
 
-        return {
+        const holeOut = {
           ...defaultHole(index + 1),
           ...sourceHole,
 
@@ -510,6 +510,34 @@
               ? ''
               : Math.max(1, Math.round(num(sourceHole.yards, 0))),
         };
+
+        // v1.15.0 tee-anchor migration (one-time, safe): courses saved
+        // before this version anchored teePoint on a tee-set node (often
+        // the women's tee, tens of yards off the hole line). When the
+        // hole carries pathPts and the tee is NOT player-placed
+        // (teeSource === 'manual'), snap it to the way end farthest from
+        // the green centre. Player tees are never touched.
+        try {
+          const pts = holeOut.pathPts;
+          if (Array.isArray(pts) && pts.length >= 2 &&
+              holeOut.teeSource !== 'manual' &&
+              holeOut.greenCenter && Number.isFinite(holeOut.greenCenter.lat)) {
+            const dM = (a, b) => Math.hypot(
+              (a.lng - b.lng) * 111320 * Math.cos(a.lat * Math.PI / 180),
+              (a.lat - b.lat) * 110540);
+            const gEnd = holeOut.greenCenter;
+            const d0 = dM(pts[0], gEnd);
+            const dN = dM(pts[pts.length - 1], gEnd);
+            const wayTee = d0 >= dN ? pts[0] : pts[pts.length - 1];
+            if (wayTee && (!holeOut.teePoint ||
+                dM(holeOut.teePoint, wayTee) > 9.144)) {   // >10 yd off
+              holeOut.teePoint = { lat: wayTee.lat, lng: wayTee.lng };
+              holeOut.teeSource = 'way';
+            }
+          }
+        } catch (e) { /* migration is best-effort */ }
+
+        return holeOut;
       }),
     };
   }
@@ -5676,8 +5704,31 @@
           report.yardsImported++;
         }
 
-        if (setEntry) h.teePoint = { lat: setEntry.lat, lng: setEntry.lng };
-        else h.teePoint = { lat: r.path[0].lat, lng: r.path[0].lng };
+        // v1.15.0 (tee anchor — James: "set the tee to the start of the
+        // hole line because it's been super accurate"): the tee-set node
+        // (usually the women's tee) can sit 50+ yd off the hole line —
+        // every projection anchored there inherited the offset (floating
+        // tee dot, misplaced hazards). The OSM hole WAY's geometry is
+        // accurate: anchor the tee at the way END FARTHEST from the
+        // green centre (direction of the way is not guaranteed in OSM).
+        // Tee-set nodes remain in teeSets for yardage/labels only.
+        let wayTee = null;
+        if (r.path && r.path.length) {
+          const gEnd = r.greenCenter || r.path[r.path.length - 1];
+          const d0 = osmDistM(r.path[0], gEnd);
+          const dN = osmDistM(r.path[r.path.length - 1], gEnd);
+          wayTee = d0 >= dN ? r.path[0] : r.path[r.path.length - 1];
+        }
+        if (h.teeSource === 'manual' && h.teePoint) {
+          // Player-placed tee (Check location "Move tee") always wins.
+        } else if (wayTee) {
+          h.teePoint = { lat: wayTee.lat, lng: wayTee.lng };
+          h.teeSource = 'way';
+        } else if (setEntry) {
+          h.teePoint = { lat: setEntry.lat, lng: setEntry.lng };
+        } else {
+          h.teePoint = { lat: r.path[0].lat, lng: r.path[0].lng };
+        }
 
         if (r.greenCenter) h.greenCenter = r.greenCenter;
         if (r.front) h.front = r.front;
@@ -12806,15 +12857,82 @@ out geom;`;
         Number.isFinite(h.lat) &&
         Number.isFinite(h.lng)
       ) {
-        const along = alongTrackYd(tee, green, h);
-        const cross = crossTrackYd(tee, green, h);
-        const side =
-          Math.abs(cross) < 8
-            ? 'on the line'
-            : cross > 0
-              ? 'right'
-              : 'left';
-        sub = `${side}, ~${Math.max(0, Math.round(along))} yd off the tee`;
+        // v1.15.0 (path-relative hazards): when the hole carries its real
+        // path, measure along = walked path distance to the nearest path
+        // point and side = perpendicular from the LOCAL path direction
+        // there (a dogleg's "right" is the golfer's right AT the bunker,
+        // not right of the chord). Falls back to the chord projection
+        // when no path is stored.
+        const path = Array.isArray(hole.pathPts) && hole.pathPts.length >= 2
+          ? hole.pathPts : null;
+        if (path) {
+          const mLat = 110540;
+          const mLng = 111320 * Math.cos(path[0].lat * Math.PI / 180);
+          const en = (p) => ({
+            x: (p.lng - path[0].lng) * mLng,
+            y: (p.lat - path[0].lat) * mLat,
+          });
+          const q = en(h);
+          let best = null;
+          let walked = 0;
+          for (let i = 1; i < path.length; i++) {
+            const a = en(path[i - 1]), b = en(path[i]);
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const len2 = dx * dx + dy * dy || 1e-9;
+            let t = ((q.x - a.x) * dx + (q.y - a.y) * dy) / len2;
+            t = Math.max(0, Math.min(1, t));
+            const px = a.x + t * dx, py = a.y + t * dy;
+            const d2 = (q.x - px) * (q.x - px) + (q.y - py) * (q.y - py);
+            if (!best || d2 < best.d2) {
+              const segLen = Math.sqrt(len2) || 1e-9;
+              const ux = dx / segLen, uy = dy / segLen;
+              // +side = golfer's RIGHT of local play (viewer-behind-tee):
+              // rotate the heading -90° → (uy, -ux); dot with the offset.
+              const side = (q.x - px) * uy - (q.y - py) * ux;
+              best = { d2, side };
+            }
+            walked += Math.sqrt(len2);
+          }
+          if (best) {
+            // walk cumulative distance to the projection point:
+            let acc = 0, alongM = null;
+            for (let i = 1; i < path.length; i++) {
+              const a = en(path[i - 1]), b = en(path[i]);
+              const segM = Math.hypot(b.x - a.x, b.y - a.y);
+              const dx = b.x - a.x, dy = b.y - a.y;
+              const len2 = dx * dx + dy * dy || 1e-9;
+              let t = ((q.x - a.x) * dx + (q.y - a.y) * dy) / len2;
+              t = Math.max(0, Math.min(1, t));
+              const px = a.x + t * dx, py = a.y + t * dy;
+              const d2 = (q.x - px) * (q.x - px) + (q.y - py) * (q.y - py);
+              if (best && Math.abs(d2 - best.d2) < 1e-6) {
+                alongM = acc + t * segM;
+                break;
+              }
+              acc += segM;
+            }
+            if (alongM != null) {
+              const along = alongM * OSM_YD_PER_M;
+              const crossYd = Math.sqrt(best.d2) * OSM_YD_PER_M *
+                (best.side >= 0 ? 1 : -1);
+              const side = Math.abs(crossYd) < 8
+                ? 'on the line'
+                : crossYd > 0 ? 'right' : 'left';
+              sub = `${side}, ~${Math.max(0, Math.round(along))} yd off the tee`;
+            }
+          }
+        }
+        if (!sub) {
+          const along = alongTrackYd(tee, green, h);
+          const cross = crossTrackYd(tee, green, h);
+          const side =
+            Math.abs(cross) < 8
+              ? 'on the line'
+              : cross > 0
+                ? 'right'
+                : 'left';
+          sub = `${side}, ~${Math.max(0, Math.round(along))} yd off the tee`;
+        }
       }
       return { type: h.type, label: kind, sub };
     });
@@ -14572,6 +14690,13 @@ out geom;`;
     // no writes, no UI. null when yards or bag are missing.
     clubSequence(totalYd) {
       return planClubSequence(totalYd);
+    },
+    // v1.15.0 (shot plan): read-only bag snapshot so Prep can resolve a
+    // club name to its stock carry.
+    clubs() {
+      return (state.clubs || []).map((c) => ({
+        name: c.name, yards: c.yards,
+      }));
     },
     haptic,
   };
