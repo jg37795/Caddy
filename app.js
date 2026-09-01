@@ -5836,9 +5836,20 @@
 
     // Strategy 1: server-side scope to the course area.
     // Area ids: way -> 2400000000 + id, relation -> 3600000000 + id.
+    // v1.18.1 (James: choosing "Jester Park Executive" mapped the 18-hole
+    // course): when the chosen course's OWN area has no golf=hole ways,
+    // that means OSM hasn't mapped that course — fall through to a
+    // 2.8 km point radius and it vacuums up the NEIGHBOUR'S scorecard
+    // (the main 18). A wrong scorecard is worse than none (James's
+    // honest-nulls rule), so area-scoped courses now get the SAME honest
+    // "isn't mapped in OpenStreetMap yet" answer the search level gives.
+    // The radius fallback remains ONLY for point-tagged courses (no
+    // area to scope to).
+    let areaScoped = false;
     if ((osmType === 'way' || osmType === 'relation') && Number.isFinite(osmId)) {
+      areaScoped = true;
       const areaId = (osmType === 'way' ? 2400000000 : 3600000000) + osmId;
-      const qArea = `[out:json][timeout:40];
+      const qArea = `[out:json][timeout:25];
 area(${areaId})->.a;
 (
   nwr["golf"](area.a);
@@ -5846,24 +5857,38 @@ area(${areaId})->.a;
 );
 out geom;`;
       try {
-        const els = await overpassFetch(qArea, { cacheKey, timeoutMs: 45000 });
-        // Fall through on EMPTY, not just on error: not every way/relation has an
-        // area counterpart, and Overpass area extraction lags the main DB.
+        const els = await overpassFetch(qArea, { cacheKey, timeoutMs: 30000 });
         if (els.some((e) => e.tags && e.tags.golf === 'hole')) return els;
-      } catch { /* fall through */ }
+        // Empty area result → the chosen course has no mapped holes.
+        const err = new Error(
+          `${candidate.name || 'This course'} isn't mapped in OpenStreetMap yet — no holes were found for it.`);
+        err.honestUnmapped = true;
+        throw err;
+      } catch (e) {
+        // Empty-but-successful area answer is FINAL for area courses
+        // (honestUnmapped rethrown above). Only a TIMEOUT/abort may fall
+        // through to the radius query — a mirror may still answer fast —
+        // any other error surfaces (never import the neighbour on a
+        // broken response).
+        if (e && e.honestUnmapped) throw e;
+        if (!(e && /timed? ?out|abort/i.test(String(e && e.message)))) {
+          throw e;
+        }
+      }
     }
 
-    // Strategy 2: radius (node-tagged courses, or missing area).
+    // Strategy 2: radius — ONLY for point-tagged courses (no area to
+    // scope to). Area-scoped courses never reach here (see above).
     if (!Number.isFinite(cLat) || !Number.isFinite(cLng)) {
       throw new Error('Selected course has no usable coordinates.');
     }
-    const qRadius = `[out:json][timeout:40];
+    const qRadius = `[out:json][timeout:25];
 (
   nwr["golf"](around:2800,${cLat},${cLng});
   nwr["natural"="water"](around:2800,${cLat},${cLng});
 );
 out geom;`;
-    return overpassFetch(qRadius, { cacheKey, timeoutMs: 45000 });
+    return overpassFetch(qRadius, { cacheKey, timeoutMs: 30000 });
   }
 
   /* ================= Import reporting ================= */
@@ -5999,6 +6024,31 @@ out geom;`;
       flashMappingSuccess();
     } catch (error) {
       console.warn('Auto scorecard lookup failed:', error);
+
+      // v1.18.1: honest-unmapped on the ROUND path too — the chosen
+      // course's own OSM area has no holes; do NOT silently import the
+      // neighbour's scorecard. Bind a MANUAL template (editable
+      // scorecard, startable — same as a manual course) with a clear
+      // message explaining why the map came back empty.
+      if (error && error.honestUnmapped) {
+        clearCourseMapping();
+        els.nearbyCourseStatus.textContent =
+          `${candidate.name} isn't mapped in OpenStreetMap yet — no holes ` +
+          `were found for it. The scorecard is blank and editable — add ` +
+          `pars and yardages, or pick another course.`;
+        state.selectedCourseTemplate = normalizeCourse({
+          id: `local:${cryptoId()}`,
+          name: candidate.name,
+          teeName: 'Regular tees',
+          source: 'manual',
+          location: { lat: candidate.lat, lng: candidate.lng },
+          holes: defaultCourseHoles(),
+        });
+        applyTemplateHoleCount(state.selectedCourseTemplate);
+        renderRoundSetupHoles(state.selectedCourseTemplate.holes);
+        renderTeeSetPicker(state.selectedCourseTemplate);
+        return;
+      }
 
       // Mapping failed: Start stays blocked until a successful retry or
       // the user explicitly clears the course selection.
@@ -12441,7 +12491,16 @@ out geom;`;
           }
           return {
             id: `osm:${p.osm_type || 'n'}:${p.osm_id}`,
-            osmType: p.osm_type || null,
+            // v1.18.1 (REAL root cause of "Executive mapped the 18-hole
+            // course"): Photon returns osm_type as the OSM primitive
+            // LETTER 'W'/'R'/'N', but the scorecard area-scoping compares
+            // 'way'/'relation' — the mismatch meant EVERY Photon-sourced
+            // course skipped area scoping and fell to the 2.8 km radius,
+            // which vacuums whatever course is nearby. Map the letters.
+            osmType: p.osm_type
+              ? { W: 'way', R: 'relation', N: 'node' }[
+                  String(p.osm_type).toUpperCase()] || null
+              : null,
             osmId: Number(p.osm_id),
             name,
             lat: Number(c[1]),
@@ -13116,6 +13175,16 @@ out geom;`;
       `<div class="prep-search-status">${html}</div>`;
   }
 
+  // v1.18.1 E2E seam (?e2e=1): seeds the player's location so jsdom
+  // harnesses can drive the course-search pipeline without the GPS
+  // stack. No-op in production (param absent). Read-only.
+  if (new URLSearchParams(location.search).get('e2e') === '1' && !state.loc) {
+    state.loc = {
+      lat: Number(new URLSearchParams(location.search).get('e2eLat')) || 41.5931,
+      lng: Number(new URLSearchParams(location.search).get('e2eLng')) || -93.8829,
+    };
+  }
+
   function clearPlannerSearch() {
     if (els.planCourseSearch) els.planCourseSearch.value = '';
     if (els.planCourseSearchResults) {
@@ -13238,6 +13307,15 @@ out geom;`;
       planSearchResults = [];
       // v-fix(map-err) v1.7.1: distinguish offline/timeouts from unmapped,
       // and KEEP the typed search term so a retry doesn't need retyping.
+      // v1.18.1: honest-unmapped (the chosen course's own area has no
+      // holes — never import the neighbour) gets its own clear message.
+      if (error && error.honestUnmapped) {
+        planSearchStatus(
+          `${escapeHtml(candidate.name)} isn't mapped in OpenStreetMap yet — ` +
+          `no holes were found for it. Try another course, or use the ` +
+          `Play tab's 3D Green and trace its greens manually.`);
+        return;
+      }
       const offline = error && (error.name === 'AbortError' ||
         /timeout|network|fetch/i.test(String(error && error.message)));
       planSearchStatus(
