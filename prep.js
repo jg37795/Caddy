@@ -1009,7 +1009,7 @@
 
     // ---- Projection helpers (shared by both modes) ----
     let P = null;   // {toXY(latlngOrAlongCross)} when real geometry exists
-    if (Array.isArray(h.pathPts) && h.pathPts.length >= 3 &&
+    if (Array.isArray(h.pathPts) && h.pathPts.length >= 2 &&
         h.teeLatLng && h.greenLatLng) {
       // v1.15.0: anchor the EN plane at the PATH's first point — the hole
       // way start, which is on the hole line (the stored teePoint may be
@@ -1038,19 +1038,15 @@
         const cross = p.x * px + p.y * py;
         return { along, cross };
       };
-      // Fit: v1.20.0 (James: "map the ponds bunkers greens etc correctly
-      // like osm"): the old fit squashed Y into ±22% of hole length and
-      // CLAMPED everything into frame — course-sized shapes (the donut
-      // pond beside the green) got flattened and dragged over the hole.
-      // TRUE-SCALE fit: one uniform yards-per-pixel for X and Y.
-      // v1.20.4 (James: missing hazards / too much course; chose A —
-      // hole stays dominant, unused far water clips at the frame):
-      // centre on THIS hole's path + green. Grass vertices do not drive
-      // the window. Water/bunker vertices may widen it only if they sit
-      // in the play envelope (along in [-20, yards+30], |cross-mid|≲90).
-      // Far unused lake arms clip at the SVG edge at true scale. Cap
-      // 160 yd (was 200).
-      const fitLen = Math.max(120, effYd);
+      // Fit: TRUE-SCALE, hole fills the card.
+      // v1.20.5 (James hole 1 tiny / hole 3 full-width): the 110 yd
+      // crossSpan FLOOR zoomed a 164 yd par 3 to half the viewBox
+      // because scale = max(holeLength, 110+28). Scale from THIS
+      // hole's tee→green length so the hole spans the card, same as
+      // the generic corridor. In-play water/bunkers still draw at
+      // true scale and CLIP at the SVG frame (James chose A) — they
+      // do not choose the zoom.
+      const fitLen = Math.max(80, effYd);
       let holeCrossMin = Infinity, holeCrossMax = -Infinity;
       const surveyHole = (ll) => {
         if (!ll) return;
@@ -1060,26 +1056,9 @@
       };
       h.pathPts.forEach(surveyHole);
       if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(surveyHole);
-      if (!Number.isFinite(holeCrossMin)) { holeCrossMin = -40; holeCrossMax = 40; }
+      if (!Number.isFinite(holeCrossMin)) { holeCrossMin = -20; holeCrossMax = 20; }
       const holeCrossMid = (holeCrossMin + holeCrossMax) / 2;
-      let playCrossMin = holeCrossMin, playCrossMax = holeCrossMax;
-      const S0 = h.shapes || {};
-      ['bunkers', 'water'].forEach((k) => {
-        (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) => {
-          (ring || []).forEach((ll) => {
-            if (!ll) return;
-            const p = toXY(ll);
-            if (p.along < -20 || p.along > fitLen + 30) return;
-            if (Math.abs(p.cross - holeCrossMid) > 90) return;
-            if (p.cross < playCrossMin) playCrossMin = p.cross;
-            if (p.cross > playCrossMax) playCrossMax = p.cross;
-          });
-        });
-      });
-      const crossSpan = Math.min(160,
-        Math.max(110, playCrossMax - playCrossMin) + 28);
-      // Uniform scale: px per yard — the same for X and Y.
-      const ydPerPx = Math.max(fitLen / spanX, crossSpan / (H - padT - padB));
+      const ydPerPx = fitLen / spanX;
       const X = (along) => x0 + along / ydPerPx;
       const Y = (cross) => yMid + (cross - holeCrossMid) / ydPerPx;
       P = { toXY, X, Y, ydPerPx };
@@ -1139,7 +1118,7 @@
       }
       if (Array.isArray(S.water) && S.water.length) {
         parts.push(
-          `<path class="prep-hm-shape water" d="${shapePath(S.water)}"/>`);
+          `<path class="prep-hm-shape water" fill-rule="nonzero" d="${shapePath(S.water)}"/>`);
       }
       if (Array.isArray(S.bunkers) && S.bunkers.length) {
         parts.push(

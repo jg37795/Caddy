@@ -1606,6 +1606,7 @@ button.prep-carry-tile:active { transform: scale(0.96); }
   fill: rgba(58, 143, 212, 0.55);
   stroke: rgba(126, 200, 255, 0.8);
   stroke-width: 1.5;
+  fill-rule: nonzero;
 }
 .prep-holemap path.prep-hm-shape.bunker {
   fill: rgba(196, 138, 18, 0.55);

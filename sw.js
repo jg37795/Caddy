@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.20.4'; // PREP CARTOON THIS-HOLE ONLY (James: missing hazards OR too much course): assignment uses path-to-polygon distance not centroid (donut/horseshoe shoreline 20 yd off fairway now stays; centroid 120 yd no longer drops it). Grass exclusive (nearest hole; path-through always keeps). Water/bunkers still share at 90 yd. Cartoon now DRAWS bunker polygons (they were assigned then skipped as dots). Camera centres on this hole's path+green; grass does not zoom the window; in-play water/bunkers may widen within 160 yd cap; unused far water clips at the SVG frame (James chose A). Greenside fallback dots allow along up to yards+30. Re-map required for assignment; draw-time bunker+camera show immediately.
+const CACHE_VERSION = 'v1.20.5'; // PREP CARTOON FILL (James hole 1 empty pond + tiny map / hole 3 generic sausage): OSM maps the same pond twice (way + opposite-wound relation) so SVG fill cancelled to an outline. Dedup water rings whose centroids sit within 25 yd. Camera: tee-to-green FILLS the card (dropped the 110 yd height floor). 2-point OSM hole ways now store pathPts and draw real OSM polygons. Re-map required.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

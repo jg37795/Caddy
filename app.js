@@ -5525,6 +5525,30 @@
       }
     };
 
+    // v1.20.5 (James hole 1 pond = blue outline, not fill): OSM often
+    // maps the same water twice — a closed way AND a multipolygon
+    // relation of the same shoreline, opposite winding. Both assign to
+    // the hole; SVG evenodd/nonzero then CANCELS the fill and only the
+    // stroke remains. Collapse rings whose centroids sit within 25 yd
+    // (keep the denser outline).
+    const dedupRings = (rings, maxCentroidYd) => {
+      const kept = [];
+      for (const ring of rings) {
+        if (!ring || ring.length < 3) continue;
+        let lat = 0, lng = 0;
+        for (const p of ring) { lat += p.lat; lng += p.lng; }
+        const c = { lat: lat / ring.length, lng: lng / ring.length };
+        const dup = kept.find((k) =>
+          osmDistM(c, k.c) * OSM_YD_PER_M <= maxCentroidYd);
+        if (dup) {
+          if (ring.length > dup.ring.length) { dup.ring = ring; dup.c = c; }
+          continue;
+        }
+        kept.push({ ring, c });
+      }
+      return kept.map((k) => k.ring);
+    };
+
     for (const el of elements) {
       const t = el.tags || {};
       if (t.golf === 'hole') {
@@ -5555,6 +5579,11 @@
         // area or a mapped riverbank — osmRing returns null for lines)
         pushPolygon(el, t.golf === 'bunker' ? 'bunker' : 'water');
       }
+    }
+    {
+      const unique = dedupRings(polyWater, 25);
+      polyWater.length = 0;
+      unique.forEach((r) => polyWater.push(r));
     }
 
     // ---- Pass 1: per-hole records: orientation, length, green, FCB ----
@@ -5886,7 +5915,7 @@
           });
           return pts.slice(0, bi + 1);
         };
-        if (Array.isArray(r.path) && r.path.length > 2)
+        if (Array.isArray(r.path) && r.path.length >= 2)
           h.pathPts = simplify(
             trimToJourney(r.path, r.greenCenter), 28);
         if (Array.isArray(r.greenRing) && r.greenRing.length > 2)
