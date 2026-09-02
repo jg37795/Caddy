@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.20.5'; // PREP CARTOON FILL (James hole 1 empty pond + tiny map / hole 3 generic sausage): OSM maps the same pond twice (way + opposite-wound relation) so SVG fill cancelled to an outline. Dedup water rings whose centroids sit within 25 yd. Camera: tee-to-green FILLS the card (dropped the 110 yd height floor). 2-point OSM hole ways now store pathPts and draw real OSM polygons. Re-map required.
+const CACHE_VERSION = 'v1.20.6'; // PREP CARTOON DYNAMIC FIT (James: hole features cropped even though they belong to the hole): camera surveys THIS hole's path+green+assigned shapes and scales uniformly so that bbox fills the viewBox. No 110/160 yd floor or cap. Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

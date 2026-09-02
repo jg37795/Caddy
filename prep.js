@@ -1038,29 +1038,46 @@
         const cross = p.x * px + p.y * py;
         return { along, cross };
       };
-      // Fit: TRUE-SCALE, hole fills the card.
-      // v1.20.5 (James hole 1 tiny / hole 3 full-width): the 110 yd
-      // crossSpan FLOOR zoomed a 164 yd par 3 to half the viewBox
-      // because scale = max(holeLength, 110+28). Scale from THIS
-      // hole's tee→green length so the hole spans the card, same as
-      // the generic corridor. In-play water/bunkers still draw at
-      // true scale and CLIP at the SVG frame (James chose A) — they
-      // do not choose the zoom.
-      const fitLen = Math.max(80, effYd);
-      let holeCrossMin = Infinity, holeCrossMax = -Infinity;
-      const surveyHole = (ll) => {
+      // Fit: TRUE-SCALE, this hole's own features fill the card.
+      // v1.20.6 (James: hole features cropped even though they belong
+      // to the hole — no set cap): survey PATH + GREEN + ASSIGNED
+      // shapes (fairway/rough/tees/water/bunkers). Uniform yd/px so
+      // the bounding box of THIS hole fits the viewBox with a small
+      // pad. No 110/160 yd floor or cap — a 90 yd pond beside a
+      // 164 yd par 3 zooms to fit the pond; a skinny 400 yd par 4
+      // stays long and narrow. Neighbour clutter never enters this
+      // bbox because assignment already dropped it.
+      const innerH = H - padT - padB;
+      let aMin = Infinity, aMax = -Infinity;
+      let cMin = Infinity, cMax = -Infinity;
+      const survey = (ll) => {
         if (!ll) return;
-        const c = toXY(ll).cross;
-        if (c < holeCrossMin) holeCrossMin = c;
-        if (c > holeCrossMax) holeCrossMax = c;
+        const p = toXY(ll);
+        if (p.along < aMin) aMin = p.along;
+        if (p.along > aMax) aMax = p.along;
+        if (p.cross < cMin) cMin = p.cross;
+        if (p.cross > cMax) cMax = p.cross;
       };
-      h.pathPts.forEach(surveyHole);
-      if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(surveyHole);
-      if (!Number.isFinite(holeCrossMin)) { holeCrossMin = -20; holeCrossMax = 20; }
-      const holeCrossMid = (holeCrossMin + holeCrossMax) / 2;
-      const ydPerPx = fitLen / spanX;
-      const X = (along) => x0 + along / ydPerPx;
-      const Y = (cross) => yMid + (cross - holeCrossMid) / ydPerPx;
+      h.pathPts.forEach(survey);
+      if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(survey);
+      if (h.teeLatLng) survey(h.teeLatLng);
+      if (h.greenLatLng) survey(h.greenLatLng);
+      const S0 = h.shapes || {};
+      ['fairways', 'rough', 'tees', 'bunkers', 'water'].forEach((k) => {
+        (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) =>
+          (ring || []).forEach(survey));
+      });
+      if (!Number.isFinite(aMin)) { aMin = 0; aMax = Math.max(80, effYd); }
+      if (!Number.isFinite(cMin)) { cMin = -20; cMax = 20; }
+      const PAD_YD = 12;
+      const alongSpan = Math.max(40, aMax - aMin) + PAD_YD * 2;
+      const crossSpan = Math.max(28, cMax - cMin) + PAD_YD * 2;
+      const alongMid = (aMin + aMax) / 2;
+      const crossMid = (cMin + cMax) / 2;
+      const ydPerPx = Math.max(alongSpan / spanX, crossSpan / innerH);
+      const xMid = (x0 + x1) / 2;
+      const X = (along) => xMid + (along - alongMid) / ydPerPx;
+      const Y = (cross) => yMid + (cross - crossMid) / ydPerPx;
       P = { toXY, X, Y, ydPerPx };
     }
 

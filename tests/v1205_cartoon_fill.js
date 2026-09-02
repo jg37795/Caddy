@@ -200,9 +200,22 @@ function svg() { return window.document.querySelector('.prep-holemap'); }
     if (m) flagX = Number(m[1]);
   }
   const span = flagX - teeX;
-  check('4. hole 1 fills the card (tee→green span > 240 px, not the 110-yd floor)',
-    Number.isFinite(span) && span > 240,
-    `span=${Number.isFinite(span) ? span.toFixed(1) : 'na'} teeX=${teeX} flagX=${flagX}`);
+  const parseXY = (d) => {
+    const out = [];
+    const re = /(-?[\d.]+)\s+(-?[\d.]+)/g;
+    let m;
+    while ((m = re.exec(d || ''))) out.push([Number(m[1]), Number(m[2])]);
+    return out;
+  };
+  const waterXY = parseXY(waterD);
+  const waterInFrame = waterXY.length >= 3 &&
+    waterXY.every(([x, y]) => x >= -0.5 && x <= 320.5 && y >= -0.5 && y <= 168.5);
+  check('4. this-hole pond stays in frame (dynamic fit, no yardage cap cropping it)',
+    waterInFrame,
+    `pts=${waterXY.length} sample=${JSON.stringify(waterXY.slice(0, 2))} span=${Number.isFinite(span) ? span.toFixed(1) : 'na'}`);
+  check('4b. tee is left of the flag (hole still reads left→right)',
+    Number.isFinite(span) && span > 80,
+    `span=${span} teeX=${teeX} flagX=${flagX}`);
 
   const row3 = rows.find((r) => r.dataset.hole === '3');
   if (row3) row3.click();

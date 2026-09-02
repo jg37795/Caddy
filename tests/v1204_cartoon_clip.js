@@ -220,14 +220,22 @@ function wait(ms) {
     if (m) flagX = Number(m[1]);
   }
   const span = flagX - teeX;
-  check('5. hole stays dominant (tee→green pixel span > 250; not zoomed out for the pond)',
-    Number.isFinite(span) && span > 250,
-    `teeX=${teeX.toFixed(1)} flagX=${Number.isFinite(flagX) ? flagX.toFixed(1) : 'na'} span=${Number.isFinite(span) ? span.toFixed(1) : 'na'}`);
-
-  const teeY = tee ? Number(tee.getAttribute('cy')) : NaN;
-  check('5b. hole is vertically centred (tee cy within 12 px of mid 84)',
-    Number.isFinite(teeY) && Math.abs(teeY - 84) <= 12,
-    `tee cy=${teeY}`);
+  const waterD = (svg1 && svg1.querySelector('path.prep-hm-shape.water') ||
+    { getAttribute: () => '' }).getAttribute('d') || '';
+  const waterXY = [];
+  {
+    const re = /(-?[\d.]+)\s+(-?[\d.]+)/g;
+    let m;
+    while ((m = re.exec(waterD))) waterXY.push([Number(m[1]), Number(m[2])]);
+  }
+  const waterInFrame = waterXY.length >= 3 &&
+    waterXY.every(([x, y]) => x >= -0.5 && x <= 320.5 && y >= -0.5 && y <= 168.5);
+  check('5. assigned water stays in frame (dynamic per-hole fit, no cap crop)',
+    waterInFrame,
+    `pts=${waterXY.length} span=${Number.isFinite(span) ? span.toFixed(1) : 'na'}`);
+  check('5b. hole still reads left→right (tee left of flag, span > 80)',
+    Number.isFinite(span) && span > 80,
+    `teeX=${teeX} flagX=${flagX} span=${span}`);
 
   const row3 = rows.find((r) => r.dataset.hole === '3');
   if (row3) row3.click();
