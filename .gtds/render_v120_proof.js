@@ -72,11 +72,17 @@ fs.writeFileSync(path.join(__dirname, 'exec_full_q.txt'), q);
       return { ring, centroid: c };
     }).filter(Boolean);
   const endPt = pathPts[pathPts.length - 1];
-  const green = greens.find(g => g.centroid &&
-    Math.hypot((g.centroid.lng - endPt.lng) * 111320 *
-      Math.cos(endPt.lat * Math.PI / 180),
-      (g.centroid.lat - endPt.lat) * 111320) < 90 * 0.9144) ||
-    greens[0] || null;
+  // v1.20.1: associate the green NEAREST the path end (like the real
+  // importer) — greens[0] can belong to another hole.
+  let green = null, bestGd = Infinity;
+  for (const g of greens) {
+    if (!g.centroid) continue;
+    const d = Math.hypot(
+      (g.centroid.lng - endPt.lng) * 111320 *
+        Math.cos(endPt.lat * Math.PI / 180),
+      (g.centroid.lat - endPt.lat) * 111320) / 0.9144;
+    if (d < bestGd) { bestGd = d; green = g; }
+  }
 
   const CORRIDOR_YD = 90;
   const distToPathYd = (pt, pts) => {
@@ -145,8 +151,9 @@ fs.writeFileSync(path.join(__dirname, 'exec_full_q.txt'), q);
   };
   pathPts.forEach(survey);
   if (greenRing) greenRing.forEach(survey);
-  Object.values(shapes).forEach(arr => arr.forEach(ring => ring.forEach(survey)));
-  const crossSpan = Math.min(220, Math.max(90, crossMax - crossMin) + 30);
+  // v1.20.1: shapes no longer expand the window (hole's window only);
+  // keep the proof identical to the shipped survey.
+  const crossSpan = Math.min(140, Math.max(90, crossMax - crossMin) + 24);
   const W = 500, H = 300, padT = 24, padB = 24, padL = 28, padR = 32;
   const spanX = W - padL - padR;
   const effYd = Math.round(pathPts.reduce((s, p, i) => {

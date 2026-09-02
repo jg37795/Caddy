@@ -1046,8 +1046,11 @@
       // window covers the hole PLUS any assigned shapes (shapes clip at
       // the frame edge instead of distorting). No clamping anywhere.
       const fitLen = Math.max(120, effYd);
-      // Survey the real cross-range of everything we will draw: the
-      // hole path + green + assigned shapes.
+      // Survey the real cross-range of what we will draw: the hole's
+      // own path + green. v1.20.1 (James: "showing way too much of the
+      // course"): shape vertices NO LONGER expand the window — shapes
+      // extending past the hole simply CLIP at the frame (honest map
+      // behaviour). The window is the HOLE's window.
       let crossMin = -40, crossMax = 40;   // sane defaults (±40 yd)
       const survey = (ll) => {
         if (!ll) return;
@@ -1057,15 +1060,11 @@
       };
       h.pathPts.forEach(survey);
       if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(survey);
-      const S0 = h.shapes || {};
-      ['fairways', 'bunkers', 'water', 'tees', 'rough'].forEach((k) => {
-        (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) =>
-          (ring || []).forEach(survey));
-      });
-      // Window height in yards: cross range + margin, capped so a stray
-      // huge shape can't flatten the hole into a sliver.
-      const crossSpan = Math.min(220,
-        Math.max(90, crossMax - crossMin) + 30);
+      // Window height in yards: cross range + margin, capped for
+      // readable proportion (a 164-yd hole shouldn't render 250 yd
+      // tall).
+      const crossSpan = Math.min(140,
+        Math.max(90, crossMax - crossMin) + 24);
       // Uniform scale: px per yard — the same for X and Y.
       const ydPerPx = Math.max(fitLen / spanX, crossSpan / (H - padT - padB));
       const X = (along) => x0 + along / ydPerPx;
@@ -1111,6 +1110,12 @@
         }).join(' ') + (close ? ' Z' : '');
       }).join(' ');
       const S = h.shapes || {};
+      // v1.20.1 (James: "some holes still keep the old style even though
+      // they're mapped"): the stroked band was engaging whenever the
+      // course had no golf=FAIRWAY polygons — but courses like the exec
+      // tag their light green as golf=ROUGH. When rough polygons exist,
+      // they ARE the corridor: draw them and skip the band. Band only
+      // when there's neither.
       if (Array.isArray(S.rough) && S.rough.length) {
         parts.push(
           `<path class="prep-hm-shape rough" d="${shapePath(S.rough)}"/>`);
@@ -1127,7 +1132,8 @@
         parts.push(
           `<path class="prep-hm-shape teebox" d="${shapePath(S.tees)}"/>`);
       }
-      if (!Array.isArray(S.fairways) || !S.fairways.length) {
+      if ((!Array.isArray(S.fairways) || !S.fairways.length) &&
+          (!Array.isArray(S.rough) || !S.rough.length)) {
         parts.push(`<path class="prep-hm-fairway" d="${d}" fill="none" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`);
       }
 
@@ -1762,6 +1768,13 @@
           return '';
         }
         const clearYd = lastYd + 8;
+        // v1.20.1 (James: "the pond is still incorrect?" — the drawn
+        // pond only grazed the line but the text implied a full carry):
+        // distinguish a graze (<25 yd of water on the line) from a true
+        // forced carry.
+        if (runLen < 25) {
+          return `Your line clips the water's corner from ~${Math.round(firstYd)} yd out — clear ~${Math.round(clearYd)} yd and it's never in play`;
+        }
         return `Your line carries water from ~${Math.round(firstYd)} yd out — take the club that clears ~${Math.round(clearYd)} yd with room to spare`;
       })();
       // 3. The green's slope feed (LiDAR brief).
