@@ -5490,14 +5490,33 @@
       // member, so the body drew as fragments with a gap. Expand the
       // relation into ALL outer rings; each draws as its own polygon
       // and shared edges make them read as one continuous shape.
+      // v1.19.3: osmOuterRings now ASSEMBLES relation arcs into
+      // complete rings (shared endpoints joined). Bounding gate: a ring
+      // bigger than a golf hole (bbox diagonal > 1200 yd ≈ courses/
+      // counties, not features) or farther than 400 yd from every hole
+      // is course-level noise — skip (the 12-mi-lake clamp bug).
       const rings = osmOuterRings(el);
       if (!rings) return;
       for (const ring of rings) {
         if (!ring || ring.length < 4) continue;
-        // simplify to ≤14 points (20 for greens, which are small and
-        // detailed) so a full course of polygons stays well under the
-        // localStorage budget.
-        const simple = osmSimplifyRing(ring, 14);
+        // bbox diagonal gate
+        let minLat = Infinity, maxLat = -Infinity;
+        let minLng = Infinity, maxLng = -Infinity;
+        for (const p of ring) {
+          if (p.lat < minLat) minLat = p.lat;
+          if (p.lat > maxLat) maxLat = p.lat;
+          if (p.lng < minLng) minLng = p.lng;
+          if (p.lng > maxLng) maxLng = p.lng;
+        }
+        const diagYd = Math.hypot(
+          (maxLat - minLat) * 111320,
+          (maxLng - minLng) * 111320 *
+            Math.cos((minLat + maxLat) / 2 * Math.PI / 180)
+        ) / 0.9144;
+        if (diagYd > 1200) continue;
+        // simplify to ≤40 pts at 2 m tolerance (organic shorelines);
+        // budget was 14 pts/4 m — blocky on smooth water bodies.
+        const simple = osmSimplifyRing(ring, 40);
         if (kind === 'fairway') polyFairways.push(simple);
         else if (kind === 'bunker') polyBunkers.push(simple);
         else if (kind === 'water') polyWater.push(simple);
@@ -14479,7 +14498,7 @@ out geom;`;
   // Douglas-Peucker to a metre tolerance keeps geometrically necessary
   // vertices, so shared nodes survive on BOTH rings and shared edges
   // simplify identically. Hard cap via iterative tolerance increase.
-  const SIMPLIFY_TOL_M = 4;
+  const SIMPLIFY_TOL_M = 2;
   function osmSimplifyRing(pts, maxPts) {
     if (!Array.isArray(pts) || pts.length <= maxPts) return pts || null;
     const dp = (tol) => {
@@ -14543,13 +14562,63 @@ out geom;`;
   // outer rings, each simplified separately. A simple way/closed path
   // returns [ring]; a relation returns one ring per outer member;
   // anything else null. (Inner rings/islands remain future work.)
+  // v1.19.3 (PROOF-DRIVEN REWRITE): the "all outers as independent
+  // rings" approach produced chord-fan shards — OSM maps big lakes as
+  // relations whose outer members are ARCS OF ONE RING (member N ends
+  // where member N+1 starts). Verified on real Jester Park data
+  // (relation 115195: 4 members, 84 pts, chain-closed). Assemble the
+  // arcs into complete rings by joining shared endpoints, closing only
+  // when the walk returns to its start.
   function osmOuterRings(el) {
     if (!el) return null;
     if (el.type === 'relation' && Array.isArray(el.members)) {
-      const rings = el.members
+      const arcs = el.members
         .filter((m) => m.role === 'outer' && Array.isArray(m.geometry))
         .map((m) => osmRing({ type: 'way', geometry: m.geometry }))
-        .filter((r) => r && r.length >= 3);
+        .filter((r) => r && r.length >= 2)
+        .map((r) => {
+          // drop the closing duplicate node if present
+          const a = r[0], b = r[r.length - 1];
+          if (Math.abs(a.lat - b.lat) < 1e-9 &&
+              Math.abs(a.lng - b.lng) < 1e-9) return r.slice(0, -1);
+          return r;
+        });
+      if (!arcs.length) return null;
+      const eps = 1e-7;
+      const same = (a, b) =>
+        Math.abs(a.lat - b.lat) < eps && Math.abs(a.lng - b.lng) < eps;
+      const rings = [];
+      const used = new Array(arcs.length).fill(false);
+      for (let start = 0; start < arcs.length; start++) {
+        if (used[start]) continue;
+        used[start] = true;
+        let ringArcs = arcs[start].slice();
+        let extended = true;
+        while (extended) {
+          extended = false;
+          for (let k = 0; k < arcs.length; k++) {
+            if (used[k]) continue;
+            const tail = ringArcs[ringArcs.length - 1];
+            const head = ringArcs[0];
+            const a0 = arcs[k][0];
+            const aN = arcs[k][arcs[k].length - 1];
+            if (same(tail, a0)) {
+              ringArcs = ringArcs.concat(arcs[k].slice(1));
+              used[k] = true; extended = true;
+            } else if (same(tail, aN)) {
+              ringArcs = ringArcs.concat(arcs[k].slice(0, -1).reverse());
+              used[k] = true; extended = true;
+            } else if (same(head, aN)) {
+              ringArcs = arcs[k].slice(0, -1).concat(ringArcs);
+              used[k] = true; extended = true;
+            } else if (same(head, a0)) {
+              ringArcs = arcs[k].slice(1).reverse().concat(ringArcs);
+              used[k] = true; extended = true;
+            }
+          }
+        }
+        if (ringArcs.length >= 3) rings.push(ringArcs);
+      }
       return rings.length ? rings : null;
     }
     const ring = osmRing(el);
