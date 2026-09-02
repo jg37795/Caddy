@@ -1285,11 +1285,12 @@
         let hasTurfClip = false;
         parts.push(
           `<defs><clipPath id="${footClipId}"><path d="${footClipD}"/></clipPath></defs>`);
-        // v1.21.1 (James: the pond extends past the turf — red line on
-        // hole 9): water's edge is THIS HOLE'S TURF. Wrap the water path
-        // in a group clipped to the turf union (fairway + rough + green
-        // ring + green ellipse fallback). Intersection of both clips:
-        // strip/chord decides the hole's line, turf decides the edge.
+        // v1.21.2 (evolution of v1.21.1): the turf clipPath now gates a
+        // SECOND water path (the turf-overlap slice), added to the
+        // strip/chord-clipped one. Water = (strip ∪ chord) ∪ (water ∩
+        // turf) — the crossing sliver James red-marked fills, and the
+        // far past-turf mass still never paints (it's outside the
+        // strip/chord AND the turf-overlap slice stops at the grass).
         const turfD = shapePath([
           ...(Array.isArray(S.fairways) ? S.fairways : []),
           ...(Array.isArray(S.rough) ? S.rough : []),
@@ -1325,15 +1326,22 @@
           `<path class="prep-hm-shape fairway" d="${shapePath(S.fairways)}"/>`);
       }
       if (Array.isArray(S.water) && S.water.length && footClipD) {
+        // v1.21.2 (James: "the water should be FILLED where I marked
+        // red"): the v1.21.1 AND-of-clips cut the crossing sliver —
+        // the pond near the line sits on NEITHER the 20 yd strip NOR
+        // the turf (the line hooks across a gap between rough blobs).
+        // Water paints where the hole genuinely meets it:
+        //   (strip ∪ chord)   — the line/crossing gate (kept), PLUS
+        //   turf-overlap slice — where the water touches this hole's
+        //   grass (the red-marked area), via a SECOND water path
+        //   clipped to turf only. Minus rule (unchanged): anything
+        //   outside both gates never paints (far arms, neighbour
+        //   water). No green surround anywhere.
         const waterD = `<path class="prep-hm-shape water" fill-rule="nonzero" clip-path="url(#${footClipId})" d="${shapePath(S.water)}"/>`;
-        // v1.21.1: turf boundary intersects the strip/chord clip (James
-        // red line). Without mapped turf the group clip is omitted and
-        // the strip/chord alone governs (poorly-mapped holes).
+        parts.push(waterD);
         if (foot.hasTurfClip) {
           parts.push(
             `<g class="prep-hm-waterclip" clip-path="url(#prepHmTurf)">${waterD}</g>`);
-        } else {
-          parts.push(waterD);
         }
       }
       if (foot.bunkers.length) {

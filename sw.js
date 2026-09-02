@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.1'; // PREP TURF IS WATER'S EDGE (James red line on hole 9: pond extended past the turf): water draws inside a group clipped to this hole's turf union (fairway+rough+green). Intersection with the existing strip+chord clip: the strip keeps the hole line, the turf cuts the edge. No mapped turf = strip/chord alone. Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.21.2'; // PREP WATER = LINE + TURF SLICE (James: fill the red-marked crossing): v1.21.1 intersected strip AND turf and cut the sliver where the hooked line crosses a gap between rough blobs. Water now paints (strip UNION chord) PLUS a second water path clipped to the turf union — the crossing fills, the far past-turf mass still never paints. Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
