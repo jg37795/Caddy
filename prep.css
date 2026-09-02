@@ -1267,6 +1267,7 @@ body.dark .prep-strat-advice {
   height: auto;
   display: block;
   margin: 4px 0 2px;
+  overflow: hidden;
 }
 
 /* v1.8.0 — map + elevation-chip overlay; the old Green Map card is gone,
@@ -1605,6 +1606,11 @@ button.prep-carry-tile:active { transform: scale(0.96); }
   fill: rgba(58, 143, 212, 0.55);
   stroke: rgba(126, 200, 255, 0.8);
   stroke-width: 1.5;
+}
+.prep-holemap path.prep-hm-shape.bunker {
+  fill: rgba(196, 138, 18, 0.55);
+  stroke: rgba(255, 209, 102, 0.75);
+  stroke-width: 1.2;
 }
 .prep-holemap path.prep-hm-shape.teebox {
   fill: rgba(130, 190, 140, 0.4);

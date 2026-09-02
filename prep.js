@@ -1042,39 +1042,46 @@
       // like osm"): the old fit squashed Y into ±22% of hole length and
       // CLAMPED everything into frame — course-sized shapes (the donut
       // pond beside the green) got flattened and dragged over the hole.
-      // TRUE-SCALE fit: one uniform yards-per-pixel for X and Y; the
-      // window covers the hole PLUS any assigned shapes (shapes clip at
-      // the frame edge instead of distorting). No clamping anywhere.
+      // TRUE-SCALE fit: one uniform yards-per-pixel for X and Y.
+      // v1.20.4 (James: missing hazards / too much course; chose A —
+      // hole stays dominant, unused far water clips at the frame):
+      // centre on THIS hole's path + green. Grass vertices do not drive
+      // the window. Water/bunker vertices may widen it only if they sit
+      // in the play envelope (along in [-20, yards+30], |cross-mid|≲90).
+      // Far unused lake arms clip at the SVG edge at true scale. Cap
+      // 160 yd (was 200).
       const fitLen = Math.max(120, effYd);
-      // Survey the real cross-range of everything we will draw: the
-      // hole's path + green + assigned shapes. v1.20.2 (James: the
-      // v1.20.1 hole-only window CLIPPED the donut pond into slivers —
-      // the pond is bigger than 140 yd; the "previous view" he liked
-      // let it draw fully): shapes expand the window again, but the
-      // v1.20.2 grass-corridor tightening (55 yd) keeps neighbour
-      // clutter out, so the expansion is now only genuine surroundings.
-      let crossMin = -40, crossMax = 40;   // sane defaults (±40 yd)
-      const survey = (ll) => {
+      let holeCrossMin = Infinity, holeCrossMax = -Infinity;
+      const surveyHole = (ll) => {
         if (!ll) return;
         const c = toXY(ll).cross;
-        if (c < crossMin) crossMin = c;
-        if (c > crossMax) crossMax = c;
+        if (c < holeCrossMin) holeCrossMin = c;
+        if (c > holeCrossMax) holeCrossMax = c;
       };
-      h.pathPts.forEach(survey);
-      if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(survey);
+      h.pathPts.forEach(surveyHole);
+      if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(surveyHole);
+      if (!Number.isFinite(holeCrossMin)) { holeCrossMin = -40; holeCrossMax = 40; }
+      const holeCrossMid = (holeCrossMin + holeCrossMax) / 2;
+      let playCrossMin = holeCrossMin, playCrossMax = holeCrossMax;
       const S0 = h.shapes || {};
-      ['fairways', 'bunkers', 'water', 'tees', 'rough'].forEach((k) => {
-        (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) =>
-          (ring || []).forEach(survey));
+      ['bunkers', 'water'].forEach((k) => {
+        (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) => {
+          (ring || []).forEach((ll) => {
+            if (!ll) return;
+            const p = toXY(ll);
+            if (p.along < -20 || p.along > fitLen + 30) return;
+            if (Math.abs(p.cross - holeCrossMid) > 90) return;
+            if (p.cross < playCrossMin) playCrossMin = p.cross;
+            if (p.cross > playCrossMax) playCrossMax = p.cross;
+          });
+        });
       });
-      // Window height: cross range + margin, capped so a stray huge
-      // shape can't flatten the hole into a sliver.
-      const crossSpan = Math.min(200,
-        Math.max(110, crossMax - crossMin) + 28);
+      const crossSpan = Math.min(160,
+        Math.max(110, playCrossMax - playCrossMin) + 28);
       // Uniform scale: px per yard — the same for X and Y.
       const ydPerPx = Math.max(fitLen / spanX, crossSpan / (H - padT - padB));
       const X = (along) => x0 + along / ydPerPx;
-      const Y = (cross) => yMid + cross / ydPerPx;
+      const Y = (cross) => yMid + (cross - holeCrossMid) / ydPerPx;
       P = { toXY, X, Y, ydPerPx };
     }
 
@@ -1133,6 +1140,10 @@
       if (Array.isArray(S.water) && S.water.length) {
         parts.push(
           `<path class="prep-hm-shape water" d="${shapePath(S.water)}"/>`);
+      }
+      if (Array.isArray(S.bunkers) && S.bunkers.length) {
+        parts.push(
+          `<path class="prep-hm-shape bunker" d="${shapePath(S.bunkers)}"/>`);
       }
       if (Array.isArray(S.tees) && S.tees.length) {
         parts.push(
@@ -1232,7 +1243,7 @@
           ax = P.X(pr.gx); ay = P.Y(pr.gy);
         } else {
           const along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
-          if (along == null || along <= 0 || along >= effYd) continue;
+          if (along == null || along <= 0 || along > effYd + 30) continue;
           const cross = Number.isFinite(hz.cross) ? hz.cross : 0;
           ax = P.X(along); ay = P.Y(cross);
         }
@@ -1350,7 +1361,7 @@
         `<text class="prep-hm-club" x="${teeXY.x.toFixed(1)}" y="${H - 4}" text-anchor="start">Tee</text>` +
         `<text class="prep-hm-club" x="${(W - padR).toFixed(1)}" y="${H - 4}" text-anchor="end">${effYd} yd</text>`
       );
-      return `<svg class="prep-holemap" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hole ${h.number} map, ${effYd} yards">${parts.join('')}</svg>`;
+      return `<svg class="prep-holemap" viewBox="0 0 ${W} ${H}" overflow="hidden" role="img" aria-label="Hole ${h.number} map, ${effYd} yards">${parts.join('')}</svg>`;
     }
 
     // ---- GENERIC CORRIDOR (pre-v1.10 courses / manual holes) ----
@@ -1363,7 +1374,7 @@
     const haz = Array.isArray(h.hazards) ? h.hazards : [];
     for (const hz of haz) {
       let along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
-      if (along == null || along <= 0 || along >= effYd) continue;
+      if (along == null || along <= 0 || along > effYd + 30) continue;
       const cross = Number.isFinite(hz.cross) ? hz.cross : 0;
       const hx = xAt(along);
       const hy = yMid2 + clamp(cross / 28, -1, 1) * 22;

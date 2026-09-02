@@ -5721,47 +5721,62 @@
 
     // ---- Pass 3b (v1.19.0): assign REAL shape polygons to holes ----
     // OSM doesn't tag fairways/bunkers/water with a hole number, so
-    // spatially assign: a polygon belongs to every hole whose path runs
-    // within CORRIDOR_YD of the polygon's centroid (a bunker shared by
-    // two holes draws on both — truthful, it IS in play from both).
-    // v1.20.0 (James: exec hole 1 drew the neighbour donut pond over
-    // grass): 160 yd was too generous — course features a hole's width
-    // away stamped onto the wrong card. 90 yd = genuinely in play from
-    // this tee.
-    // v1.20.2 (James: "showing way too much of the course — the focus
-    // is the current hole"): PER-KIND corridors. Water/bunkers stay at
-    // 90 yd (safety-relevant, keep them), but fairway/rough at 90 yd
-    // pulled in neighbouring holes' grass as visual noise — those drop
-    // to 55 yd.
+    // spatially assign. v1.20.4 (James: missing hazards / too much
+    // course): a polygon belongs to a hole by PATH-TO-POLYGON distance
+    // (edge or interior), NOT centroid. A donut/horseshoe pond's
+    // centroid sits in empty water and used to drop a shoreline that's
+    // 20 yd off this fairway.
+    // Per-kind corridors stay: water/bunkers 90 yd (in play from both
+    // neighbouring holes when shared); fairway/rough/tees 55 yd AND
+    // exclusive — nearest hole wins, unless the path actually runs
+    // through the polygon (then every hole whose path enters it keeps
+    // it). A tee→green flight line that crosses water/bunker also
+    // counts as in play (dogleg around a pond).
     const CORRIDOR_YD = 90;
     const CORRIDOR_GRASS_YD = 55;
-    const polyCentroid = (ring) => {
-      let lat = 0, lng = 0;
-      for (const p of ring) { lat += p.lat; lng += p.lng; }
-      return { lat: lat / ring.length, lng: lng / ring.length };
-    };
+    const GRASS_KEYS = { fairways: 1, rough: 1, tees: 1 };
     const shapesByHole = new Map();   // hole num -> {fairways, bunkers, water, tees, rough}
-    const assignShape = (ring, key, corridorYd) => {
+    const ensureShapes = (num) => {
+      if (!shapesByHole.has(num)) {
+        shapesByHole.set(num, {
+          fairways: [], bunkers: [], water: [], tees: [], rough: [],
+        });
+      }
+      return shapesByHole.get(num);
+    };
+    const candidates = [];
+    const considerShape = (ring, key, corridorYd) => {
       if (!ring || ring.length < 3) return;
-      const c = polyCentroid(ring);
+      const hazard = !GRASS_KEYS[key];
       for (const r of byNum.values()) {
-        const dYd = osmDistPointToPathM(c, r.path) * OSM_YD_PER_M;
+        let dYd = osmDistPathToRingM(r.path, ring) * OSM_YD_PER_M;
+        if (hazard && dYd > 0 && osmFlightHitsRing(r.path, ring)) dYd = 0;
         if (dYd > corridorYd) continue;
-        if (!shapesByHole.has(r.num)) {
-          shapesByHole.set(r.num, {
-            fairways: [], bunkers: [], water: [], tees: [], rough: [],
-          });
-        }
-        shapesByHole.get(r.num)[key].push(ring);
+        candidates.push({ num: r.num, key, ring, dYd });
       }
     };
-    // v1.20.2: hazards keep the 90 yd corridor; grass shapes (neighbour
-    // noise) tighten to 55 yd.
-    for (const ring of polyFairways) assignShape(ring, 'fairways', CORRIDOR_GRASS_YD);
-    for (const ring of polyBunkers) assignShape(ring, 'bunkers', CORRIDOR_YD);
-    for (const ring of polyWater) assignShape(ring, 'water', CORRIDOR_YD);
-    for (const ring of polyTees) assignShape(ring, 'tees', CORRIDOR_YD);
-    for (const ring of polyRough) assignShape(ring, 'rough', CORRIDOR_GRASS_YD);
+    for (const ring of polyFairways) considerShape(ring, 'fairways', CORRIDOR_GRASS_YD);
+    for (const ring of polyBunkers) considerShape(ring, 'bunkers', CORRIDOR_YD);
+    for (const ring of polyWater) considerShape(ring, 'water', CORRIDOR_YD);
+    for (const ring of polyTees) considerShape(ring, 'tees', CORRIDOR_GRASS_YD);
+    for (const ring of polyRough) considerShape(ring, 'rough', CORRIDOR_GRASS_YD);
+
+    const grassByRing = new Map();
+    for (const c of candidates) {
+      if (!GRASS_KEYS[c.key]) {
+        ensureShapes(c.num)[c.key].push(c.ring);
+        continue;
+      }
+      if (!grassByRing.has(c.ring)) grassByRing.set(c.ring, []);
+      grassByRing.get(c.ring).push(c);
+    }
+    grassByRing.forEach((list) => {
+      const through = list.filter((c) => c.dYd <= 0.5);
+      const keep = through.length
+        ? through
+        : [list.reduce((best, c) => (c.dYd < best.dYd ? c : best))];
+      keep.forEach((c) => ensureShapes(c.num)[c.key].push(c.ring));
+    });
 
     // ---- Pass 4: build the 18 holes. NEVER emit a key without a real value. ----
     const report = {
@@ -14709,6 +14724,61 @@ out geom;`;
       );
     }
     return best;
+  }
+
+  // Min distance from a hole path to a polygon, meters. 0 if the path
+  // enters the ring or an edge crosses it. v1.20.4: assignment uses this
+  // instead of centroid-to-path (donut ponds, long water arms).
+  function osmDistPathToRingM(path, ring) {
+    if (!path || path.length < 2 || !ring || ring.length < 3) return Infinity;
+    for (const p of path) {
+      if (osmPointInRing(p, ring)) return 0;
+    }
+    const closed = ring.slice();
+    const a = closed[0], b = closed[closed.length - 1];
+    if (!(Math.abs(a.lat - b.lat) < 1e-12 && Math.abs(a.lng - b.lng) < 1e-12)) {
+      closed.push(a);
+    }
+    let best = Infinity;
+    for (const v of closed) {
+      best = Math.min(best, osmDistPointToPathM(v, path));
+    }
+    for (const p of path) {
+      best = Math.min(best, osmDistPointToPathM(p, closed));
+    }
+    if (osmPolylinesCross(path, closed)) return 0;
+    return best;
+  }
+
+  function osmSegsCross(a0, a1, b0, b1) {
+    const or = (p, q, r) => {
+      const v = (q.lng - p.lng) * (r.lat - p.lat) - (q.lat - p.lat) * (r.lng - p.lng);
+      if (Math.abs(v) < 1e-18) return 0;
+      return v > 0 ? 1 : -1;
+    };
+    const o1 = or(a0, a1, b0), o2 = or(a0, a1, b1);
+    const o3 = or(b0, b1, a0), o4 = or(b0, b1, a1);
+    // Strict proper intersection — collinear (0) is NOT a crossing.
+    // The v1.20.4 first cut used Math.sign and treated 0 as a side, so
+    // every polygon "hit" every hole and neighbour grass leaked.
+    return o1 && o2 && o3 && o4 && o1 !== o2 && o3 !== o4;
+  }
+
+  function osmPolylinesCross(a, b) {
+    for (let i = 1; i < a.length; i++) {
+      for (let j = 1; j < b.length; j++) {
+        if (osmSegsCross(a[i - 1], a[i], b[j - 1], b[j])) return true;
+      }
+    }
+    return false;
+  }
+
+  // True if the straight tee→green chord (path ends) crosses the ring.
+  function osmFlightHitsRing(path, ring) {
+    if (!path || path.length < 2 || !ring || ring.length < 3) return false;
+    const a = path[0], b = path[path.length - 1];
+    if (osmPointInRing(a, ring) || osmPointInRing(b, ring)) return true;
+    return osmPolylinesCross([a, b], ring);
   }
 
   // ============================================================
