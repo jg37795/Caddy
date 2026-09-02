@@ -26,6 +26,10 @@ const closed = (pts) => geom(pts.concat([pts[0]]));
 const rect = (n0, e0, nS, eS) => closed([
   ll(n0, e0), ll(n0, e0 + eS), ll(n0 - nS, e0 + eS), ll(n0 - nS, e0),
 ]);
+// stored-shape rings keep {lat, lng} (what prep.js's math expects)
+const rectN = (n0, e0, nS, eS) => ([
+  ll(n0, e0), ll(n0, e0 + eS), ll(n0 - nS, e0 + eS), ll(n0 - nS, e0), ll(n0, e0),
+]);
 
 let leafletCalls = [];
 function fakeLayer(kind, opts) {
@@ -133,8 +137,41 @@ window.fetch = async (url) => {
 };
 global.fetch = window.fetch;
 
+// v1.21.4: seed the course BEFORE app.js boots (state.courseProfiles
+// loads at boot; later localStorage writes are invisible to it).
+window.localStorage.setItem('caddy:courseProfiles:v1', JSON.stringify([{
+  id: 'test-course', name: 'Sat Test GC', holesCount: 9,
+  teeName: 'Regular tees', source: 'manual', updatedAt: Date.now(),
+  holes: Array.from({ length: 9 }, (_, i) => ({
+    number: i + 1, par: 4, yards: 387, source: 'manual',
+    pathPts: [ll(0, 0), ll(-190, 4), ll(-380, 0)],
+    greenRingPts: rect(-392, -10, 18, 20),
+    teePoint: ll(0, 0), greenCenter: ll(-390, 0),
+    shapes: {
+      fairways: [rectN(8, -14, 396, 28)],
+      rough: [rectN(14, -26, 408, 52)],
+      water: [
+        rectN(-160, 5, 40, 40),    // ON hole: cross 5..45, strip clips it
+        rectN(-320, -120, 30, 30), // FOREIGN: cross -150..-120
+      ],
+      tees: [rectN(6, -8, 12, 16)],
+      bunkers: [rectN(-100, 30, 12, 14)],
+    },
+    hazards: [
+      { type: 'bunker', lat: ll(-100, -10).lat, lng: ll(-100, -10).lng },
+      { type: 'water', lat: ll(-200, -60).lat, lng: ll(-200, -60).lng },
+    ],
+  })),
+}]));
+
 window.eval(fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf-8'));
+window.eval(fs.readFileSync(path.join(__dirname, '..', 'prep.js'), 'utf-8'));
 window.eval(fs.readFileSync(path.join(__dirname, '..', 'holeSat.js'), 'utf-8'));
+
+let captured = null;
+let satOpenCalls = 0;
+const realOpen = window.PrepHoleSat.open;
+window.PrepHoleSat.open = (o) => { satOpenCalls++; captured = o; };
 
 let fails = 0;
 const check = (n, c, d) => {
@@ -160,6 +197,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     hazards: [{ type: 'bunker', lat: ll(-100, 34).lat, lng: ll(-100, 34).lng }],
   };
   leafletCalls = [];
+  window.PrepHoleSat.open = realOpen;   // real sheet for the layer checks
   window.PrepHoleSat.open({
     greenLatLng: ll(-390, 0),
     courseId: 'test-course',
@@ -168,6 +206,10 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     teeLL: ll(0, 0),
   });
   await wait(120);
+  // close the real sheet so the later stubbed open isn't guarded out
+  const doneBtn = window.document.getElementById('pshDone');
+  if (doneBtn) doneBtn.click();
+  await wait(50);
 
   const mapCall = leafletCalls.find((c) => c[0] === 'map');
   check('sheet opens with a map', !!mapCall);
@@ -210,6 +252,47 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   check('1b. this hole\'s own fairway polygon renders',
     ownFairway);
+
+  // v1.21.4: the PAYLOAD the caller hands the sheet is filtered to the
+  // cartoon's gates. Drive the real prep pipeline: seed the course,
+  // select it, bind hole 1, tap the cartoon.
+  leafletCalls = [];
+  window.PrepHoleSat.open = (o) => { satOpenCalls++; captured = o; };
+window.localStorage.setItem('caddy:onboarded', '1');
+  // Rebind through the real prep pipeline: select the course, bind hole 1.
+  const selEl = window.document.getElementById('planCourseSelect');
+  if (selEl) {
+    const opt = [...selEl.options].find((o) =>
+      String(o.textContent || '').includes('Sat Test GC'));
+    if (opt) {
+      selEl.value = opt.value;
+      selEl.dispatchEvent(new window.Event('change'));
+    }
+  }
+  await wait(300);
+  const rowsAfter = [...window.document.querySelectorAll('.plan-hole-row')];
+  const rowEl = rowsAfter.find((r) => r.dataset.hole === '1');
+  if (rowEl) rowEl.click();
+  await wait(500);
+  captured = null;
+  const tapEl = window.document.getElementById('prepHoleMapTap');
+  if (tapEl) {
+    tapEl.dispatchEvent(new window.MouseEvent('click', {
+      bubbles: true, cancelable: true,
+    }));
+  }
+  await wait(250);
+  check('4. sat payload water = only rings on this hole (foreign ring dropped)',
+    captured && captured.holeData && Array.isArray(captured.holeData.shapes.water) &&
+      captured.holeData.shapes.water.length === 1,
+    `open=${satOpenCalls} ` + (captured && captured.holeData
+      ? `water=${(captured.holeData.shapes.water || []).length}`
+      : 'no capture'));
+  check('5. sat payload hazards = only strip points (off-strip water point dropped)',
+    captured && captured.holeData && captured.holeData.hazards.length === 1 &&
+      captured.holeData.hazards[0].type === 'bunker',
+    captured && captured.holeData
+      ? `hazards=${captured.holeData.hazards.length}` : 'no capture');
 
   if (fails) {
     console.log(`${fails} FAILURE(S)`);

@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.3'; // SAT SHEET THIS-HOLE ONLY (James: other holes' features on the satellite view; thick green band on the shot lines; zoom cap): dropped the live Overpass context fetch (that drew neighbour greens/holes), removed the 30px dark halo + 26px green fairway ribbon under the shot line (real polygons + thin centre line carry the shape), removed the Leaflet minZoom:15 cap so he can zoom in past 15. Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.21.4'; // SAT SHEET = CARTOON FEATURE SET (James: still rendering unnecessary stuff): prep.js now filters the holeData payload before PrepHoleSat.open — hazards pass the same 20 yd strip test as the chips; water rings must touch the strip/chord OR overlap this hole's turf (ringWaterOnHole), passed at FULL bounds since real imagery is the background. Bunkers/turf/tees already matched (assignment-owned). Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

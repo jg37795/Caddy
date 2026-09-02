@@ -1716,6 +1716,102 @@
   // the same corridor internally, so the list and the map can never
   // disagree.
   const STRIP_YD = 20;
+  // v1.21.4: does a water ring belong on THIS hole? Same gates as the
+  // cartoon's paint rule (strip ∪ chord ∪ turf overlap), evaluated in
+  // lat/lng so the sat payload can reuse it. Full bounds pass through —
+  // only membership is tested here.
+  function ringWaterOnHole(ring, h) {
+    if (!Array.isArray(ring) || ring.length < 3 || !h ||
+        !Array.isArray(h.pathPts) || h.pathPts.length < 2) return true;
+    const anchor = h.pathPts[0];
+    const mLat = 111320;
+    const mLng = 111320 * Math.cos(anchor.lat * Math.PI / 180);
+    const en = (ll) => ({
+      x: ((ll.lng - anchor.lng) * mLng) / 0.9144,
+      y: ((ll.lat - anchor.lat) * mLat) / 0.9144,
+    });
+    const tgt = en(h.greenLatLng || h.pathPts[h.pathPts.length - 1]);
+    const L = Math.hypot(tgt.x, tgt.y) || 1e-9;
+    const ux = tgt.x / L, uy = tgt.y / L;
+    const px = uy, py = -ux;
+    const toAC = (ll) => {
+      const p = en(ll);
+      return { along: p.x * ux + p.y * uy, cross: p.x * px + p.y * py };
+    };
+    const acPts = h.pathPts.map(toAC);
+    const extend = (pts) => {
+      const f = pts[0], s = pts[1];
+      const d0 = Math.hypot(s.along - f.along, s.cross - f.cross) || 1e-9;
+      pts.unshift({ along: f.along - (s.along - f.along) / d0 * STRIP_YD,
+        cross: f.cross - (s.cross - f.cross) / d0 * STRIP_YD });
+      const l = pts[pts.length - 1], pv = pts[pts.length - 2];
+      const dN = Math.hypot(l.along - pv.along, l.cross - pv.cross) || 1e-9;
+      pts.push({ along: l.along + (l.along - pv.along) / dN * STRIP_YD,
+        cross: l.cross + (l.cross - pv.cross) / dN * STRIP_YD });
+      return pts;
+    };
+    const offset = (pts, w) => {
+      const left = [], right = [];
+      for (let i = 0; i < pts.length; i++) {
+        let dx, dy;
+        if (i === 0) { dx = pts[1].along - pts[0].along; dy = pts[1].cross - pts[0].cross; }
+        else if (i === pts.length - 1) { dx = pts[i].along - pts[i - 1].along; dy = pts[i].cross - pts[i - 1].cross; }
+        else { dx = pts[i + 1].along - pts[i - 1].along; dy = pts[i + 1].cross - pts[i - 1].cross; }
+        const len = Math.hypot(dx, dy) || 1e-9;
+        const nx = -dy / len, ny = dx / len;
+        left.push({ along: pts[i].along + nx * w, cross: pts[i].cross + ny * w });
+        right.push({ along: pts[i].along - nx * w, cross: pts[i].cross - ny * w });
+      }
+      return left.concat(right.reverse());
+    };
+    const ptIn = (p, ringPts) => {
+      let inside = false;
+      for (let i = 0, j = ringPts.length - 1; i < ringPts.length; j = i++) {
+        const a = ringPts[i], b = ringPts[j];
+        if ((a.cross > p.cross) !== (b.cross > p.cross) &&
+            p.along < ((b.along - a.along) * (p.cross - a.cross)) /
+              ((b.cross - a.cross) || 1e-12) + a.along) inside = !inside;
+      }
+      return inside;
+    };
+    const stripRing = offset(extend(acPts.map((p) => ({ ...p }))), STRIP_YD);
+    const a = acPts[0], b = acPts[acPts.length - 1];
+    const dx = b.along - a.along, dy = b.cross - a.cross;
+    const len = Math.hypot(dx, dy) || 1e-9;
+    const nx = -dy / len, ny = dx / len;
+    const chordRing = [
+      { along: (a.along - dx / len * STRIP_YD) + nx * STRIP_YD,
+        cross: (a.cross - dy / len * STRIP_YD) + ny * STRIP_YD },
+      { along: (b.along + dx / len * STRIP_YD) + nx * STRIP_YD,
+        cross: (b.cross + dy / len * STRIP_YD) + ny * STRIP_YD },
+      { along: (b.along + dx / len * STRIP_YD) - nx * STRIP_YD,
+        cross: (b.cross + dy / len * STRIP_YD) - ny * STRIP_YD },
+      { along: (a.along - dx / len * STRIP_YD) - nx * STRIP_YD,
+        cross: (a.cross - dy / len * STRIP_YD) - ny * STRIP_YD },
+    ];
+    const wRing = ring.map(toAC);
+    // gate 1/2: any water vertex inside the path strip or chord tube
+    if (wRing.some((p) => ptIn(p, stripRing) || ptIn(p, chordRing))) return true;
+    // gate 3: turf overlap — any water vertex inside this hole's
+    // fairway/rough/green, or a turf vertex inside the water ring
+    const s0 = h.shapes || {};
+    const turf = [
+      ...(Array.isArray(s0.fairways) ? s0.fairways : []),
+      ...(Array.isArray(s0.rough) ? s0.rough : []),
+    ];
+    let greenRing = null;
+    if (Array.isArray(h.greenRingPts) && h.greenRingPts.length >= 3) {
+      greenRing = h.greenRingPts;
+    }
+    const turfAC = [...turf, ...(greenRing ? [greenRing] : [])]
+      .map((r) => r.map(toAC));
+    for (const tr of turfAC) {
+      if (wRing.some((p) => ptIn(p, tr))) return true;
+      if (tr.some((p) => ptIn(p, wRing))) return true;
+    }
+    return false;
+  }
+
   function hazPointOnStrip(hz, h) {
     if (!h || !Array.isArray(h.pathPts) || h.pathPts.length < 2) return true;
     if (!hz || !Number.isFinite(hz.lat) || !Number.isFinite(hz.lng)) return true;
@@ -2197,29 +2293,51 @@
       window.__prepPlanLanding = landing;
       // v1.17.1: DIRECT hole payload — no localStorage round-trip (that
       // was the first-tap-empty/second-tap-loaded bug).
-      window.PrepHoleSat.open({
-        greenLatLng: boundHole.greenLatLng,
-        courseId: boundHole.courseId,
-        hole: boundHole.number,
-        holeData: {
-          par: boundHole.par || null,
-          yards: boundHole.yards || null,
-          pathPts: boundHole.pathPts || null,
-          greenRingPts: boundHole.greenRingPts || null,
-          // v1.19.0: REAL OSM polygons (fairway/bunker/water/tee/rough).
-          shapes: boundHole.shapes || null,
-          teePoint: boundHole.teeLatLng
-            ? { lat: boundHole.teeLatLng.lat,
-                lng: boundHole.teeLatLng.lng } : null,
-          greenCenter: boundHole.greenLatLng
-            ? { lat: boundHole.greenLatLng.lat,
-                lng: boundHole.greenLatLng.lng } : null,
-          hazards: (Array.isArray(boundHole.hazards)
-            ? boundHole.hazards : []).filter((hz) =>
-              hz && Number.isFinite(hz.lat) && Number.isFinite(hz.lng)),
-        },
-        teeLL: boundHole.teeLatLng,
-      });
+        // v1.21.4 (James: the sat sheet shows what the CARTOON shows):
+        // hazards use the same 20 yd strip test as the chips (not on the
+        // cartoon → not on the sheet). Water uses the same line/turf
+        // gates (strip ∪ chord ∪ turf-overlap) but passes FULL bounds —
+        // the sheet clips against real imagery, no artificial cut.
+        // Filters computed here where the cartoon's geometry lives.
+        const satShapes = (() => {
+          const s0 = boundHole.shapes || {};
+          const out = {};
+          ['fairways', 'rough', 'tees', 'bunkers'].forEach((k) => {
+            if (Array.isArray(s0[k])) out[k] = s0[k];
+          });
+          const wArr = Array.isArray(s0.water) ? s0.water : [];
+          if (wArr.length && boundHole.pathPts && boundHole.teeLatLng) {
+            // gate: ring touches the strip/chord corridor OR the turf
+            out.water = wArr.filter((ring) => ringWaterOnHole(ring, boundHole));
+          } else if (wArr.length) {
+            out.water = wArr;   // no path/turf → nothing to gate with
+          }
+          return out;
+        })();
+        const satHazards = (Array.isArray(boundHole.hazards)
+          ? boundHole.hazards : []).filter((hz) =>
+            hz && Number.isFinite(hz.lat) && Number.isFinite(hz.lng) &&
+            hazPointOnStrip(hz, boundHole));
+        window.PrepHoleSat.open({
+          greenLatLng: boundHole.greenLatLng,
+          courseId: boundHole.courseId,
+          hole: boundHole.number,
+          holeData: {
+            par: boundHole.par || null,
+            yards: boundHole.yards || null,
+            pathPts: boundHole.pathPts || null,
+            greenRingPts: boundHole.greenRingPts || null,
+            shapes: satShapes,
+            teePoint: boundHole.teeLatLng
+              ? { lat: boundHole.teeLatLng.lat,
+                  lng: boundHole.teeLatLng.lng } : null,
+            greenCenter: boundHole.greenLatLng
+              ? { lat: boundHole.greenLatLng.lat,
+                  lng: boundHole.greenLatLng.lng } : null,
+            hazards: satHazards,
+          },
+          teeLL: boundHole.teeLatLng,
+        });
       haptic(6);
       // v1.18.0 (James: "why rely on me opening the 3d green?"): run the
       // FULL green-brief pipeline invisibly — USGS patch → gradient
