@@ -95,7 +95,6 @@
       zoomControl: false,
       attributionControl: false,
       maxZoom: 21,
-      minZoom: 15,
     }).setView([boot.lat, boot.lng], 17);
     window.__pshMap = map;
     L.tileLayer(TILES, { attribution: '', maxZoom: 21 })
@@ -151,26 +150,11 @@
         fillColor: 'rgba(196,138,18,0.55)', fillOpacity: 1,
         interactive: false });
     }
-    // Fairway ribbon: the same simplified path the cartoon uses.
-    // v1.17.0 premium pass: halo underlay (dark rim makes the green pop
-    // off the satellite imagery, Play-tab style).
-    if (Array.isArray(hole.pathPts) && hole.pathPts.length >= 2) {
-      const ll = hole.pathPts.map((p) => [p.lat, p.lng]);
-      // dark halo rim
-      L.polyline(ll, {
-        color: 'rgba(6, 12, 9, 0.55)', weight: 30,
-        lineCap: 'round', lineJoin: 'round', interactive: false,
-      }).addTo(map);
-      // soft wide body
-      L.polyline(ll, {
-        color: 'rgba(46, 186, 108, 0.38)', weight: 26,
-        lineCap: 'round', lineJoin: 'round', interactive: false,
-      }).addTo(map);
-      // crisp centre line
-      L.polyline(ll, {
-        color: 'rgba(140, 240, 175, 0.9)', weight: 2.5,
-        interactive: false,
-      }).addTo(map);
+    // Fairway band: REMOVED (v1.21.3, James: "get rid of the thick green
+    // band that's on the shot lines"). The hole's real fairway/rough
+    // polygons above + the thin centre line below carry the shape.
+    if (false) {
+      void 0;
     }
 
     // Green outline: stored ring or the local traced outline.
@@ -323,31 +307,10 @@
       });
     } catch (e) { /* plan dots are garnish */ }
 
-    // Live OSM context: neighbouring greens + hole lines (like Check
-    // location). Failure is silent — stored overlays carry the sheet.
-    fetch(`${OVERPASS}?data=${encodeURIComponent(
-      `[out:json][timeout:15];(way["golf"="green"](around:120,${boot.lat},${boot.lng});way["golf"="hole"](around:120,${boot.lat},${boot.lng}););out geom;`)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!data || !data.elements) return;
-        data.elements.forEach((el) => {
-          if (!el.geometry || el.geometry.length < 2) return;
-          const ll = el.geometry.map((g) => [g.lat, g.lon]);
-          const isHole = el.tags && el.tags.golf === 'hole';
-          if (isHole) {
-            L.polyline(ll, {
-              color: 'rgba(255,255,255,0.45)', weight: 1.5,
-              dashArray: '3 6', interactive: false,
-            }).addTo(map);
-          } else if (ll.length >= 3) {
-            L.polygon(ll, {
-              color: '#7dff9b', weight: 1.5, fillOpacity: 0.12,
-              interactive: false,
-            }).addTo(map);
-          }
-        });
-      })
-      .catch(() => { /* offline: stored overlays only */ });
+    // v1.21.3 (James: "I don't want the other hole features"): the live
+    // Overpass context fetch (neighbouring greens + hole lines) is GONE.
+    // The sheet draws ONLY this hole's stored payload: its assigned
+    // shapes, path, green, tee, hazards, landing dots.
 
     sheet.querySelector('#pshDone').addEventListener('click', () => {
       map.remove();

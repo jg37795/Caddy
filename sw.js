@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.2'; // PREP WATER = LINE + TURF SLICE (James: fill the red-marked crossing): v1.21.1 intersected strip AND turf and cut the sliver where the hooked line crosses a gap between rough blobs. Water now paints (strip UNION chord) PLUS a second water path clipped to the turf union — the crossing fills, the far past-turf mass still never paints. Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.21.3'; // SAT SHEET THIS-HOLE ONLY (James: other holes' features on the satellite view; thick green band on the shot lines; zoom cap): dropped the live Overpass context fetch (that drew neighbour greens/holes), removed the 30px dark halo + 26px green fairway ribbon under the shot line (real polygons + thin centre line carry the shape), removed the Leaflet minZoom:15 cap so he can zoom in past 15. Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
