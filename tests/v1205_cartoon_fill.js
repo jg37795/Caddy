@@ -209,6 +209,12 @@ function svg() { return window.document.querySelector('.prep-holemap'); }
   check('4c. water is clipped to the 90 yd play strip (clipPath on the cartoon)',
     !!(svg1 && svg1.querySelector('clipPath')),
     svg1 ? 'no clipPath' : 'no svg');
+  const clipPath1 = svg1 && svg1.querySelector('clipPath path');
+  const clipLoops1 = clipPath1
+    ? ((clipPath1.getAttribute('d') || '').match(/\bM\b/g) || []).length : 0;
+  check('4d. water clip is the hole footprint (turf + green loops), not one corridor band',
+    clipLoops1 >= 2,
+    `clip subpaths=${clipLoops1}`);
 
   const row3 = rows.find((r) => r.dataset.hole === '3');
   if (row3) row3.click();

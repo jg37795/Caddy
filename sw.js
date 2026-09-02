@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.20.7'; // PREP WATER CLIP (James: don't fit the entire pond — only the part on this hole): camera surveys path+green+turf+bunkers (water does NOT pick zoom). Water is clipped to a 90 yd filled corridor along this hole's path. Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.20.8'; // PREP CARTOON IS THE HOLE (James: foreign bunkers rendered; only clipped pond parts should show): draw keys off the hole FOOTPRINT = this hole's turf (fairway/rough/tees) + green ring + green grown 25 yd (narrow band fallback when no turf mapped). Water clips to the footprint (wrapping pond paints only the sliver the hole clips). Bunkers whole-or-drop — other holes' bunkers vanish. Point-hazard dots footprint-gated. Camera fits hole+footprint+kept bunkers, never water. 90 yd corridor survives ONLY in assignment (hazards-in-play text). Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

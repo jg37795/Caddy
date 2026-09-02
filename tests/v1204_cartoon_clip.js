@@ -103,6 +103,10 @@ window.fetch = async (url) => {
         // Shared bunker between 1 and 2 (~20 yd from both paths)
         { type: 'way', id: 12, tags: { golf: 'bunker' },
           geometry: rect(-190, 12, 20, 16) },
+        // FOREIGN bunker: 60 yd right of hole 1's path, outside hole 1's
+        // turf/green — assigned by the 90 yd corridor but NOT on hole 1.
+        { type: 'way', id: 13, tags: { golf: 'bunker' },
+          geometry: rect(-120, 60, 16, 16) },
 
         // Greenside POINT bunker past hole 3's green (no polygon on hole 3)
         { type: 'node', id: 31, tags: { golf: 'bunker' },
@@ -187,8 +191,8 @@ function wait(ms) {
     h1Fw === 1 && h2Fw === 1,
     `h1 fairways=${h1Fw} h2 fairways=${h2Fw}`);
 
-  check('3. shared bunker assigned to both hole 1 and hole 2',
-    (S1.bunkers || []).length === 1 && (S2.bunkers || []).length === 1,
+  check('3. shared bunker still ASSIGNED to hole 1 and hole 2 (90 yd in-play)',
+    (S1.bunkers || []).length >= 1 && (S2.bunkers || []).length >= 1,
     `h1 bunkers=${(S1.bunkers || []).length} h2=${(S2.bunkers || []).length}`);
 
   check('3b. hole 3 has no bunker polygon (point-only greenside)',
@@ -226,9 +230,15 @@ function wait(ms) {
   check('5b. hole still reads left→right (tee left of flag, span > 80)',
     Number.isFinite(span) && span > 80,
     `teeX=${teeX} flagX=${flagX} span=${span}`);
-  check('5c. water is clipped to the 90 yd play strip (clipPath on the cartoon)',
+  check('4c. water is clipped to the hole footprint (clipPath on the cartoon)',
     !!(svg1 && svg1.querySelector('clipPath')),
     svg1 ? 'no clipPath' : 'no svg');
+  const bunkerD1 = ((svg1 && svg1.querySelector('path.prep-hm-shape.bunker')) ||
+    { getAttribute: () => '' }).getAttribute('d') || '';
+  const bunkerM1 = (bunkerD1.match(/\bM\b/g) || []).length;
+  check('4d. foreign bunker (other hole) does not render on hole 1',
+    bunkerM1 === 1,
+    `bunker M count=${bunkerM1}`);
 
   const row3 = rows.find((r) => r.dataset.hole === '3');
   if (row3) row3.click();

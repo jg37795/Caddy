@@ -1009,6 +1009,10 @@
 
     // ---- Projection helpers (shared by both modes) ----
     let P = null;   // {toXY(latlngOrAlongCross)} when real geometry exists
+    // v1.20.8: the hole's FOOTPRINT — loops in along/cross (turf + green
+    // + surround) and the bunkers that touch it. Filled by the fit block
+    // below, consumed by the draw block.
+    const foot = { loops: [], bunkers: [] };
     if (Array.isArray(h.pathPts) && h.pathPts.length >= 2 &&
         h.teeLatLng && h.greenLatLng) {
       // v1.15.0: anchor the EN plane at the PATH's first point — the hole
@@ -1039,32 +1043,125 @@
         return { along, cross };
       };
       // Fit: TRUE-SCALE, this hole fills the card.
-      // v1.20.7 (James: don't zoom to the whole pond — only the part
-      // that's on THIS hole): camera surveys PATH + GREEN + TURF +
-      // BUNKERS. Water does NOT pick the zoom. A wrapping lake next
-      // to a 164 yd par 3 stays a par 3 on the card. Water is drawn
-      // later, clipped to a 90 yd strip along this hole's path (same
-      // in-play corridor as assignment). No 110/160 yd floor or cap.
+      // v1.20.8 (James: the cartoon is TEE→GREEN, this hole only):
+      // FOOTPRINT = this hole's mapped turf (fairway/rough/tees) +
+      // green ring + green grown by 25 yd. Water/bunkers render only
+      // where they touch the footprint — a wrapping pond paints just
+      // the sliver the hole clips; another hole's bunker (inside the
+      // old 90 yd corridor) renders nothing. Camera surveys path +
+      // green + footprint + the bunkers that earned their place —
+      // never water, never foreign shapes. No yardage floor or cap.
+      // The 90 yd corridor lives on only in ASSIGNMENT (hazards-in-
+      // play text), not as a drawing rule.
       const innerH = H - padT - padB;
+      const GREEN_SURROUND_YD = 25;
+      const S0 = h.shapes || {};
+      const toLL = (p) => ({ lat: 0, lng: 0, __ac: p });
+      const turfRings = [
+        ...(Array.isArray(S0.fairways) ? S0.fairways : []),
+        ...(Array.isArray(S0.rough) ? S0.rough : []),
+        ...(Array.isArray(S0.tees) ? S0.tees : []),
+      ];
+      // along/cross loops for the turf (axis-aligned rects in EN space)
+      const ringLoop = (ring) => {
+        const loop = { aMin: Infinity, aMax: -Infinity, cMin: Infinity, cMax: -Infinity, pts: [] };
+        (ring || []).forEach((ll) => {
+          if (!ll) return;
+          const p = toXY(ll);
+          loop.aMin = Math.min(loop.aMin, p.along);
+          loop.aMax = Math.max(loop.aMax, p.along);
+          loop.cMin = Math.min(loop.cMin, p.cross);
+          loop.cMax = Math.max(loop.cMax, p.cross);
+          loop.pts.push(p);
+        });
+        return loop.pts.length >= 3 ? loop : null;
+      };
+      const greenLoop = Array.isArray(h.greenRingPts)
+        ? ringLoop(h.greenRingPts) : null;
+      let greenPt = null;
+      if (h.greenLatLng) {
+        const p = toXY(h.greenLatLng);
+        greenPt = {
+          aMin: p.along - GREEN_SURROUND_YD,
+          aMax: p.along + GREEN_SURROUND_YD,
+          cMin: p.cross - GREEN_SURROUND_YD,
+          cMax: p.cross + GREEN_SURROUND_YD,
+          pts: [p],
+        };
+      }
+      const inLoop = (loop, p) =>
+        p.along >= loop.aMin && p.along <= loop.aMax &&
+        p.cross >= loop.cMin && p.cross <= loop.cMax;
+      const ptInRing = (p, pts) => {
+        let inside = false;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+          const a = pts[i], b = pts[j];
+          if ((a.cross > p.cross) !== (b.cross > p.cross) &&
+              p.along < ((b.along - a.along) * (p.cross - a.cross)) /
+                ((b.cross - a.cross) || 1e-12) + a.along) {
+            inside = !inside;
+          }
+        }
+        return inside;
+      };
+      // Bunker touches the footprint? (whole-or-drop — James)
+      const bunkerTouches = (ring) => {
+        const bl = ringLoop(ring);
+        if (!bl) return false;
+        const loops = [];
+        turfRings.forEach((r) => { const l = ringLoop(r); if (l) loops.push(l); });
+        if (greenLoop) loops.push(greenLoop);
+        if (greenPt) loops.push(greenPt);
+        for (const lp of loops) {
+          // bbox overlap of the two axis-aligned envelopes = touch
+          if (bl.aMin <= lp.aMax && bl.aMax >= lp.aMin &&
+              bl.cMin <= lp.cMax && bl.cMax >= lp.cMin) return true;
+        }
+        // green ring is a real polygon — also test true containment
+        if (greenLoop && greenLoop.pts.some((p) => ptInRing(p, bl.pts))) {
+          return true;
+        }
+        return false;
+      };
+      foot.bunkers = (Array.isArray(S0.bunkers) ? S0.bunkers : [])
+        .filter((r) => bunkerTouches(r));
+      // Footprint loops: real turf + green when mapped; a narrow
+      // ±25 yd band along tee→green only when the hole has NO turf
+      // mapped at all (old/manual courses) so flight-crossed water
+      // and greenside dots still show.
+      if (turfRings.length || greenLoop || greenPt) {
+        turfRings.forEach((r) => { const l = ringLoop(r); if (l) foot.loops.push(l); });
+        if (greenLoop) foot.loops.push(greenLoop);
+        if (greenPt) foot.loops.push(greenPt);
+      } else {
+        const band = {
+          aMin: -20, aMax: Math.max(80, effYd) + 20,
+          cMin: -25, cMax: 25, pts: [],
+        };
+        foot.loops.push(band);
+      }
+      // Camera: hole + footprint + kept bunkers. WATER EXCLUDED.
       let aMin = Infinity, aMax = -Infinity;
       let cMin = Infinity, cMax = -Infinity;
+      const surveyAC = (along, cross) => {
+        if (along < aMin) aMin = along;
+        if (along > aMax) aMax = along;
+        if (cross < cMin) cMin = cross;
+        if (cross > cMax) cMax = cross;
+      };
       const survey = (ll) => {
         if (!ll) return;
         const p = toXY(ll);
-        if (p.along < aMin) aMin = p.along;
-        if (p.along > aMax) aMax = p.along;
-        if (p.cross < cMin) cMin = p.cross;
-        if (p.cross > cMax) cMax = p.cross;
+        surveyAC(p.along, p.cross);
       };
       h.pathPts.forEach(survey);
       if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(survey);
       if (h.teeLatLng) survey(h.teeLatLng);
       if (h.greenLatLng) survey(h.greenLatLng);
-      const S0 = h.shapes || {};
-      ['fairways', 'rough', 'tees', 'bunkers'].forEach((k) => {
-        (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) =>
-          (ring || []).forEach(survey));
+      foot.loops.forEach((l) => {
+        surveyAC(l.aMin, l.cMin); surveyAC(l.aMax, l.cMax);
       });
+      foot.bunkers.forEach((r) => (r || []).forEach(survey));
       if (!Number.isFinite(aMin)) { aMin = 0; aMax = Math.max(80, effYd); }
       if (!Number.isFinite(cMin)) { cMin = -20; cMax = 20; }
       const PAD_YD = 12;
@@ -1077,6 +1174,7 @@
       const X = (along) => xMid + (along - alongMid) / ydPerPx;
       const Y = (cross) => yMid + (cross - crossMid) / ydPerPx;
       P = { toXY, X, Y, ydPerPx };
+      void toLL;
     }
 
     if (P) {
@@ -1117,49 +1215,28 @@
         }).join(' ') + (close ? ' Z' : '');
       }).join(' ');
       const S = h.shapes || {};
-      // v1.20.7: 90 yd play strip along this hole's path. Water is
-      // clipped to it so a wrapping pond only paints the shoreline
-      // that's in play — the far arm does not fill the card. Camera
-      // already ignored water (above). Filled offset polygon, not a
-      // stroked clipPath (SVG clips fill, not stroke).
-      const PLAY_YD = 90;
-      const playClipId = 'prepHmPlay';
-      const playCorridorD = (() => {
-        const pts = h.pathPts.map((ll) => P.toXY(ll));
-        if (pts.length < 2) return '';
-        const left = [], right = [];
-        for (let i = 0; i < pts.length; i++) {
-          let dx, dy;
-          if (i === 0) {
-            dx = pts[1].along - pts[0].along;
-            dy = pts[1].cross - pts[0].cross;
-          } else if (i === pts.length - 1) {
-            dx = pts[i].along - pts[i - 1].along;
-            dy = pts[i].cross - pts[i - 1].cross;
-          } else {
-            dx = pts[i + 1].along - pts[i - 1].along;
-            dy = pts[i + 1].cross - pts[i - 1].cross;
-          }
-          const len = Math.hypot(dx, dy) || 1e-9;
-          const nx = -dy / len, ny = dx / len;
-          left.push({
-            along: pts[i].along + nx * PLAY_YD,
-            cross: pts[i].cross + ny * PLAY_YD,
-          });
-          right.push({
-            along: pts[i].along - nx * PLAY_YD,
-            cross: pts[i].cross - ny * PLAY_YD,
-          });
+      // v1.20.8: water + point-dots clip to the hole's FOOTPRINT
+      // (turf + green + 25 yd surround; ±25 yd band fallback). The
+      // 90 yd corridor is gone as a drawing rule — a wrapping pond
+      // paints only the sliver this hole clips.
+      const footClipId = 'prepHmFoot';
+      const footLoopD = (l) => {
+        if (!l.pts || l.pts.length < 3) {
+          // envelope-only loop (bbox rect) — build the rect path
+          return 'M ' + P.X(l.aMin).toFixed(1) + ' ' + P.Y(l.cMin).toFixed(1) +
+            ' L ' + P.X(l.aMax).toFixed(1) + ' ' + P.Y(l.cMin).toFixed(1) +
+            ' L ' + P.X(l.aMax).toFixed(1) + ' ' + P.Y(l.cMax).toFixed(1) +
+            ' L ' + P.X(l.aMin).toFixed(1) + ' ' + P.Y(l.cMax).toFixed(1) + ' Z';
         }
-        const ring = left.concat(right.reverse());
-        return ring.map((p, i) =>
+        return l.pts.map((p, i) =>
           (i ? 'L' : 'M') +
           ` ${P.X(p.along).toFixed(1)} ${P.Y(p.cross).toFixed(1)}`
         ).join(' ') + ' Z';
-      })();
-      if (playCorridorD && Array.isArray(S.water) && S.water.length) {
+      };
+      const footClipD = foot.loops.map(footLoopD).join(' ');
+      if (footClipD && ((Array.isArray(S.water) && S.water.length))) {
         parts.push(
-          `<defs><clipPath id="${playClipId}"><path d="${playCorridorD}"/></clipPath></defs>`);
+          `<defs><clipPath id="${footClipId}"><path d="${footClipD}"/></clipPath></defs>`);
       }
       // v1.20.1 (James: "some holes still keep the old style even though
       // they're mapped"): the stroked band was engaging whenever the
@@ -1175,15 +1252,13 @@
         parts.push(
           `<path class="prep-hm-shape fairway" d="${shapePath(S.fairways)}"/>`);
       }
-      if (Array.isArray(S.water) && S.water.length) {
-        const clip = playCorridorD
-          ? ` clip-path="url(#${playClipId})"` : '';
+      if (Array.isArray(S.water) && S.water.length && footClipD) {
         parts.push(
-          `<path class="prep-hm-shape water" fill-rule="nonzero"${clip} d="${shapePath(S.water)}"/>`);
+          `<path class="prep-hm-shape water" fill-rule="nonzero" clip-path="url(#${footClipId})" d="${shapePath(S.water)}"/>`);
       }
-      if (Array.isArray(S.bunkers) && S.bunkers.length) {
+      if (foot.bunkers.length) {
         parts.push(
-          `<path class="prep-hm-shape bunker" d="${shapePath(S.bunkers)}"/>`);
+          `<path class="prep-hm-shape bunker" d="${shapePath(foot.bunkers)}"/>`);
       }
       if (Array.isArray(S.tees) && S.tees.length) {
         parts.push(
@@ -1268,6 +1343,12 @@
       // v1.19.0: bunkers/water with REAL outlines (h.shapes) draw as
       // their true shapes; the ellipse dots stay only for point-only
       // hazards (no polygon mapped).
+      // v1.20.8: a fallback dot also has to sit ON this hole —
+      // inside the footprint loops (turf/green/band). The 45 yd
+      // assignment corridor used to paint neighbours' point hazards.
+      const dotOnHole = (along, cross) => foot.loops.some((l) =>
+        along >= l.aMin && along <= l.aMax &&
+        cross >= l.cMin && cross <= l.cMax);
       const shapes = h.shapes || {};
       const bunkersDrawn = Array.isArray(shapes.bunkers) &&
         shapes.bunkers.length;
@@ -1280,11 +1361,13 @@
         if (Number.isFinite(hz.lat) && Number.isFinite(hz.lng) && h.teeLatLng) {
           const pr = pathProject(hz);
           if (!pr) continue;
+          if (!dotOnHole(pr.along, pr.side)) continue;
           ax = P.X(pr.gx); ay = P.Y(pr.gy);
         } else {
           const along = Number.isFinite(hz.along) ? hz.along : hazardAlongYd(hz.sub);
           if (along == null || along <= 0 || along > effYd + 30) continue;
           const cross = Number.isFinite(hz.cross) ? hz.cross : 0;
+          if (!dotOnHole(along, cross)) continue;
           ax = P.X(along); ay = P.Y(cross);
         }
         if (hz.type === 'water') {
