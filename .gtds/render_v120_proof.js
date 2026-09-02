@@ -151,9 +151,10 @@ fs.writeFileSync(path.join(__dirname, 'exec_full_q.txt'), q);
   };
   pathPts.forEach(survey);
   if (greenRing) greenRing.forEach(survey);
-  // v1.20.1: shapes no longer expand the window (hole's window only);
-  // keep the proof identical to the shipped survey.
-  const crossSpan = Math.min(140, Math.max(90, crossMax - crossMin) + 24);
+  // v1.20.2: shapes expand the window again (the 140-yd cap clipped
+  // the donut pond into slivers); grass corridor tightened instead.
+  Object.values(shapes).forEach(arr => arr.forEach(ring => ring.forEach(survey)));
+  const crossSpan = Math.min(200, Math.max(110, crossMax - crossMin) + 28);
   const W = 500, H = 300, padT = 24, padB = 24, padL = 28, padR = 32;
   const spanX = W - padL - padR;
   const effYd = Math.round(pathPts.reduce((s, p, i) => {
@@ -197,7 +198,9 @@ fs.writeFileSync(path.join(__dirname, 'exec_full_q.txt'), q);
   };
   drawPolys(shapes.rough, 'rgba(38,66,48,0.35)', 'rgba(0,0,0,0)');
   drawPolys(shapes.fairways, 'rgba(64,152,99,0.42)', 'rgba(122,232,160,0.35)');
-  drawPolys(shapes.water, 'rgba(58,143,212,0.45)', 'rgba(126,200,255,0.5)');
+  // v1.20.2: brighter water so the horseshoe arms read at cartoon scale
+  ctx.lineWidth = 1.5;
+  drawPolys(shapes.water, 'rgba(58,143,212,0.55)', 'rgba(126,200,255,0.8)');
   drawPolys(shapes.bunkers, 'rgba(196,138,18,0.55)', 'rgba(255,209,102,0.75)');
   drawPolys(shapes.tees, 'rgba(130,190,140,0.4)', 'rgba(200,240,205,0.4)');
   if (greenRing) drawPolys([greenRing], 'rgba(125,255,155,0.25)', '#7dff9b');

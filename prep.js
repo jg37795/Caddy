@@ -1046,11 +1046,13 @@
       // window covers the hole PLUS any assigned shapes (shapes clip at
       // the frame edge instead of distorting). No clamping anywhere.
       const fitLen = Math.max(120, effYd);
-      // Survey the real cross-range of what we will draw: the hole's
-      // own path + green. v1.20.1 (James: "showing way too much of the
-      // course"): shape vertices NO LONGER expand the window — shapes
-      // extending past the hole simply CLIP at the frame (honest map
-      // behaviour). The window is the HOLE's window.
+      // Survey the real cross-range of everything we will draw: the
+      // hole's path + green + assigned shapes. v1.20.2 (James: the
+      // v1.20.1 hole-only window CLIPPED the donut pond into slivers —
+      // the pond is bigger than 140 yd; the "previous view" he liked
+      // let it draw fully): shapes expand the window again, but the
+      // v1.20.2 grass-corridor tightening (55 yd) keeps neighbour
+      // clutter out, so the expansion is now only genuine surroundings.
       let crossMin = -40, crossMax = 40;   // sane defaults (±40 yd)
       const survey = (ll) => {
         if (!ll) return;
@@ -1060,11 +1062,15 @@
       };
       h.pathPts.forEach(survey);
       if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(survey);
-      // Window height in yards: cross range + margin, capped for
-      // readable proportion (a 164-yd hole shouldn't render 250 yd
-      // tall).
-      const crossSpan = Math.min(140,
-        Math.max(90, crossMax - crossMin) + 24);
+      const S0 = h.shapes || {};
+      ['fairways', 'bunkers', 'water', 'tees', 'rough'].forEach((k) => {
+        (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) =>
+          (ring || []).forEach(survey));
+      });
+      // Window height: cross range + margin, capped so a stray huge
+      // shape can't flatten the hole into a sliver.
+      const crossSpan = Math.min(200,
+        Math.max(110, crossMax - crossMin) + 28);
       // Uniform scale: px per yard — the same for X and Y.
       const ydPerPx = Math.max(fitLen / spanX, crossSpan / (H - padT - padB));
       const X = (along) => x0 + along / ydPerPx;
