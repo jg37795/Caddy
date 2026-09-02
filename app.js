@@ -5728,19 +5728,25 @@
     // grass): 160 yd was too generous — course features a hole's width
     // away stamped onto the wrong card. 90 yd = genuinely in play from
     // this tee.
+    // v1.20.2 (James: "showing way too much of the course — the focus
+    // is the current hole"): PER-KIND corridors. Water/bunkers stay at
+    // 90 yd (safety-relevant, keep them), but fairway/rough at 90 yd
+    // pulled in neighbouring holes' grass as visual noise — those drop
+    // to 55 yd.
     const CORRIDOR_YD = 90;
+    const CORRIDOR_GRASS_YD = 55;
     const polyCentroid = (ring) => {
       let lat = 0, lng = 0;
       for (const p of ring) { lat += p.lat; lng += p.lng; }
       return { lat: lat / ring.length, lng: lng / ring.length };
     };
     const shapesByHole = new Map();   // hole num -> {fairways, bunkers, water, tees, rough}
-    const assignShape = (ring, key) => {
+    const assignShape = (ring, key, corridorYd) => {
       if (!ring || ring.length < 3) return;
       const c = polyCentroid(ring);
       for (const r of byNum.values()) {
         const dYd = osmDistPointToPathM(c, r.path) * OSM_YD_PER_M;
-        if (dYd > CORRIDOR_YD) continue;
+        if (dYd > corridorYd) continue;
         if (!shapesByHole.has(r.num)) {
           shapesByHole.set(r.num, {
             fairways: [], bunkers: [], water: [], tees: [], rough: [],
@@ -5749,11 +5755,13 @@
         shapesByHole.get(r.num)[key].push(ring);
       }
     };
-    for (const ring of polyFairways) assignShape(ring, 'fairways');
-    for (const ring of polyBunkers) assignShape(ring, 'bunkers');
-    for (const ring of polyWater) assignShape(ring, 'water');
-    for (const ring of polyTees) assignShape(ring, 'tees');
-    for (const ring of polyRough) assignShape(ring, 'rough');
+    // v1.20.2: hazards keep the 90 yd corridor; grass shapes (neighbour
+    // noise) tighten to 55 yd.
+    for (const ring of polyFairways) assignShape(ring, 'fairways', CORRIDOR_GRASS_YD);
+    for (const ring of polyBunkers) assignShape(ring, 'bunkers', CORRIDOR_YD);
+    for (const ring of polyWater) assignShape(ring, 'water', CORRIDOR_YD);
+    for (const ring of polyTees) assignShape(ring, 'tees', CORRIDOR_YD);
+    for (const ring of polyRough) assignShape(ring, 'rough', CORRIDOR_GRASS_YD);
 
     // ---- Pass 4: build the 18 holes. NEVER emit a key without a real value. ----
     const report = {
@@ -14591,37 +14599,47 @@ out geom;`;
       const eps = 1e-7;
       const same = (a, b) =>
         Math.abs(a.lat - b.lat) < eps && Math.abs(a.lng - b.lng) < eps;
+      const dist = (a, b) => Math.hypot(
+        (a.lat - b.lat) * 111320,
+        (a.lng - b.lng) * 111320 * Math.cos(a.lat * Math.PI / 180));
+      // v1.20.2 (James: "the pond should be fully colored blue inside —
+      // there's only the sliver that's blue"): exact-endpoint greedy
+      // assembly could splice arcs in the wrong order (two arcs sharing
+      // both endpoints, or coincident nodes) → self-intersecting bowtie
+      // ring → the fill rule leaves the middle UNFILLED. Rewritten:
+      // NEAREST-ENDPOINT CHAINING — start from an arc whose start is
+      // not any other's end (a true chain head when one exists), then
+      // repeatedly append the unused arc whose start is CLOSEST to the
+      // chain's tail (reversing when the tail matches its end). Order
+      // follows the shoreline instead of iteration luck.
+      const arcsLeft = () => arcs.reduce((n, _, i) => n + (used[i] ? 0 : 1), 0);
       const rings = [];
       const used = new Array(arcs.length).fill(false);
-      for (let start = 0; start < arcs.length; start++) {
-        if (used[start]) continue;
-        used[start] = true;
-        let ringArcs = arcs[start].slice();
-        let extended = true;
-        while (extended) {
-          extended = false;
+      // chain head: an arc whose start is not (within eps) any other
+      // arc's end — for a closed ring every start IS some end, so fall
+      // back to arc 0; the loop closes anyway.
+      for (let headIdx = 0; headIdx < arcs.length; headIdx++) {
+        if (used[headIdx]) continue;
+        used[headIdx] = true;
+        let chain = arcs[headIdx].slice();
+        while (arcsLeft() > 0) {
+          const tail = chain[chain.length - 1];
+          let bestK = -1, bestD = Infinity, bestRev = false;
           for (let k = 0; k < arcs.length; k++) {
             if (used[k]) continue;
-            const tail = ringArcs[ringArcs.length - 1];
-            const head = ringArcs[0];
             const a0 = arcs[k][0];
             const aN = arcs[k][arcs[k].length - 1];
-            if (same(tail, a0)) {
-              ringArcs = ringArcs.concat(arcs[k].slice(1));
-              used[k] = true; extended = true;
-            } else if (same(tail, aN)) {
-              ringArcs = ringArcs.concat(arcs[k].slice(0, -1).reverse());
-              used[k] = true; extended = true;
-            } else if (same(head, aN)) {
-              ringArcs = arcs[k].slice(0, -1).concat(ringArcs);
-              used[k] = true; extended = true;
-            } else if (same(head, a0)) {
-              ringArcs = arcs[k].slice(1).reverse().concat(ringArcs);
-              used[k] = true; extended = true;
-            }
+            const dFwd = dist(tail, a0);
+            const dRev = dist(tail, aN);
+            if (dFwd < bestD && dFwd <= dRev) { bestD = dFwd; bestK = k; bestRev = false; }
+            else if (dRev < bestD) { bestD = dRev; bestK = k; bestRev = true; }
           }
+          if (bestK < 0 || bestD > 2) break;   // arcs of ONE ring share nodes exactly — never bridge disjoint ponds
+          used[bestK] = true;
+          if (bestRev) chain = chain.concat(arcs[bestK].slice(0, -1).reverse());
+          else chain = chain.concat(arcs[bestK].slice(1));
         }
-        if (ringArcs.length >= 3) rings.push(ringArcs);
+        if (chain.length >= 3) rings.push(chain);
       }
       return rings.length ? rings : null;
     }

@@ -1602,9 +1602,9 @@ button.prep-carry-tile:active { transform: scale(0.96); }
   stroke-width: 1;
 }
 .prep-holemap path.prep-hm-shape.water {
-  fill: rgba(58, 143, 212, 0.45);
-  stroke: rgba(126, 200, 255, 0.5);
-  stroke-width: 1;
+  fill: rgba(58, 143, 212, 0.55);
+  stroke: rgba(126, 200, 255, 0.8);
+  stroke-width: 1.5;
 }
 .prep-holemap path.prep-hm-shape.teebox {
   fill: rgba(130, 190, 140, 0.4);
