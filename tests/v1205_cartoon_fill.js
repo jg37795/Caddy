@@ -219,6 +219,11 @@ function svg() { return window.document.querySelector('.prep-holemap'); }
   check('4d. water clip is the tee→green line strip PLUS the chord tube on a dogleg',
     clipLoops1 === 2,
     `clip subpaths=${clipLoops1}`);
+  const waterGroup1 = svg1 && svg1.querySelector('g.prep-hm-waterclip');
+  check('4e. water ALSO clips to this hole\'s turf (turf boundary = water\'s edge)',
+    !!(waterGroup1 && waterGroup1.getAttribute('clip-path') &&
+      waterGroup1.querySelector('path.prep-hm-shape.water')),
+    waterGroup1 ? `group clip=${waterGroup1.getAttribute('clip-path')}` : 'no water group');
 
   const row3 = rows.find((r) => r.dataset.hole === '3');
   if (row3) row3.click();

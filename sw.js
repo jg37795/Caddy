@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.0'; // PREP LIST MATCHES THE MAP + FLIGHT WATER (James: hazards-in-play obeys the same 20 yd strip the cartoon clips to; chord-crossed water paints too): chips filtered by the strip test; water clip = path strip UNION a tube along the straight tee-to-green flight chord (dogleg pond the flight crosses now paints). Not drawn = not listed. Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.21.1'; // PREP TURF IS WATER'S EDGE (James red line on hole 9: pond extended past the turf): water draws inside a group clipped to this hole's turf union (fairway+rough+green). Intersection with the existing strip+chord clip: the strip keeps the hole line, the turf cuts the edge. No mapped turf = strip/chord alone. Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

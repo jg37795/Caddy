@@ -1282,8 +1282,33 @@
             ` ${P.X(p.along).toFixed(1)} ${P.Y(p.cross).toFixed(1)}`
           ).join(' ') + ' Z' : '');
       if (footClipD && ((Array.isArray(S.water) && S.water.length))) {
+        let hasTurfClip = false;
         parts.push(
           `<defs><clipPath id="${footClipId}"><path d="${footClipD}"/></clipPath></defs>`);
+        // v1.21.1 (James: the pond extends past the turf — red line on
+        // hole 9): water's edge is THIS HOLE'S TURF. Wrap the water path
+        // in a group clipped to the turf union (fairway + rough + green
+        // ring + green ellipse fallback). Intersection of both clips:
+        // strip/chord decides the hole's line, turf decides the edge.
+        const turfD = shapePath([
+          ...(Array.isArray(S.fairways) ? S.fairways : []),
+          ...(Array.isArray(S.rough) ? S.rough : []),
+        ]) + (Array.isArray(h.greenRingPts) && h.greenRingPts.length >= 3
+          ? ' ' + shapePath([h.greenRingPts])
+          : (() => {
+            if (!h.greenLatLng) return '';
+            const e = P.toXY(h.greenLatLng);
+            const rx = 16 * P.ydPerPx, ry = 11 * P.ydPerPx;
+            return ` M ${(P.X(e.along) - rx).toFixed(1)} ${P.Y(e.cross).toFixed(1)}` +
+              ` a ${rx.toFixed(1)} ${ry.toFixed(1)} 0 1 0 ${(2 * rx).toFixed(1)} 0` +
+              ` a ${rx.toFixed(1)} ${ry.toFixed(1)} 0 1 0 ${(-2 * rx).toFixed(1)} 0 Z`;
+          })());
+        if (turfD) {
+          hasTurfClip = true;
+          parts.push(
+            `<defs><clipPath id="prepHmTurf"><path d="${turfD}"/></clipPath></defs>`);
+        }
+        foot.hasTurfClip = hasTurfClip;
       }
       // v1.20.1 (James: "some holes still keep the old style even though
       // they're mapped"): the stroked band was engaging whenever the
@@ -1300,8 +1325,16 @@
           `<path class="prep-hm-shape fairway" d="${shapePath(S.fairways)}"/>`);
       }
       if (Array.isArray(S.water) && S.water.length && footClipD) {
-        parts.push(
-          `<path class="prep-hm-shape water" fill-rule="nonzero" clip-path="url(#${footClipId})" d="${shapePath(S.water)}"/>`);
+        const waterD = `<path class="prep-hm-shape water" fill-rule="nonzero" clip-path="url(#${footClipId})" d="${shapePath(S.water)}"/>`;
+        // v1.21.1: turf boundary intersects the strip/chord clip (James
+        // red line). Without mapped turf the group clip is omitted and
+        // the strip/chord alone governs (poorly-mapped holes).
+        if (foot.hasTurfClip) {
+          parts.push(
+            `<g class="prep-hm-waterclip" clip-path="url(#prepHmTurf)">${waterD}</g>`);
+        } else {
+          parts.push(waterD);
+        }
       }
       if (foot.bunkers.length) {
         parts.push(
