@@ -1038,15 +1038,13 @@
         const cross = p.x * px + p.y * py;
         return { along, cross };
       };
-      // Fit: TRUE-SCALE, this hole's own features fill the card.
-      // v1.20.6 (James: hole features cropped even though they belong
-      // to the hole — no set cap): survey PATH + GREEN + ASSIGNED
-      // shapes (fairway/rough/tees/water/bunkers). Uniform yd/px so
-      // the bounding box of THIS hole fits the viewBox with a small
-      // pad. No 110/160 yd floor or cap — a 90 yd pond beside a
-      // 164 yd par 3 zooms to fit the pond; a skinny 400 yd par 4
-      // stays long and narrow. Neighbour clutter never enters this
-      // bbox because assignment already dropped it.
+      // Fit: TRUE-SCALE, this hole fills the card.
+      // v1.20.7 (James: don't zoom to the whole pond — only the part
+      // that's on THIS hole): camera surveys PATH + GREEN + TURF +
+      // BUNKERS. Water does NOT pick the zoom. A wrapping lake next
+      // to a 164 yd par 3 stays a par 3 on the card. Water is drawn
+      // later, clipped to a 90 yd strip along this hole's path (same
+      // in-play corridor as assignment). No 110/160 yd floor or cap.
       const innerH = H - padT - padB;
       let aMin = Infinity, aMax = -Infinity;
       let cMin = Infinity, cMax = -Infinity;
@@ -1063,7 +1061,7 @@
       if (h.teeLatLng) survey(h.teeLatLng);
       if (h.greenLatLng) survey(h.greenLatLng);
       const S0 = h.shapes || {};
-      ['fairways', 'rough', 'tees', 'bunkers', 'water'].forEach((k) => {
+      ['fairways', 'rough', 'tees', 'bunkers'].forEach((k) => {
         (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) =>
           (ring || []).forEach(survey));
       });
@@ -1119,6 +1117,50 @@
         }).join(' ') + (close ? ' Z' : '');
       }).join(' ');
       const S = h.shapes || {};
+      // v1.20.7: 90 yd play strip along this hole's path. Water is
+      // clipped to it so a wrapping pond only paints the shoreline
+      // that's in play — the far arm does not fill the card. Camera
+      // already ignored water (above). Filled offset polygon, not a
+      // stroked clipPath (SVG clips fill, not stroke).
+      const PLAY_YD = 90;
+      const playClipId = 'prepHmPlay';
+      const playCorridorD = (() => {
+        const pts = h.pathPts.map((ll) => P.toXY(ll));
+        if (pts.length < 2) return '';
+        const left = [], right = [];
+        for (let i = 0; i < pts.length; i++) {
+          let dx, dy;
+          if (i === 0) {
+            dx = pts[1].along - pts[0].along;
+            dy = pts[1].cross - pts[0].cross;
+          } else if (i === pts.length - 1) {
+            dx = pts[i].along - pts[i - 1].along;
+            dy = pts[i].cross - pts[i - 1].cross;
+          } else {
+            dx = pts[i + 1].along - pts[i - 1].along;
+            dy = pts[i + 1].cross - pts[i - 1].cross;
+          }
+          const len = Math.hypot(dx, dy) || 1e-9;
+          const nx = -dy / len, ny = dx / len;
+          left.push({
+            along: pts[i].along + nx * PLAY_YD,
+            cross: pts[i].cross + ny * PLAY_YD,
+          });
+          right.push({
+            along: pts[i].along - nx * PLAY_YD,
+            cross: pts[i].cross - ny * PLAY_YD,
+          });
+        }
+        const ring = left.concat(right.reverse());
+        return ring.map((p, i) =>
+          (i ? 'L' : 'M') +
+          ` ${P.X(p.along).toFixed(1)} ${P.Y(p.cross).toFixed(1)}`
+        ).join(' ') + ' Z';
+      })();
+      if (playCorridorD && Array.isArray(S.water) && S.water.length) {
+        parts.push(
+          `<defs><clipPath id="${playClipId}"><path d="${playCorridorD}"/></clipPath></defs>`);
+      }
       // v1.20.1 (James: "some holes still keep the old style even though
       // they're mapped"): the stroked band was engaging whenever the
       // course had no golf=FAIRWAY polygons — but courses like the exec
@@ -1134,8 +1176,10 @@
           `<path class="prep-hm-shape fairway" d="${shapePath(S.fairways)}"/>`);
       }
       if (Array.isArray(S.water) && S.water.length) {
+        const clip = playCorridorD
+          ? ` clip-path="url(#${playClipId})"` : '';
         parts.push(
-          `<path class="prep-hm-shape water" fill-rule="nonzero" d="${shapePath(S.water)}"/>`);
+          `<path class="prep-hm-shape water" fill-rule="nonzero"${clip} d="${shapePath(S.water)}"/>`);
       }
       if (Array.isArray(S.bunkers) && S.bunkers.length) {
         parts.push(

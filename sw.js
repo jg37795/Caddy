@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.20.6'; // PREP CARTOON DYNAMIC FIT (James: hole features cropped even though they belong to the hole): camera surveys THIS hole's path+green+assigned shapes and scales uniformly so that bbox fills the viewBox. No 110/160 yd floor or cap. Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.20.7'; // PREP WATER CLIP (James: don't fit the entire pond — only the part on this hole): camera surveys path+green+turf+bunkers (water does NOT pick zoom). Water is clipped to a 90 yd filled corridor along this hole's path. Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

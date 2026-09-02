@@ -200,22 +200,15 @@ function svg() { return window.document.querySelector('.prep-holemap'); }
     if (m) flagX = Number(m[1]);
   }
   const span = flagX - teeX;
-  const parseXY = (d) => {
-    const out = [];
-    const re = /(-?[\d.]+)\s+(-?[\d.]+)/g;
-    let m;
-    while ((m = re.exec(d || ''))) out.push([Number(m[1]), Number(m[2])]);
-    return out;
-  };
-  const waterXY = parseXY(waterD);
-  const waterInFrame = waterXY.length >= 3 &&
-    waterXY.every(([x, y]) => x >= -0.5 && x <= 320.5 && y >= -0.5 && y <= 168.5);
-  check('4. this-hole pond stays in frame (dynamic fit, no yardage cap cropping it)',
-    waterInFrame,
-    `pts=${waterXY.length} sample=${JSON.stringify(waterXY.slice(0, 2))} span=${Number.isFinite(span) ? span.toFixed(1) : 'na'}`);
+  check('4. camera ignores the pond (tee→green fills the card; water does not pick zoom)',
+    Number.isFinite(span) && span > 200,
+    `span=${Number.isFinite(span) ? span.toFixed(1) : 'na'} teeX=${teeX} flagX=${flagX}`);
   check('4b. tee is left of the flag (hole still reads left→right)',
     Number.isFinite(span) && span > 80,
     `span=${span} teeX=${teeX} flagX=${flagX}`);
+  check('4c. water is clipped to the 90 yd play strip (clipPath on the cartoon)',
+    !!(svg1 && svg1.querySelector('clipPath')),
+    svg1 ? 'no clipPath' : 'no svg');
 
   const row3 = rows.find((r) => r.dataset.hole === '3');
   if (row3) row3.click();
