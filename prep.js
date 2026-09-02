@@ -1156,6 +1156,31 @@
       foot.bunkers = (Array.isArray(S0.bunkers) ? S0.bunkers : [])
         .filter((r) => bunkerTouches(r));
       foot.loops = [corridor];
+      // v1.21.0 (James: chord-crossed water paints too): a second tube
+      // along the STRAIGHT tee→green chord — the flight line. Water
+      // clips to the union of both; bunkers/dots stay on the path strip.
+      const chordRing = (() => {
+        const a = acPts[1];   // first original point (after the extension)
+        const b = acPts[acPts.length - 2];
+        const dx = b.along - a.along, dy = b.cross - a.cross;
+        const len = Math.hypot(dx, dy) || 1e-9;
+        const nx = -dy / len, ny = dx / len;
+        const aE = {
+          along: a.along - (dx / len) * STRIP_YD,
+          cross: a.cross - (dy / len) * STRIP_YD,
+        };
+        const bE = {
+          along: b.along + (dx / len) * STRIP_YD,
+          cross: b.cross + (dy / len) * STRIP_YD,
+        };
+        return [
+          { along: aE.along + nx * STRIP_YD, cross: aE.cross + ny * STRIP_YD },
+          { along: bE.along + nx * STRIP_YD, cross: bE.cross + ny * STRIP_YD },
+          { along: bE.along - nx * STRIP_YD, cross: bE.cross - ny * STRIP_YD },
+          { along: aE.along - nx * STRIP_YD, cross: aE.cross - ny * STRIP_YD },
+        ];
+      })();
+      foot.chord = chordRing;
       // Camera: hole + strip + kept bunkers. WATER EXCLUDED.
       let aMin = Infinity, aMax = -Infinity;
       let cMin = Infinity, cMax = -Infinity;
@@ -1250,7 +1275,12 @@
           ` ${P.X(p.along).toFixed(1)} ${P.Y(p.cross).toFixed(1)}`
         ).join(' ') + ' Z';
       };
-      const footClipD = foot.loops.map(footLoopD).join(' ');
+      const footClipD = foot.loops.map(footLoopD).join(' ') +
+        (foot.chord && foot.chord.length >= 3
+          ? ' ' + foot.chord.map((p, i) =>
+            (i ? 'L' : 'M') +
+            ` ${P.X(p.along).toFixed(1)} ${P.Y(p.cross).toFixed(1)}`
+          ).join(' ') + ' Z' : '');
       if (footClipD && ((Array.isArray(S.water) && S.water.length))) {
         parts.push(
           `<defs><clipPath id="${footClipId}"><path d="${footClipD}"/></clipPath></defs>`);
@@ -1639,6 +1669,88 @@
       '3D Green</a>';
   }
 
+  // v1.21.0: shared geometry math for the "is this ON the hole" tests.
+  // Strip = the hole's path offset ±20 yd each side (matches the map
+  // clip). Point-in-ring in the along/cross plane. The cartoon builds
+  // the same corridor internally, so the list and the map can never
+  // disagree.
+  const STRIP_YD = 20;
+  function hazPointOnStrip(hz, h) {
+    if (!h || !Array.isArray(h.pathPts) || h.pathPts.length < 2) return true;
+    if (!hz || !Number.isFinite(hz.lat) || !Number.isFinite(hz.lng)) return true;
+    const anchor = h.pathPts[0];
+    const mLat = 111320;
+    const mLng = 111320 * Math.cos(anchor.lat * Math.PI / 180);
+    const en = (ll) => ({
+      x: ((ll.lng - anchor.lng) * mLng) / 0.9144,
+      y: ((ll.lat - anchor.lat) * mLat) / 0.9144,
+    });
+    const tgt = en(h.greenLatLng || h.pathPts[h.pathPts.length - 1]);
+    const L = Math.hypot(tgt.x, tgt.y) || 1e-9;
+    const ux = tgt.x / L, uy = tgt.y / L;
+    const px = uy, py = -ux;
+    const toAC = (ll) => {
+      const p = en(ll);
+      return { along: p.x * ux + p.y * uy, cross: p.x * px + p.y * py };
+    };
+    const acPts = h.pathPts.map(toAC);
+    {
+      const first = acPts[0], second = acPts[1];
+      const d0 = Math.hypot(second.along - first.along,
+        second.cross - first.cross) || 1e-9;
+      acPts.unshift({
+        along: first.along - ((second.along - first.along) / d0) * STRIP_YD,
+        cross: first.cross - ((second.cross - first.cross) / d0) * STRIP_YD,
+      });
+      const last = acPts[acPts.length - 1];
+      const prev = acPts[acPts.length - 2];
+      const dN = Math.hypot(last.along - prev.along,
+        last.cross - prev.cross) || 1e-9;
+      acPts.push({
+        along: last.along + ((last.along - prev.along) / dN) * STRIP_YD,
+        cross: last.cross + ((last.cross - prev.cross) / dN) * STRIP_YD,
+      });
+    }
+    const ring = (() => {
+      const left = [], right = [];
+      for (let i = 0; i < acPts.length; i++) {
+        let dx, dy;
+        if (i === 0) {
+          dx = acPts[1].along - acPts[0].along;
+          dy = acPts[1].cross - acPts[0].cross;
+        } else if (i === acPts.length - 1) {
+          dx = acPts[i].along - acPts[i - 1].along;
+          dy = acPts[i].cross - acPts[i - 1].cross;
+        } else {
+          dx = acPts[i + 1].along - acPts[i - 1].along;
+          dy = acPts[i + 1].cross - acPts[i - 1].cross;
+        }
+        const len = Math.hypot(dx, dy) || 1e-9;
+        const nx = -dy / len, ny = dx / len;
+        left.push({
+          along: acPts[i].along + nx * STRIP_YD,
+          cross: acPts[i].cross + ny * STRIP_YD,
+        });
+        right.push({
+          along: acPts[i].along - nx * STRIP_YD,
+          cross: acPts[i].cross - ny * STRIP_YD,
+        });
+      }
+      return left.concat(right.reverse());
+    })();
+    const p = toAC(hz);
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i], b = ring[j];
+      if ((a.cross > p.cross) !== (b.cross > p.cross) &&
+          p.along < ((b.along - a.along) * (p.cross - a.cross)) /
+            ((b.cross - a.cross) || 1e-12) + a.along) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
   function renderStrategy() {
     const card = $('prepStrategyCard');
     if (!card) return;
@@ -1704,7 +1816,11 @@
     // they're location info, not decision info; the plan below stays lean.
     // (haz is declared later, just before the plan, in the mapped branch —
     // hoist a local read here for unmapped holes.)
-    const hzHere = Array.isArray(h.hazards) ? h.hazards : [];
+    // v1.21.0 (James: the list matches the map): a hazard chip shows
+    // only if the hazard sits inside the same 20 yd strip the cartoon
+    // clips to. Not drawn → not listed.
+    const hzHere = (Array.isArray(h.hazards) ? h.hazards : [])
+      .filter((hz) => hazPointOnStrip(hz, h));
     body.push('<div class="prep-section-gap"><div class="prep-mini-label">Hazards in play</div>');
     if (hzHere.length) {
       body.push(

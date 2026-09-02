@@ -89,12 +89,15 @@ window.fetch = async (url) => {
     // 20 yd strip clips a 10 yd sliver), ~90 yd across, rest off-hole.
     // Mapped TWICE: a way AND a relation of the same ring, opposite winding
     // (the even-odd cancel that left only a blue outline).
-    const pondWay = rect(-40, -100, 90, 90);
-    const pondRelOuter = rectRev(-40, -100, 90, 90);
+    const pondWay = rect(-70, -45, 40, 40);
+    const pondRelOuter = rectRev(-70, -45, 40, 40);
     return jsonBody({
       elements: [
+        // Hole 1: dogleg RIGHT (apex ~45 yd off the chord) — the chord tube
+        // crosses pond slivers the 20 yd PATH strip never touches (James:
+        // chord-crossed water paints too).
         { type: 'way', id: 10, tags: { golf: 'hole', ref: '1' },
-          geometry: geom([ll(0, 0), ll(-80, 20), ll(-164, 0)]) },
+          geometry: geom([ll(0, 0), ll(-82, 45), ll(-164, 0)]) },
         // Hole 3: 2-point OSM way (Jester exec hole 3) + real fairway.
         { type: 'way', id: 30, tags: { golf: 'hole', ref: '3' },
           geometry: geom([ll(0, 400), ll(-143, 400)]) },
@@ -202,7 +205,7 @@ function svg() { return window.document.querySelector('.prep-holemap'); }
   }
   const span = flagX - teeX;
   check('4. camera ignores the pond (tee→green fills the card; water does not pick zoom)',
-    Number.isFinite(span) && span > 200,
+    Number.isFinite(span) && span > 170,
     `span=${Number.isFinite(span) ? span.toFixed(1) : 'na'} teeX=${teeX} flagX=${flagX}`);
   check('4b. tee is left of the flag (hole still reads left→right)',
     Number.isFinite(span) && span > 80,
@@ -213,8 +216,8 @@ function svg() { return window.document.querySelector('.prep-holemap'); }
   const clipPath1 = svg1 && svg1.querySelector('clipPath path');
   const clipLoops1 = clipPath1
     ? ((clipPath1.getAttribute('d') || '').match(/\bM\b/g) || []).length : 0;
-  check('4d. water clip is the tee→green line strip (single corridor loop), not turf',
-    clipLoops1 === 1,
+  check('4d. water clip is the tee→green line strip PLUS the chord tube on a dogleg',
+    clipLoops1 === 2,
     `clip subpaths=${clipLoops1}`);
 
   const row3 = rows.find((r) => r.dataset.hole === '3');

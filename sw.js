@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.20.9'; // PREP LINE-STRIP CLIP (James: 25 yd green surround pulled neighbour bunkers; the clip is the HOLE LINE, not the turf): one corridor = tee-to-green path offset 20 yd each side, extended 20 yd past the ends. Water hard-clips to it; bunkers whole-or-drop against it; fallback dots must sit in it; turf paints as background but never clips; camera uses the strip for width only — along stays the hole. Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.21.0'; // PREP LIST MATCHES THE MAP + FLIGHT WATER (James: hazards-in-play obeys the same 20 yd strip the cartoon clips to; chord-crossed water paints too): chips filtered by the strip test; water clip = path strip UNION a tube along the straight tee-to-green flight chord (dogleg pond the flight crosses now paints). Not drawn = not listed. Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

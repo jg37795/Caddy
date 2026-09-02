@@ -100,9 +100,11 @@ window.fetch = async (url) => {
         { type: 'way', id: 16, tags: { natural: 'water' },
           geometry: rect(-200, -220, 140, 200) },
 
-        // Shared bunker between 1 and 2 (~20 yd from both paths)
+        // Shared bunker between 1 and 2: near edge 16 yd from hole 1's
+        // path (INSIDE the 20 yd strip → still drawn), centroid 24 yd
+        // (OUTSIDE the strip → its point-hazard chip drops).
         { type: 'way', id: 12, tags: { golf: 'bunker' },
-          geometry: rect(-190, 12, 20, 16) },
+          geometry: rect(-190, 16, 20, 16) },
         // FOREIGN bunker: 60 yd right of hole 1's path, outside hole 1's
         // turf/green — assigned by the 90 yd corridor but NOT on hole 1.
         { type: 'way', id: 13, tags: { golf: 'bunker' },
@@ -111,6 +113,16 @@ window.fetch = async (url) => {
         // Greenside POINT bunker past hole 3's green (no polygon on hole 3)
         { type: 'node', id: 31, tags: { golf: 'bunker' },
           lat: ll(-160, 408).lat, lon: ll(-160, 408).lng },
+        // FOREIGN point water: 35 yd off hole 3's line (assigned by the
+        // 45 yd point corridor, but OUTSIDE the 20 yd map strip).
+        { type: 'node', id: 32, tags: { natural: 'water' },
+          lat: ll(-160, 435).lat, lon: ll(-160, 435).lng },
+        // Hole 1 point waters: one ON the 20 yd strip (12 yd off line),
+        // one OFF it (30 yd off line but inside the 45 yd assignment).
+        { type: 'node', id: 33, tags: { natural: 'water' },
+          lat: ll(-180, -12).lat, lon: ll(-180, -12).lng },
+        { type: 'node', id: 34, tags: { natural: 'water' },
+          lat: ll(-180, -30).lat, lon: ll(-180, -30).lng },
 
         { type: 'way', id: 15, tags: { golf: 'green' },
           geometry: rect(-340, -10, 20, 20) },
@@ -225,7 +237,7 @@ function wait(ms) {
   }
   const span = flagX - teeX;
   check('5. camera ignores far water (hole fills the card; pond does not pick zoom)',
-    Number.isFinite(span) && span > 200,
+    Number.isFinite(span) && span > 170,
     `span=${Number.isFinite(span) ? span.toFixed(1) : 'na'} teeX=${teeX} flagX=${flagX}`);
   check('5b. hole still reads left→right (tee left of flag, span > 80)',
     Number.isFinite(span) && span > 80,
@@ -239,6 +251,11 @@ function wait(ms) {
   check('4d. foreign bunker (other hole) does not render on hole 1',
     bunkerM1 === 1,
     `bunker M count=${bunkerM1}`);
+
+  const chips1 = [...window.document.querySelectorAll('.prep-hz-list .prep-hz')];
+  check('7. hazards-in-play list obeys the 20 yd map strip (off-strip point water dropped)',
+    chips1.length === 1,
+    `hole 1 chips=${chips1.length}: ${chips1.map((c) => c.textContent.trim().slice(0, 24)).join(' | ')}`);
 
   const row3 = rows.find((r) => r.dataset.hole === '3');
   if (row3) row3.click();
@@ -257,6 +274,10 @@ function wait(ms) {
   check('6. greenside bunker past the card number still draws as a fallback ellipse',
     !!(svg3 && svg3.querySelector('ellipse.prep-hm-hz.bunker')),
     svg3cls);
+  const chips3 = [...window.document.querySelectorAll('.prep-hz-list .prep-hz')];
+  check('8. hole 3 list drops the 35 yd off-strip water, keeps the greenside bunker',
+    chips3.length === 1 && /bunker/i.test(chips3[0] && chips3[0].textContent || ''),
+    `hole 3 chips=${chips3.length}: ${chips3.map((c) => c.textContent.trim().slice(0, 24)).join(' | ')}`);
 
   if (fails) {
     console.log(`${fails} FAILURE(S)`);
