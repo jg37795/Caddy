@@ -1038,18 +1038,39 @@
         const cross = p.x * px + p.y * py;
         return { along, cross };
       };
-      // Fit: along 0..(dist tee→green scaled to nudged length), cross
-      // clipped to a band. Scale = spanX / nudgeLen so the map stretches
-      // with the tee nudge (tee is anchor at origin).
+      // Fit: v1.20.0 (James: "map the ponds bunkers greens etc correctly
+      // like osm"): the old fit squashed Y into ±22% of hole length and
+      // CLAMPED everything into frame — course-sized shapes (the donut
+      // pond beside the green) got flattened and dragged over the hole.
+      // TRUE-SCALE fit: one uniform yards-per-pixel for X and Y; the
+      // window covers the hole PLUS any assigned shapes (shapes clip at
+      // the frame edge instead of distorting). No clamping anywhere.
       const fitLen = Math.max(120, effYd);
-      // v1.15.1 (James: hole 3 dogleg still reversed): the v1.14.1 basis
-      // flip made +cross = golfer-RIGHT, but this mapping still SUBTRACTED
-      // cross (left-positive era) — net effect: right-of-play rendered
-      // ABOVE the line = dogleg left drawn as dogleg right, hazards
-      // mirrored. The viewer-behind-tee read needs golfer-right BELOW:
-      const X = (along) => x0 + spanX * clamp(along / fitLen, -0.06, 1.04);
-      const Y = (cross) => yMid + clamp(cross / (fitLen * 0.22), -1.15, 1.15) * (H * 0.30);
-      P = { toXY, X, Y };
+      // Survey the real cross-range of everything we will draw: the
+      // hole path + green + assigned shapes.
+      let crossMin = -40, crossMax = 40;   // sane defaults (±40 yd)
+      const survey = (ll) => {
+        if (!ll) return;
+        const c = toXY(ll).cross;
+        if (c < crossMin) crossMin = c;
+        if (c > crossMax) crossMax = c;
+      };
+      h.pathPts.forEach(survey);
+      if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(survey);
+      const S0 = h.shapes || {};
+      ['fairways', 'bunkers', 'water', 'tees', 'rough'].forEach((k) => {
+        (Array.isArray(S0[k]) ? S0[k] : []).forEach((ring) =>
+          (ring || []).forEach(survey));
+      });
+      // Window height in yards: cross range + margin, capped so a stray
+      // huge shape can't flatten the hole into a sliver.
+      const crossSpan = Math.min(220,
+        Math.max(90, crossMax - crossMin) + 30);
+      // Uniform scale: px per yard — the same for X and Y.
+      const ydPerPx = Math.max(fitLen / spanX, crossSpan / (H - padT - padB));
+      const X = (along) => x0 + along / ydPerPx;
+      const Y = (cross) => yMid + cross / ydPerPx;
+      P = { toXY, X, Y, ydPerPx };
     }
 
     if (P) {

@@ -1,0 +1,9 @@
+[out:json][timeout:25];area(3610543316)->.a;(
+  way["golf"="hole"](area.a);
+  way["golf"="green"](area.a);
+  way["golf"="fairway"](area.a);
+  relation["natural"="water"](area.a);
+  way["natural"="water"](area.a);
+  way["golf"="bunker"](area.a);
+  way["golf"="tee"](area.a);
+);out geom;

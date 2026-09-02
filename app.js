@@ -5724,7 +5724,11 @@
     // spatially assign: a polygon belongs to every hole whose path runs
     // within CORRIDOR_YD of the polygon's centroid (a bunker shared by
     // two holes draws on both — truthful, it IS in play from both).
-    const CORRIDOR_YD = 160;
+    // v1.20.0 (James: exec hole 1 drew the neighbour donut pond over
+    // grass): 160 yd was too generous — course features a hole's width
+    // away stamped onto the wrong card. 90 yd = genuinely in play from
+    // this tee.
+    const CORRIDOR_YD = 90;
     const polyCentroid = (ring) => {
       let lat = 0, lng = 0;
       for (const p of ring) { lat += p.lat; lng += p.lng; }
