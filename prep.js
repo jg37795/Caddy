@@ -1054,44 +1054,71 @@
       // The 90 yd corridor lives on only in ASSIGNMENT (hazards-in-
       // play text), not as a drawing rule.
       const innerH = H - padT - padB;
-      const GREEN_SURROUND_YD = 25;
       const S0 = h.shapes || {};
-      const toLL = (p) => ({ lat: 0, lng: 0, __ac: p });
-      const turfRings = [
-        ...(Array.isArray(S0.fairways) ? S0.fairways : []),
-        ...(Array.isArray(S0.rough) ? S0.rough : []),
-        ...(Array.isArray(S0.tees) ? S0.tees : []),
-      ];
-      // along/cross loops for the turf (axis-aligned rects in EN space)
-      const ringLoop = (ring) => {
-        const loop = { aMin: Infinity, aMax: -Infinity, cMin: Infinity, cMax: -Infinity, pts: [] };
-        (ring || []).forEach((ll) => {
-          if (!ll) return;
-          const p = toXY(ll);
-          loop.aMin = Math.min(loop.aMin, p.along);
-          loop.aMax = Math.max(loop.aMax, p.along);
-          loop.cMin = Math.min(loop.cMin, p.cross);
-          loop.cMax = Math.max(loop.cMax, p.cross);
-          loop.pts.push(p);
+      // v1.20.9 (James: the surround pulled in neighbour bunkers — the
+      // clip is the HOLE LINE, not the turf): one corridor = the
+      // tee→green path offset ±20 yd each side, extended 20 yd past
+      // the tee and past the green. Water clips to it (only the part
+      // the hole line clips paints). Bunkers whole-or-drop against it.
+      // Fallback dots must sit inside it. Turf still paints as the
+      // background but is NOT the clip. No green surround.
+      const STRIP_YD = 20;
+      const acPts = h.pathPts.map((ll) => toXY(ll));
+      {
+        // extend the centerline one strip-width past each end
+        const first = acPts[0], second = acPts[1];
+        const d0 = Math.hypot(second.along - first.along,
+          second.cross - first.cross) || 1e-9;
+        acPts.unshift({
+          along: first.along - ((second.along - first.along) / d0) * STRIP_YD,
+          cross: first.cross - ((second.cross - first.cross) / d0) * STRIP_YD,
         });
-        return loop.pts.length >= 3 ? loop : null;
-      };
-      const greenLoop = Array.isArray(h.greenRingPts)
-        ? ringLoop(h.greenRingPts) : null;
-      let greenPt = null;
-      if (h.greenLatLng) {
-        const p = toXY(h.greenLatLng);
-        greenPt = {
-          aMin: p.along - GREEN_SURROUND_YD,
-          aMax: p.along + GREEN_SURROUND_YD,
-          cMin: p.cross - GREEN_SURROUND_YD,
-          cMax: p.cross + GREEN_SURROUND_YD,
-          pts: [p],
-        };
+        const last = acPts[acPts.length - 1];
+        const prev = acPts[acPts.length - 2];
+        const dN = Math.hypot(last.along - prev.along,
+          last.cross - prev.cross) || 1e-9;
+        acPts.push({
+          along: last.along + ((last.along - prev.along) / dN) * STRIP_YD,
+          cross: last.cross + ((last.cross - prev.cross) / dN) * STRIP_YD,
+        });
       }
-      const inLoop = (loop, p) =>
-        p.along >= loop.aMin && p.along <= loop.aMax &&
-        p.cross >= loop.cMin && p.cross <= loop.cMax;
+      const offsetRing = (() => {
+        const left = [], right = [];
+        for (let i = 0; i < acPts.length; i++) {
+          let dx, dy;
+          if (i === 0) {
+            dx = acPts[1].along - acPts[0].along;
+            dy = acPts[1].cross - acPts[0].cross;
+          } else if (i === acPts.length - 1) {
+            dx = acPts[i].along - acPts[i - 1].along;
+            dy = acPts[i].cross - acPts[i - 1].cross;
+          } else {
+            dx = acPts[i + 1].along - acPts[i - 1].along;
+            dy = acPts[i + 1].cross - acPts[i - 1].cross;
+          }
+          const len = Math.hypot(dx, dy) || 1e-9;
+          const nx = -dy / len, ny = dx / len;
+          left.push({
+            along: acPts[i].along + nx * STRIP_YD,
+            cross: acPts[i].cross + ny * STRIP_YD,
+          });
+          right.push({
+            along: acPts[i].along - nx * STRIP_YD,
+            cross: acPts[i].cross - ny * STRIP_YD,
+          });
+        }
+        return left.concat(right.reverse());
+      })();
+      const corridor = {
+        pts: offsetRing,
+        aMin: Infinity, aMax: -Infinity, cMin: Infinity, cMax: -Infinity,
+      };
+      offsetRing.forEach((p) => {
+        corridor.aMin = Math.min(corridor.aMin, p.along);
+        corridor.aMax = Math.max(corridor.aMax, p.along);
+        corridor.cMin = Math.min(corridor.cMin, p.cross);
+        corridor.cMax = Math.max(corridor.cMax, p.cross);
+      });
       const ptInRing = (p, pts) => {
         let inside = false;
         for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -1104,43 +1131,32 @@
         }
         return inside;
       };
-      // Bunker touches the footprint? (whole-or-drop — James)
+      // Bunker touches the strip? (whole-or-drop — James)
       const bunkerTouches = (ring) => {
-        const bl = ringLoop(ring);
-        if (!bl) return false;
-        const loops = [];
-        turfRings.forEach((r) => { const l = ringLoop(r); if (l) loops.push(l); });
-        if (greenLoop) loops.push(greenLoop);
-        if (greenPt) loops.push(greenPt);
-        for (const lp of loops) {
-          // bbox overlap of the two axis-aligned envelopes = touch
-          if (bl.aMin <= lp.aMax && bl.aMax >= lp.aMin &&
-              bl.cMin <= lp.cMax && bl.cMax >= lp.cMin) return true;
-        }
-        // green ring is a real polygon — also test true containment
-        if (greenLoop && greenLoop.pts.some((p) => ptInRing(p, bl.pts))) {
-          return true;
-        }
+        const bl = { pts: [], aMin: Infinity, aMax: -Infinity,
+          cMin: Infinity, cMax: -Infinity };
+        (ring || []).forEach((ll) => {
+          if (!ll) return;
+          const p = toXY(ll);
+          bl.pts.push(p);
+          bl.aMin = Math.min(bl.aMin, p.along);
+          bl.aMax = Math.max(bl.aMax, p.along);
+          bl.cMin = Math.min(bl.cMin, p.cross);
+          bl.cMax = Math.max(bl.cMax, p.cross);
+        });
+        if (bl.pts.length < 3) return false;
+        // any bunker vertex inside the strip, or the strip swallowed
+        // by a huge bunker (bunker bbox contains a strip vertex)
+        if (bl.pts.some((p) => ptInRing(p, corridor.pts))) return true;
+        if (corridor.pts.some((p) =>
+          p.along >= bl.aMin && p.along <= bl.aMax &&
+          p.cross >= bl.cMin && p.cross <= bl.cMax)) return true;
         return false;
       };
       foot.bunkers = (Array.isArray(S0.bunkers) ? S0.bunkers : [])
         .filter((r) => bunkerTouches(r));
-      // Footprint loops: real turf + green when mapped; a narrow
-      // ±25 yd band along tee→green only when the hole has NO turf
-      // mapped at all (old/manual courses) so flight-crossed water
-      // and greenside dots still show.
-      if (turfRings.length || greenLoop || greenPt) {
-        turfRings.forEach((r) => { const l = ringLoop(r); if (l) foot.loops.push(l); });
-        if (greenLoop) foot.loops.push(greenLoop);
-        if (greenPt) foot.loops.push(greenPt);
-      } else {
-        const band = {
-          aMin: -20, aMax: Math.max(80, effYd) + 20,
-          cMin: -25, cMax: 25, pts: [],
-        };
-        foot.loops.push(band);
-      }
-      // Camera: hole + footprint + kept bunkers. WATER EXCLUDED.
+      foot.loops = [corridor];
+      // Camera: hole + strip + kept bunkers. WATER EXCLUDED.
       let aMin = Infinity, aMax = -Infinity;
       let cMin = Infinity, cMax = -Infinity;
       const surveyAC = (along, cross) => {
@@ -1158,9 +1174,11 @@
       if (Array.isArray(h.greenRingPts)) h.greenRingPts.forEach(survey);
       if (h.teeLatLng) survey(h.teeLatLng);
       if (h.greenLatLng) survey(h.greenLatLng);
-      foot.loops.forEach((l) => {
-        surveyAC(l.aMin, l.cMin); surveyAC(l.aMax, l.cMax);
-      });
+      // Strip contributes CROSS only (width) — the 20 yd end
+      // extensions must not lengthen the hole's along span (v1.20.9
+      // test: tee→green still fills the card).
+      cMin = Math.min(cMin, corridor.cMin);
+      cMax = Math.max(cMax, corridor.cMax);
       foot.bunkers.forEach((r) => (r || []).forEach(survey));
       if (!Number.isFinite(aMin)) { aMin = 0; aMax = Math.max(80, effYd); }
       if (!Number.isFinite(cMin)) { cMin = -20; cMax = 20; }
@@ -1174,7 +1192,6 @@
       const X = (along) => xMid + (along - alongMid) / ydPerPx;
       const Y = (cross) => yMid + (cross - crossMid) / ydPerPx;
       P = { toXY, X, Y, ydPerPx };
-      void toLL;
     }
 
     if (P) {

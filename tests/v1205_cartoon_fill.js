@@ -85,11 +85,12 @@ window.fetch = async (url) => {
     const q = decodeURIComponent(u);
     if (!q.includes('area(')) throw new Error('radius must not be called');
     // Hole 1: 164 yd dogleg (3 pts) — Jester exec hole 1 analogue.
-    // Pond LEFT of the hole, ~20 yd off the line, ~90 yd across.
+    // Pond LEFT of the hole: shoreline 10 yd off the line (the line's
+    // 20 yd strip clips a 10 yd sliver), ~90 yd across, rest off-hole.
     // Mapped TWICE: a way AND a relation of the same ring, opposite winding
     // (the even-odd cancel that left only a blue outline).
-    const pondWay = rect(-40, -110, 90, 90);
-    const pondRelOuter = rectRev(-40, -110, 90, 90);
+    const pondWay = rect(-40, -100, 90, 90);
+    const pondRelOuter = rectRev(-40, -100, 90, 90);
     return jsonBody({
       elements: [
         { type: 'way', id: 10, tags: { golf: 'hole', ref: '1' },
@@ -212,8 +213,8 @@ function svg() { return window.document.querySelector('.prep-holemap'); }
   const clipPath1 = svg1 && svg1.querySelector('clipPath path');
   const clipLoops1 = clipPath1
     ? ((clipPath1.getAttribute('d') || '').match(/\bM\b/g) || []).length : 0;
-  check('4d. water clip is the hole footprint (turf + green loops), not one corridor band',
-    clipLoops1 >= 2,
+  check('4d. water clip is the tee→green line strip (single corridor loop), not turf',
+    clipLoops1 === 1,
     `clip subpaths=${clipLoops1}`);
 
   const row3 = rows.find((r) => r.dataset.hole === '3');

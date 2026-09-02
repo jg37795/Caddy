@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.20.8'; // PREP CARTOON IS THE HOLE (James: foreign bunkers rendered; only clipped pond parts should show): draw keys off the hole FOOTPRINT = this hole's turf (fairway/rough/tees) + green ring + green grown 25 yd (narrow band fallback when no turf mapped). Water clips to the footprint (wrapping pond paints only the sliver the hole clips). Bunkers whole-or-drop — other holes' bunkers vanish. Point-hazard dots footprint-gated. Camera fits hole+footprint+kept bunkers, never water. 90 yd corridor survives ONLY in assignment (hazards-in-play text). Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.20.9'; // PREP LINE-STRIP CLIP (James: 25 yd green surround pulled neighbour bunkers; the clip is the HOLE LINE, not the turf): one corridor = tee-to-green path offset 20 yd each side, extended 20 yd past the ends. Water hard-clips to it; bunkers whole-or-drop against it; fallback dots must sit in it; turf paints as background but never clips; camera uses the strip for width only — along stays the hole. Draw-time only — no Re-map.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
