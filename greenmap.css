@@ -44,10 +44,10 @@ body:not(.dark) #gm-stage {
 #gm-stage {
   position: fixed;
   inset: 0;
-  /* v1.21.8: keep the heat/3D surface below the in-flow topstack so the
-     slope heatmap never sits under the fixed top bar (James: heatmap
-     behind the top bar). --gm-top-inset is written from JS after layout;
-     the CSS fallback covers first paint / no-JS. */
+  /* v1.21.8/v1.21.9: keep the heat/3D surface below the in-flow topstack.
+     --gm-top-inset is measured from #gm-topstack after layout (boot,
+     resize, status wrap). The 118px fallback is first-paint / no-JS only
+     — it must track the real topstack height once JS runs. */
   top: var(--gm-top-inset, calc(var(--safe-top, 0px) + 118px));
   touch-action: none;
   cursor: crosshair;
@@ -142,6 +142,16 @@ body:not(.dark) #gm-stage {
   padding: 5px 8px;
   max-width: 104px;
 }
+
+#gm-outline-legend {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--muted, #9db3a6);
+  letter-spacing: .02em;
+  white-space: nowrap;
+  padding: 0 6px;
+}
+#gm-outline-legend[hidden] { display: none !important; }
 
 #gm-exag-wrap {
   font-size: 12px;

@@ -9,7 +9,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>3D Green — Caddy</title>
-<script>window.CADDY_VERSION = 'v1.21.8';</script>
+<script>window.CADDY_VERSION = 'v1.21.9';</script>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="greenmap.css">
 <link rel="stylesheet" href="leaflet.css">
@@ -83,6 +83,9 @@
       <span id="gm-exag-val">1×</span>
     </span>
     <button class="gm-btn" id="gm-flyover" title="Replay the tee-to-green flyover" style="display:none">Flyover</button>
+    <button class="gm-btn" id="gm-hole-auto-outline" title="Toggle auto-detected green outline on the hole" style="display:none">Auto outline</button>
+    <button class="gm-btn" id="gm-hole-osm-outline" title="Toggle OpenStreetMap green outline on the hole" style="display:none">OSM outline</button>
+    <span id="gm-outline-legend" hidden>OSM #7dff9b · Auto #ffd166</span>
   </div>
   <div class="gm-dock-row" id="gm-data-row">
     <div class="gm-dock-group" role="radiogroup" aria-label="Data">

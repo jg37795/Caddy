@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.8'; // JAMES FIELD ROUND (Grok edit pass): 2D view removed (3D + Hole only); default 1x exaggeration with near-vertical top-down camera; manual green trace removed — Auto outline + OSM outline buttons instead; Drop ball fixed (dpr-scaled drag threshold, tolerant pick in every view, dock-eaten taps captured); Hole Flyover button added and the auto-flyover scope bug fixed; Hole view is satellite-only (Stylized removed); slope/heat canvas insets below the top bar; top bar status wraps to two lines instead of a silent ellipsis.
+const CACHE_VERSION = 'v1.21.9'; // TAP ACCURACY + SATELLITE OUTLINES (James round 2): canvas bitmap now sized to the stage box (was full-viewport → CSS squash = taps/flag/ball landed off-target, drop-ball flaky, flyover vertically squashed); Auto outline + OSM outline toggles on the Hole/satellite view (amber/green depth-tested rings, on-demand Overpass/GreenDetect) and on the holeSat sheet with a source chip; tap→pick round-trip regression locks projection accuracy.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

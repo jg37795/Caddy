@@ -106,7 +106,15 @@
       `  <button class="psh-act" id="pshMoveTee" aria-pressed="false">✛ Move tee</button>` +
       `  <button class="psh-act psh-act-primary" id="psh3d">⛳ 3D Green</button>` +
       '</div>' +
-      '<div class="psh-hint">Your hole on the ground — fairway ribbon, landing spots, green &amp; hazards (OSM)</div>';
+      // v1.21.9: Auto / OSM outline overlays on the satellite sheet so
+      // James can see (and compare) both rings on the imagery.
+      '<div class="psh-actions" id="pshOutlineRow">' +
+      '  <button class="psh-act" id="pshAutoOutline" aria-pressed="false">Auto outline</button>' +
+      '  <button class="psh-act" id="pshOsmOutline" aria-pressed="false">OSM outline</button>' +
+      '  <span id="pshOutlineChip" style="flex:none;align-self:center;font-size:11px;font-weight:800;color:#9db3a6;white-space:nowrap">outline: stored</span>' +
+      '</div>' +
+      '<div class="psh-tee-banner" id="pshOutlineBanner" role="status" aria-live="polite" hidden></div>' +
+      '<div class="psh-hint">Your hole on the ground — fairway ribbon, landing spots, green & hazards (OSM)</div>';
 
     document.body.appendChild(sheet);
     lastFocus = document.activeElement instanceof HTMLElement
@@ -358,6 +366,192 @@
     // Overpass context fetch (neighbouring greens + hole lines) is GONE.
     // The sheet draws ONLY this hole's stored payload: its assigned
     // shapes, path, green, tee, hazards, landing dots.
+
+    // v1.21.9: Auto / OSM outline overlays on the satellite imagery.
+    // Stored ring stays default-visible; these two extra layers toggle.
+    const ov = { osmOn: false, autoOn: false, osmLayer: null, autoLayer: null };
+    const showBanner = (html, ms) => {
+      const bar = document.getElementById('pshOutlineBanner');
+      if (!bar) return;
+      bar.innerHTML = html;
+      bar.hidden = false;
+      if (ms) setTimeout(() => { if (bar.innerHTML === html) bar.hidden = true; }, ms);
+    };
+    const syncChip = () => {
+      const chip = document.getElementById('pshOutlineChip');
+      if (!chip) return;
+      const bits = ['stored'];
+      if (ov.osmOn) bits.push('OSM');
+      if (ov.autoOn) bits.push('Auto');
+      chip.textContent = 'outline: ' + bits.join(' + ');
+      chip.style.color = (ov.osmOn && ov.autoOn) ? '#ffd166' : '#9db3a6';
+      const autoBtn = document.getElementById('pshAutoOutline');
+      const osmBtn = document.getElementById('pshOsmOutline');
+      if (autoBtn) {
+        autoBtn.setAttribute('aria-pressed', ov.autoOn ? 'true' : 'false');
+        autoBtn.classList.toggle('armed', ov.autoOn);
+      }
+      if (osmBtn) {
+        osmBtn.setAttribute('aria-pressed', ov.osmOn ? 'true' : 'false');
+        osmBtn.classList.toggle('armed', ov.osmOn);
+      }
+      if (ov.osmOn && ov.autoOn) {
+        showBanner('<span class="psh-tee-ok">OSM #7dff9b · Auto #ffd166</span>');
+      }
+    };
+    const drawRing = (ll, color) => {
+      if (!ll || ll.length < 3) return null;
+      return L.polygon(ll, {
+        color, weight: 2.6, fillOpacity: 0, interactive: false,
+        className: color === '#ffd166' ? 'psh-ov-auto' : 'psh-ov-osm',
+      }).addTo(map);
+    };
+    const loadScriptOnce = (src) => new Promise((resolve, reject) => {
+      if (typeof document === 'undefined') { resolve(); return; }
+      const existing = document.querySelector(`script[src="${src}"]`);
+      if (existing) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('load ' + src));
+      document.head.appendChild(s);
+    });
+    const fetchOsmRing = async () => {
+      const lat = boot.lat, lng = boot.lng;
+      const q = `[out:json][timeout:15];(way["golf"="green"](around:120,${lat},${lng}););out geom;`;
+      const res = await fetch(
+        'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q));
+      if (!res.ok) throw new Error('overpass ' + res.status);
+      const data = await res.json();
+      let best = null, bestD = Infinity;
+      for (const el of (data.elements || [])) {
+        if (!el || !el.geometry || !el.geometry.length) continue;
+        let cLat = 0, cLng = 0;
+        for (const p of el.geometry) { cLat += p.lat; cLng += p.lon; }
+        cLat /= el.geometry.length; cLng /= el.geometry.length;
+        const d = Math.hypot(
+          (cLat - lat) * 111320,
+          (cLng - lng) * 111320 * Math.cos(lat * Math.PI / 180));
+        if (d < bestD) { bestD = d; best = el; }
+      }
+      if (!best || bestD > 120) return null;
+      return best.geometry.map((g) => [g.lat, g.lon]);
+    };
+    const detectAutoRing = async () => {
+      if (!(window.GreenDetect && typeof window.GreenDetect.detect === 'function')) {
+        try { await loadScriptOnce('./green-detect.js'); } catch (e) { /* offline */ }
+      }
+      if (!(window.GreenDetect && typeof window.GreenDetect.detect === 'function'))
+        return { fail: 'no-detect' };
+      if (!(window.CaddyElev && typeof window.CaddyElev.fetchElevGrid === 'function'))
+        return { fail: 'no-elev' };
+      const lat = boot.lat, lng = boot.lng;
+      const spanM = 90, N = 64;
+      const halfLat = (spanM / 2) / 111320;
+      const halfLng = (spanM / 2) / (111320 * Math.cos(lat * Math.PI / 180));
+      const bbox = [lng - halfLng, lat - halfLat, lng + halfLng, lat + halfLat];
+      const elev = await window.CaddyElev.fetchElevGrid(bbox, N);
+      if (!elev || !elev.grid) return { fail: 'no-grid' };
+      const g2 = elev.grid, W = elev.W, H = elev.H, cs = elev.cellSizeM;
+      const N2 = W * H;
+      const idx2 = (x, y) => y * W + x;
+      const val2 = (x, y) => (x >= 0 && y >= 0 && x < W && y < H &&
+        Number.isFinite(g2[idx2(x, y)])) ? g2[idx2(x, y)] : null;
+      const sl2 = new Float64Array(N2).fill(NaN);
+      const s32 = new Float64Array(N2).fill(NaN);
+      const t52 = new Float64Array(N2).fill(NaN);
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const i = idx2(x, y);
+          const zc = val2(x, y); if (zc === null) continue;
+          const zx1 = val2(x + 1, y), zx0 = val2(x - 1, y);
+          const zy1 = val2(x, y + 1), zy0 = val2(x, y - 1);
+          if (zx1 !== null && zx0 !== null && zy1 !== null && zy0 !== null)
+            sl2[i] = Math.hypot(zx1 - zx0, zy1 - zy0) / (2 * cs) * 100;
+          let sA = 0, nA = 0, vA = [];
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              const v = val2(x + dx, y + dy);
+              if (v !== null) { sA += v; nA++; vA.push(v); }
+            }
+          if (nA >= 5) {
+            const m = sA / nA;
+            s32[i] = Math.sqrt(vA.reduce((a, v) => a + (v - m) * (v - m), 0) / nA);
+          }
+          let nB = 0, vB = [];
+          for (let dy = -2; dy <= 2; dy++)
+            for (let dx = -2; dx <= 2; dx++) {
+              const sv = sl2[idx2(Math.min(W - 1, Math.max(0, x + dx)),
+                Math.min(H - 1, Math.max(0, y + dy)))];
+              if (Number.isFinite(sv)) { nB++; vB.push(sv); }
+            }
+          if (nB >= 12) {
+            const m = vB.reduce((a, v) => a + v, 0) / nB;
+            t52[i] = Math.sqrt(vB.reduce((a, v) => a + (v - m) * (v - m), 0) / nB);
+          }
+        }
+      const detectRes = window.GreenDetect.detect({
+        grid: {
+          W, H, cellSizeM: cs, z: g2, slope: sl2, smooth3: s32, tex5: t52,
+          exg: new Float64Array(N2).fill(NaN),
+          bright: new Float64Array(N2).fill(NaN)
+        },
+        satSample: () => null
+      });
+      if (!detectRes || detectRes.confidence < 0.6 || !detectRes.poly)
+        return { fail: 'low-conf', conf: detectRes && detectRes.confidence };
+      const mLat = 111320;
+      const mLng = 111320 * Math.cos(lat * Math.PI / 180);
+      const ll = detectRes.poly.map(([mx, my]) => [
+        lat + my / mLat, lng + mx / mLng
+      ]);
+      return { ll, conf: detectRes.confidence };
+    };
+
+    const autoBtn = sheet.querySelector('#pshAutoOutline');
+    if (autoBtn) autoBtn.addEventListener('click', async () => {
+      if (ov.autoOn) {
+        if (ov.autoLayer) { map.removeLayer(ov.autoLayer); ov.autoLayer = null; }
+        ov.autoOn = false;
+        syncChip();
+        return;
+      }
+      showBanner('Detecting Auto outline…');
+      let res = null;
+      try { res = await detectAutoRing(); }
+      catch (e) { res = { fail: 'err' }; }
+      if (!res || res.fail || !res.ll) {
+        showBanner(
+          '<span class="psh-tee-warn">Auto outline not confident here — try OSM</span>',
+          3200);
+        return;
+      }
+      ov.autoLayer = drawRing(res.ll, '#ffd166');
+      ov.autoOn = true;
+      syncChip();
+    });
+    const osmBtn = sheet.querySelector('#pshOsmOutline');
+    if (osmBtn) osmBtn.addEventListener('click', async () => {
+      if (ov.osmOn) {
+        if (ov.osmLayer) { map.removeLayer(ov.osmLayer); ov.osmLayer = null; }
+        ov.osmOn = false;
+        syncChip();
+        return;
+      }
+      showBanner('Fetching OSM outline…');
+      let ll = null;
+      try { ll = await fetchOsmRing(); }
+      catch (e) { ll = null; }
+      if (!ll) {
+        showBanner(
+          '<span class="psh-tee-warn">No OSM green near this pin</span>', 3200);
+        return;
+      }
+      ov.osmLayer = drawRing(ll, '#7dff9b');
+      ov.osmOn = true;
+      syncChip();
+    });
+    window.__pshOutline = ov;
 
     function closeSheet() {
       map.remove();

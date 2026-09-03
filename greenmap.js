@@ -1290,6 +1290,9 @@
     v3: { yaw: 0, pitch: 88, dist: 40, exag: 1 },
     mesh: null,              // built 3D mesh (per grid load / exag change)
     meshArrows: [],          // subsampled downhill arrows on the surface
+    // v1.21.9: Hole-view overlay rings (Auto / OSM) — independent of the
+    // 3D source ladder. Default mesh outline stays; these toggle on top.
+    overlays: { osmOn: false, autoOn: false, osmPoly: null, autoPoly: null },
     // Precision bookkeeping
     greenZ: null,            // bilinear elevation (m) at the green centre
     quality: null,           // { cellM, pctValid } — shown in the legend
@@ -2408,11 +2411,45 @@
   const ctx = canvas.getContext('2d');
   const heatCanvas = document.createElement('canvas');
 
+  // v1.21.9: the CSS box is #gm-stage (inset below the top bar), NOT the
+  // viewport. Sizing the bitmap to innerWidth/innerHeight made the browser
+  // squash the canvas into a shorter box — flyover looked warped and
+  // eventPos (client - rect) * dpr no longer matched projectPt, so flag
+  // / drop-ball taps landed in the wrong spot.
+  function canvasBoxSize() {
+    const dpr = window.devicePixelRatio || 1;
+    const stage = canvas.parentElement;
+    let cssW = 0, cssH = 0;
+    if (stage && typeof stage.getBoundingClientRect === 'function') {
+      const r = stage.getBoundingClientRect();
+      cssW = r && r.width || 0;
+      cssH = r && r.height || 0;
+    }
+    if (!(cssW > 0)) cssW = canvas.clientWidth || 0;
+    if (!(cssH > 0)) cssH = canvas.clientHeight || 0;
+    if (!(cssW > 0)) cssW = (typeof innerWidth === 'number' && innerWidth > 0)
+      ? innerWidth : 400;
+    if (!(cssH > 0)) cssH = (typeof innerHeight === 'number' && innerHeight > 0)
+      ? innerHeight : 400;
+    return {
+      w: Math.max(1, Math.round(cssW * dpr)),
+      h: Math.max(1, Math.round(cssH * dpr)),
+      dpr
+    };
+  }
+  function sizeCanvas() {
+    const { w, h } = canvasBoxSize();
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      return true;
+    }
+    return false;
+  }
   function fitView() {
     const g = state.grid;
     if (!g) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+    sizeCanvas();
     state.view.scale = Math.min(canvas.width, canvas.height) / (SPAN_M * 1.25);
     state.baseScale = state.view.scale;   // zoom clamp reference resets on fit
     state.view.ox = canvas.width / 2;
@@ -2461,6 +2498,7 @@
     rafPending = true;
     requestAnimationFrame(() => {
       rafPending = false;
+      sizeCanvas();
       if (state.viewMode === '3d' || state.viewMode === 'hole') render3D();
       else render2D();
       // v1.5.0: the putt-read card mirrors the solver result every frame
@@ -3596,6 +3634,7 @@
     const ds = state.datasets.hole;
     const M = ds && ds.mesh;
     if (!M || !M.count) return;
+    sizeCanvas();
     const f = Math.min(canvas.width, canvas.height) * 1.15;
     state.v3.pitch = 26;
     state.v3.yaw = 0;
@@ -4155,6 +4194,46 @@
         'rgba(184,192,182,0.95)');
     }
 
+    // v1.21.9: Hole-view overlay rings (Auto amber / OSM green) so James
+    // can compare both outlines on the satellite corridor. Depth-tested
+    // like dressing. Independent of the 3D source-ladder buttons.
+    if (state.viewMode === 'hole') {
+      const strokeOv = (poly, color) => {
+        if (!poly || poly.length < 3) return;
+        let ring = poly;
+        if (state.datasets.hole && state.datasets.hole.gOff) {
+          const [gox, goy] = state.datasets.hole.gOff;
+          ring = poly.map(([mx, my]) => [mx + gox, my + goy]);
+        }
+        const dprv = window.devicePixelRatio || 1;
+        ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(2.4, 1.5 * dprv);
+        let prev = null, firstVis = null;
+        for (const [mx, my] of ring) {
+          const p = GreenMapCore.projectPt(cam, mx, my, surfZ3(mx, my) + 0.08);
+          const hidden = !p || (dressingOcclusion &&
+            dressingOcclusion(p[0], p[1], p[2]));
+          if (!hidden && !firstVis) firstVis = { p };
+          if (!hidden && prev && !prev.hidden) {
+            ctx.beginPath();
+            ctx.moveTo(prev.p[0], prev.p[1]);
+            ctx.lineTo(p[0], p[1]);
+            ctx.stroke();
+          }
+          prev = { p, hidden };
+        }
+        if (prev && !prev.hidden && firstVis) {
+          ctx.beginPath();
+          ctx.moveTo(prev.p[0], prev.p[1]);
+          ctx.lineTo(firstVis.p[0], firstVis.p[1]);
+          ctx.stroke();
+        }
+      };
+      if (state.overlays.osmOn) strokeOv(state.overlays.osmPoly, '#7dff9b');
+      if (state.overlays.autoOn) strokeOv(state.overlays.autoPoly, '#ffd166');
+    }
+
     // Surface break arrows (downhill), drawn on top of the mesh.
     // v2 fix: arrows show in 'both' and 'arrows' modes; 'shading' hides them.
     // v1.3.1 (float-then-snap): the FIRST render after the corridor lands
@@ -4470,6 +4549,13 @@
       }
     return best;
   }
+  window.__sizeCanvas = sizeCanvas;
+  window.__fitView = fitView;
+  window.__pickCell3D = pickCell3D;
+  window.__currentCam = currentCam;
+  window.__gmState = state;
+  window.__eventPos = eventPos;
+  window.__surfZ3 = surfZ3;
 
   /* ======================================================================
      4. INTERACTION
@@ -4785,6 +4871,130 @@
     syncTopInset();
   }
 
+  function overlayLegendText() {
+    if (!(state.overlays.osmOn && state.overlays.autoOn)) return '';
+    return ' · OSM #7dff9b · Auto #ffd166';
+  }
+  function syncHoleOutlineChrome() {
+    const hole = state.viewMode === 'hole';
+    const srcGroup = document.getElementById('gm-outline-group');
+    if (srcGroup) srcGroup.style.display = hole ? 'none' : '';
+    ['gm-hole-auto-outline', 'gm-hole-osm-outline'].forEach((id) => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      b.style.display = hole ? '' : 'none';
+      const on = id.indexOf('auto') !== -1 ? state.overlays.autoOn
+        : state.overlays.osmOn;
+      if (b.classList && b.classList.toggle) b.classList.toggle('active', !!on);
+    });
+    const legend = document.getElementById('gm-outline-legend');
+    if (legend) {
+      const both = hole && state.overlays.osmOn && state.overlays.autoOn;
+      legend.hidden = !both;
+      if (both) legend.textContent = 'OSM #7dff9b · Auto #ffd166';
+    }
+  }
+  function llToGreenLocal(lon, lat) {
+    const mLat = 111320;
+    const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);
+    return [(lon - state.lng) * mLng, (lat - state.lat) * mLat];
+  }
+  async function ensureOverlayOsm() {
+    if (state.overlays.osmPoly && state.overlays.osmPoly.length >= 3)
+      return state.overlays.osmPoly;
+    const gds = state.datasets.green;
+    if (gds && gds.polySource === 'osm' && gds.polyLocal &&
+        gds.polyLocal.length >= 3) {
+      state.overlays.osmPoly = gds.polyLocal;
+      return state.overlays.osmPoly;
+    }
+    const polyLL = await fetchGreenPolygon(state.lat, state.lng);
+    if (!polyLL || polyLL.length < 3) return null;
+    state.overlays.osmPoly = polyLL.map(([lon, la]) => llToGreenLocal(lon, la));
+    return state.overlays.osmPoly;
+  }
+  function r4FeaturesFromElev(elev) {
+    if (!elev || !elev.grid) return null;
+    if (state.__r4Slope && state.grid === elev) {
+      return { slope: state.__r4Slope, smooth3: state.__r4Smooth3,
+        tex5: state.__r4Tex5, exg: state.__r4Exg, bright: state.__r4Bright };
+    }
+    const g2 = elev.grid, W = elev.W, H = elev.H, cs = elev.cellSizeM;
+    const N2 = W * H;
+    const idx2 = (x, y) => y * W + x;
+    const val2 = (x, y) => (x >= 0 && y >= 0 && x < W && y < H &&
+      Number.isFinite(g2[idx2(x, y)])) ? g2[idx2(x, y)] : null;
+    const sl2 = new Float64Array(N2).fill(NaN);
+    const s32 = new Float64Array(N2).fill(NaN);
+    const t52 = new Float64Array(N2).fill(NaN);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = idx2(x, y);
+        const zc = val2(x, y); if (zc === null) continue;
+        const zx1 = val2(x + 1, y), zx0 = val2(x - 1, y);
+        const zy1 = val2(x, y + 1), zy0 = val2(x, y - 1);
+        if (zx1 !== null && zx0 !== null && zy1 !== null && zy0 !== null)
+          sl2[i] = Math.hypot(zx1 - zx0, zy1 - zy0) / (2 * cs) * 100;
+        let sA = 0, nA = 0, vA = [];
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const v = val2(x + dx, y + dy);
+            if (v !== null) { sA += v; nA++; vA.push(v); }
+          }
+        if (nA >= 5) {
+          const m = sA / nA;
+          s32[i] = Math.sqrt(vA.reduce((a, v) => a + (v - m) * (v - m), 0) / nA);
+        }
+        let nB = 0, vB = [];
+        for (let dy = -2; dy <= 2; dy++)
+          for (let dx = -2; dx <= 2; dx++) {
+            const sv = sl2[idx2(Math.min(W - 1, Math.max(0, x + dx)),
+              Math.min(H - 1, Math.max(0, y + dy)))];
+            if (Number.isFinite(sv)) { nB++; vB.push(sv); }
+          }
+        if (nB >= 12) {
+          const m = vB.reduce((a, v) => a + v, 0) / nB;
+          t52[i] = Math.sqrt(vB.reduce((a, v) => a + (v - m) * (v - m), 0) / nB);
+        }
+      }
+    return { slope: sl2, smooth3: s32, tex5: t52,
+      exg: new Float64Array(N2).fill(NaN),
+      bright: new Float64Array(N2).fill(NaN) };
+  }
+  async function ensureOverlayAuto() {
+    if (state.overlays.autoPoly && state.overlays.autoPoly.length >= 3)
+      return state.overlays.autoPoly;
+    const gds = state.datasets.green;
+    if (gds && gds.polySource === 'detected' && gds.polyLocal &&
+        gds.polyLocal.length >= 3) {
+      state.overlays.autoPoly = gds.polyLocal;
+      return state.overlays.autoPoly;
+    }
+    if (!(window.GreenDetect && typeof window.GreenDetect.detect === 'function'))
+      return null;
+    const elev = (gds && gds.grid) || state.grid;
+    if (!elev) return null;
+    const feat = r4FeaturesFromElev(elev);
+    if (!feat) return null;
+    let detectRes = null;
+    try {
+      detectRes = window.GreenDetect.detect({
+        grid: {
+          W: elev.W, H: elev.H, cellSizeM: elev.cellSizeM,
+          z: elev.grid, slope: feat.slope, smooth3: feat.smooth3,
+          tex5: feat.tex5, exg: feat.exg, bright: feat.bright
+        },
+        satSample: state.__r4SatSample || (() => null)
+      });
+    } catch (e) { detectRes = null; }
+    if (detectRes && detectRes.confidence >= 0.6 && detectRes.poly &&
+        detectRes.poly.length >= 3) {
+      state.overlays.autoPoly = detectRes.poly;
+      return state.overlays.autoPoly;
+    }
+    return null;
+  }
+
   // v1.21.8: when Drop ball is armed, a tap that lands on the dock (the
   // green is often behind it on iPhone) never reached the canvas. Capture
   // the next pointerup on the document and convert it to canvas space,
@@ -4795,7 +5005,7 @@
       const t = ev.target;
       if (t === canvas) return;
       if (t && typeof t.closest === 'function' &&
-          t.closest('#gm-ball, #gm-stimp, #gm-back, #gm-editloc, #gm-recenter, #gm-flyover, .gm-view-btn, .gm-mode-btn, .gm-layer-btn, #gm-auto-outline, #gm-osm-outline, #gm-exag, #gm-topbar'))
+          t.closest('#gm-ball, #gm-stimp, #gm-back, #gm-editloc, #gm-recenter, #gm-flyover, .gm-view-btn, .gm-mode-btn, .gm-layer-btn, #gm-auto-outline, #gm-osm-outline, #gm-hole-auto-outline, #gm-hole-osm-outline, #gm-exag, #gm-topbar'))
         return;
       handleTap(eventPos(ev), ev.clientX, ev.clientY);
     }, true);
@@ -4881,8 +5091,27 @@
       const r = stack.getBoundingClientRect();
       const h = (r && Number.isFinite(r.bottom)) ? r.bottom : 0;
       const root = document.documentElement;
-      if (root && root.style && root.style.setProperty)
-        root.style.setProperty('--gm-top-inset', Math.max(0, h) + 'px');
+      const next = Math.max(0, h) + 'px';
+      let changed = true;
+      if (root && root.style && root.style.setProperty) {
+        const prev = root.style.getPropertyValue
+          ? root.style.getPropertyValue('--gm-top-inset') : '';
+        changed = prev !== next;
+        root.style.setProperty('--gm-top-inset', next);
+      }
+      // v1.21.9: when the topstack grows (status wrap) the stage box
+      // shrinks — re-size the bitmap so pick/flyover stay unsquashed.
+      if (changed) {
+        const resized = sizeCanvas();
+        if (resized && state.grid) {
+          if (state.viewMode === 'hole' && state.datasets.hole &&
+              !state.datasets.hole.failed && state.datasets.hole.mesh) {
+            fitHoleView();
+          } else {
+            fitView();
+          }
+        }
+      }
     } catch (e) { /* headless stub / no layout */ }
   }
   window.__syncTopInset = syncTopInset;
@@ -4969,6 +5198,7 @@
       const lg = document.getElementById('gm-layer-group');
       if (lg) lg.style.display = '';
       syncFlyoverBtn();
+      syncHoleOutlineChrome();
       if (state.viewMode === 'hole') {
         const h = state.datasets.hole;
         if (h && !h.failed && h.mesh) {
@@ -4986,6 +5216,7 @@
           document.querySelectorAll('.gm-view-btn').forEach(b =>
             b.classList.toggle('active', b.dataset.view === '3d'));
           syncFlyoverBtn();
+          syncHoleOutlineChrome();
           setStatus(h.msg);
         } else {
           // Corridor still fetching — visible loading state + auto-land when
@@ -5036,6 +5267,53 @@
     if (autoBtn) autoBtn.addEventListener('click', () => reloadWithSrc('auto'));
     const osmBtn = document.getElementById('gm-osm-outline');
     if (osmBtn) osmBtn.addEventListener('click', () => reloadWithSrc('osm'));
+
+    // v1.21.9: Hole-view overlay toggles (compare Auto vs OSM on satellite).
+    // These do NOT reload the 3D source ladder — they paint extra rings.
+    const holeAuto = document.getElementById('gm-hole-auto-outline');
+    if (holeAuto) holeAuto.addEventListener('click', async () => {
+      if (state.viewMode !== 'hole') return;
+      if (state.overlays.autoOn) {
+        state.overlays.autoOn = false;
+        syncHoleOutlineChrome();
+        render();
+        return;
+      }
+      setStatus('Detecting Auto outline…');
+      const poly = await ensureOverlayAuto();
+      if (!poly) {
+        setStatus('Auto outline not confident here — try OSM');
+        state.overlays.autoOn = false;
+        syncHoleOutlineChrome();
+        return;
+      }
+      state.overlays.autoOn = true;
+      setStatus('Auto outline on' + overlayLegendText());
+      syncHoleOutlineChrome();
+      render();
+    });
+    const holeOsm = document.getElementById('gm-hole-osm-outline');
+    if (holeOsm) holeOsm.addEventListener('click', async () => {
+      if (state.viewMode !== 'hole') return;
+      if (state.overlays.osmOn) {
+        state.overlays.osmOn = false;
+        syncHoleOutlineChrome();
+        render();
+        return;
+      }
+      setStatus('Fetching OSM outline…');
+      const poly = await ensureOverlayOsm();
+      if (!poly) {
+        setStatus('No OSM green near this pin');
+        state.overlays.osmOn = false;
+        syncHoleOutlineChrome();
+        return;
+      }
+      state.overlays.osmOn = true;
+      setStatus('OSM outline on' + overlayLegendText());
+      syncHoleOutlineChrome();
+      render();
+    });
 
     // Vertical exaggeration slider (3D only).
     // v1.3.2 (smooth exag): 'input' fired buildScene per tick — a full mesh
@@ -5287,6 +5565,7 @@
     if (exagVal0) exagVal0.textContent = state.v3.exag + '×';
     const fly = document.getElementById('gm-flyover');
     if (fly) fly.style.display = state.viewMode === 'hole' ? '' : 'none';
+    syncHoleOutlineChrome();
     syncTopInset();
   }
   loadGreen();
