@@ -53,21 +53,25 @@ check('flyoverStart is hoisted (loadCorridor can call it)',
   gmSrc.indexOf('function flyoverStart') < gmSrc.indexOf('function wireChrome') &&
   gmSrc.indexOf('async function loadCorridor') < gmSrc.indexOf('function flyoverStart'));
 
-check('Auto outline + OSM outline buttons exist',
-  /id="gm-auto-outline"/.test(htmlSrc) &&
-  /id="gm-osm-outline"/.test(htmlSrc) &&
-  />Auto outline</.test(htmlSrc) &&
-  />OSM outline</.test(htmlSrc));
+check('OSM / Auto source buttons exist (v1.23.0 dock row)',
+  /id="gm-src-osm"/.test(htmlSrc) &&
+  /id="gm-src-auto"/.test(htmlSrc) &&
+  />OSM</.test(htmlSrc) && />Auto</.test(htmlSrc));
 
-check('Auto/OSM buttons set src=',
-  /reloadWithSrc\('auto'\)/.test(gmSrc) &&
-  /reloadWithSrc\('osm'\)/.test(gmSrc) &&
-  /qs2\.set\('src', src\)/.test(gmSrc));
+check('Auto/OSM buttons switch via the store + src= (v1.23.0 semantics)',
+  /wireSrcBtn\('gm-src-auto', 'auto'\)/.test(gmSrc) &&
+  /wireSrcBtn\('gm-src-osm', 'osm'\)/.test(gmSrc) &&
+  /qs2\.set\('src', src\)/.test(gmSrc) &&
+  /OutlineStore\.setChosen\(state\.lat, state\.lng, src\)/.test(gmSrc));
 
-check('src=auto ignores OSM/trace and requires detect ≥0.6',
-  /forceAuto = srcPref === 'auto'/.test(gmSrc) &&
-  /forceAuto \? null/.test(gmSrc) &&
-  /forceAuto[\s\S]{0,180}?detectRes && detectRes\.confidence >= 0\.6/.test(gmSrc));
+check('a missing source is greyed with an honest prompt (not hidden)',
+  /gm-btn-disabled/.test(gmSrc) &&
+  /No auto outline yet — open Check location to detect it/.test(gmSrc) &&
+  /No OSM green mapped here/.test(gmSrc));
+
+check('src=auto requires the store ring (no force-Auto bypass; detect only at the 0.75 high bar)',
+  !/forceAuto = srcPref === 'auto'/.test(gmSrc) &&
+  /detectRes\.confidence >= 0\.75/.test(gmSrc));
 
 check('topbar has title + status + loc rows',
   /id="gm-top-title-row"/.test(htmlSrc) &&
@@ -109,10 +113,13 @@ check('wasDrag threshold is CSS-px scaled by dpr (iPhone jitter)',
   function el(id) {
     return {
       id, textContent: '', innerHTML: '', style: {}, hidden: false,
-      value: '1', dataset: {},
+      value: '1', dataset: {}, _attrs: {},
       classList: { add() {}, remove() {}, toggle() {} },
       addEventListener(t, f) { (handlers[id + ':' + t] = handlers[id + ':' + t] || []).push(f); },
       appendChild() {},
+      setAttribute(k, v) { this._attrs[k] = String(v); },
+      removeAttribute(k) { delete this._attrs[k]; },
+      getAttribute(k) { return this._attrs[k] != null ? this._attrs[k] : null; },
       getContext: () => ({
         fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {},
         fill() {}, stroke() {}, arc() {}, ellipse() {},
@@ -133,7 +140,8 @@ check('wasDrag threshold is CSS-px scaled by dpr (iPhone jitter)',
   ['gm-canvas','gm-status','gm-exag-wrap','gm-exag','gm-exag-val','gm-ball',
    'gm-recenter','gm-legend-title','gm-rampbar','gm-ramplabels','gm-tip',
    'gm-quality','gm-stimp','gm-loc','gm-loading','gm-load-status','gm-back',
-   'gm-editloc','gm-flyover','gm-auto-outline','gm-osm-outline','gm-topstack'
+   'gm-editloc','gm-flyover','gm-src-osm','gm-src-auto','gm-arrows',
+   'gm-outline-chip','gm-topstack'
   ].forEach(id => els[id] = el(id));
   els['gm-canvas'].width = 400; els['gm-canvas'].height = 400;
 
@@ -162,16 +170,16 @@ check('wasDrag threshold is CSS-px scaled by dpr (iPhone jitter)',
   global.document = {
     getElementById: (id) => els[id] || (els[id] = el(id)),
     querySelectorAll: (sel) => {
-      if (sel === '.gm-layer-btn')
-        return ['shading', 'arrows', 'both'].map(l => {
-          const e = el('layer-' + l); e.dataset.layer = l; return e; });
+      if (sel === '.gm-mode-btn')
+        return ['slope', 'elev'].map(m => {
+          const e = el('mode-' + m); e.dataset.mode = m; return e; });
       if (sel === '.gm-view-btn')
         return ['3d', 'hole'].map(v => {
           const e = el('view-' + v); e.dataset.view = v; return e; });
       if (sel === '#gm-ramplabels span') return [el('s0'), el('s1'), el('s2')];
       return [];
     },
-    querySelector: () => { const e = el('layer-both'); e.dataset.layer = 'both'; return e; },
+    querySelector: () => null,
     createElement: () => el('created'),
     addEventListener() {},
     documentElement: { style: { setProperty() {} } }

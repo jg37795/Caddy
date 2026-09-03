@@ -1394,19 +1394,35 @@
       }
 
       // Green: the real outline when stored, else an ellipse at the end.
-      if (Array.isArray(h.greenRingPts) && h.greenRingPts.length >= 3) {
-        const gd = h.greenRingPts.map((ll, i) => {
-          const { along, cross } = P.toXY(ll);
-          return (i ? 'L' : 'M') + ` ${P.X(along).toFixed(1)} ${P.Y(cross).toFixed(1)}`;
-        }).join(' ') + ' Z';
-        parts.push(`<path class="prep-hm-green" d="${gd}" fill="none" stroke-width="2"/>`);
-        // tint the interior
-        parts.push(`<path class="prep-hm-greenfill" d="${gd}"/>`);
-      } else {
-        const end = P.toXY(h.greenLatLng);
-        parts.push(
-          `<ellipse class="prep-hm-green" cx="${P.X(end.along).toFixed(1)}" cy="${P.Y(end.cross).toFixed(1)}" rx="16" ry="11"/>`
-        );
+      // v1.23.0: the store's CHOSEN ring wins when present (same outline
+      // the 3D tool draws); else h.greenRingPts as today.
+      {
+        let prepRing = null;
+        try {
+          if (window.OutlineStore && typeof window.OutlineStore.chosenRing ===
+            'function' && h.greenLatLng) {
+            const cr = window.OutlineStore.chosenRing(h.greenLatLng.lat,
+              h.greenLatLng.lng);
+            if (cr && Array.isArray(cr.ring) && cr.ring.length >= 3)
+              prepRing = cr.ring;
+          }
+        } catch (e) { /* headless / no store */ }
+        if (!prepRing && Array.isArray(h.greenRingPts) &&
+            h.greenRingPts.length >= 3) prepRing = h.greenRingPts;
+        if (prepRing) {
+          const gd = prepRing.map((ll, i) => {
+            const { along, cross } = P.toXY(ll);
+            return (i ? 'L' : 'M') + ` ${P.X(along).toFixed(1)} ${P.Y(cross).toFixed(1)}`;
+          }).join(' ') + ' Z';
+          parts.push(`<path class="prep-hm-green" d="${gd}" fill="none" stroke-width="2"/>`);
+          // tint the interior
+          parts.push(`<path class="prep-hm-greenfill" d="${gd}"/>`);
+        } else {
+          const end = P.toXY(h.greenLatLng);
+          parts.push(
+            `<ellipse class="prep-hm-green" cx="${P.X(end.along).toFixed(1)}" cy="${P.Y(end.cross).toFixed(1)}" rx="16" ry="11"/>`
+          );
+        }
       }
 
       // Hazards: project real positions when lat/lng present.
@@ -2411,11 +2427,25 @@
     if (_briefInFlight) return;
     _briefInFlight = (async () => {
       try {
+        // v1.23.0: the brief builds from the store's CHOSEN ring when the
+        // green has one (same outline the 3D tool draws); else the hole's
+        // greenRingPts as today.
+        let briefPolyLL = Array.isArray(h.greenRingPts)
+          ? h.greenRingPts : null;
+        try {
+          if (window.OutlineStore &&
+              typeof window.OutlineStore.chosenRing === 'function') {
+            const cr = window.OutlineStore.chosenRing(h.greenLatLng.lat,
+              h.greenLatLng.lng);
+            if (cr && Array.isArray(cr.ring) && cr.ring.length >= 3)
+              briefPolyLL = cr.ring;
+          }
+        } catch (e) { /* headless / no store */ }
         await window.GreenBriefCore.build({
           teeLL: h.teeLatLng,
           centerLL: h.greenLatLng,
           radiusM: 18,
-          polyLL: Array.isArray(h.greenRingPts) ? h.greenRingPts : null,
+          polyLL: briefPolyLL,
         });
       } catch (e) { /* silent: advice falls back to slope-free wording */ }
       _briefInFlight = null;

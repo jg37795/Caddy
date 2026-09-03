@@ -7,10 +7,13 @@ const handlers = {};
 function el(id) {
   return {
     id, textContent: '', innerHTML: '', style: {}, hidden: false,
-    value: 'slope', dataset: {},
+    value: 'slope', dataset: {}, _attrs: {},
     classList: { add() {}, remove() {}, toggle() {} },
     addEventListener(t, f) { (handlers[id + ':' + t] = handlers[id + ':' + t] || []).push(f); },
     appendChild() {},
+    setAttribute(k, v) { this._attrs[k] = String(v); },
+    removeAttribute(k) { delete this._attrs[k]; },
+    getAttribute(k) { return this._attrs[k] != null ? this._attrs[k] : null; },
     getContext: () => ({
       fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {},
       fill() {}, stroke() {}, arc() {}, ellipse() {},
@@ -32,10 +35,12 @@ function el(id) {
 const els = {};
 // v1.4.0: gm-preset/gm-clear-ball/gm-mode(select) removed from the DOM —
 // smoke stubs keep them (harmless extra keys); gm-stimp now required.
+// v1.23.0: dock source row + arrows toggle + outline chip stubs.
 ['gm-canvas','gm-status','gm-preset','gm-mode','gm-exag-wrap','gm-exag',
  'gm-exag-val','gm-ball','gm-clear-ball','gm-recenter','gm-legend-title',
  'gm-rampbar','gm-ramplabels','gm-tip','gm-quality','gm-stimp',
- 'gm-loc','gm-loading','gm-load-status','gm-back','gm-editloc'
+ 'gm-loc','gm-loading','gm-load-status','gm-back','gm-editloc',
+ 'gm-src-osm','gm-src-auto','gm-arrows','gm-outline-chip'
  ].forEach(id => els[id] = el(id));
 els['gm-canvas'].width = 400; els['gm-canvas'].height = 400;
 
@@ -61,7 +66,23 @@ function synthEg(spanM, N, lat, lng) {
 global.window = {
   devicePixelRatio: 2, addEventListener() {},
   CaddyElev: { fetchElevGrid: async (bbox, size) =>
-    synthEleg(bbox, size) }
+    synthEleg(bbox, size) },
+  // v1.23.0: the boot loads a remembered OSM ring from the OutlineStore
+  // (offline Overpass no longer falls back to the deleted ellipse).
+  OutlineStore: (() => {
+    const rec = {
+      lat: 41.91314, lng: -93.60971, chosen: 'osm', osmDistM: 3,
+      osmRing: [[41.91324, -93.60981], [41.91304, -93.60981],
+        [41.91304, -93.60961], [41.91324, -93.60961]],
+    };
+    return {
+      get: () => rec,
+      has: (lat, lng, s) => s === 'osm' && !!rec.osmRing,
+      setChosen: (lat, lng, s) => { rec.chosen = s; return rec; },
+      chosenRing: () => ({ source: 'osm', ring: rec.osmRing }),
+      saveOsm: () => rec, saveAuto: () => rec,
+    };
+  })(),
 };
 function synthEleg(bbox, size) {
   const [w, s, e, n] = bbox;
@@ -73,16 +94,16 @@ function synthEleg(bbox, size) {
 global.document = {
   getElementById: (id) => els[id] || (els[id] = el(id)),
   querySelectorAll: (sel) => {
-    if (sel === '.gm-layer-btn')
-      return ['shading', 'arrows', 'both'].map(l => {
-        const e = el('layer-' + l); e.dataset.layer = l; return e; });
+    if (sel === '.gm-mode-btn')
+      return ['slope', 'elev'].map(m => {
+        const e = el('mode-' + m); e.dataset.mode = m; return e; });
     if (sel === '.gm-view-btn')
       return ['3d', 'hole'].map(v => {
         const e = el('view-' + v); e.dataset.view = v; return e; });
     if (sel === '#gm-ramplabels span') return [el('s0'), el('s1'), el('s2')];
     return [];
   },
-  querySelector: () => { const e = el('layer-both'); e.dataset.layer = 'both'; return e; },
+  querySelector: () => null,
   createElement: () => el('created'),
   addEventListener() {},
   documentElement: { style: { setProperty() {} } }
@@ -91,7 +112,8 @@ global.location = { search: "" };
 global.innerWidth = 800; global.innerHeight = 600;
 global.requestAnimationFrame = (f) => setImmediate(f);
 global.performance = global.performance || { now: () => Date.now() };
-// Overpass offline → ellipse fallback (fine).
+// Overpass offline → the remembered store ring above carries the outline
+// (the ellipse fallback is DELETED in v1.23.0).
 global.fetch = async () => { throw new Error('offline'); };
 // v1.6.0: load the detector so the smoke covers the auto-detect path
 // (offline Overpass + synthetic grid → detection may or may not fire;
@@ -105,7 +127,8 @@ require(path.join(__dirname, '..', 'greenmap.js'));
 
 setTimeout(async () => {
   try {
-    check('status shows ellipse fallback + slope', /ellipse/.test(els['gm-status'].textContent),
+    check('status names the OSM outline source + slope',
+      /Outline: OSM/.test(els['gm-status'].textContent),
       els['gm-status'].textContent);
     check('quality note populated', /m\/cell/.test(els['gm-quality'].textContent),
       els['gm-quality'].textContent);

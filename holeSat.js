@@ -24,7 +24,6 @@
 
   const TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
   const OVERPASS = 'https://overpass-api.de/api/interpreter';
-  const OUTLINE_KEY = 'caddy:greenOutline:v1';
 
   let sheet = null;
   let teeArmed = false;   // v1.17.1: two-tap tee placement state
@@ -96,6 +95,9 @@
         ? `<div class="psh-stats">${meta.map((m) =>
             `<span>${m}</span>`).join('<i>·</i>')}</div>` : '') +
       '<div class="psh-map" id="pshMap"></div>' +
+      // v1.23.0: outline source chip — names the store-chosen ring drawn
+      // below (OSM / AUTO). Read-only, like the sheet itself.
+      '<span class="psh-src-chip" id="pshSrcChip" hidden>OSM</span>' +
       // v1.17.1: tap-to-place tee banner (hidden until Move tee armed).
       '<div class="psh-tee-banner" id="pshTeeBanner" role="status" aria-live="polite" hidden>Tap your tee box on the map · <button type="button" class="psh-tee-cancel" id="pshTeeCancel">Cancel</button></div>' +
       // v1.16.1: Move tee + 3D Green live HERE (James) — the card's
@@ -192,35 +194,36 @@
       void 0;
     }
 
-    // Green outline: stored ring or the local traced outline.
-    let ring = Array.isArray(hole.greenRingPts)
-      ? hole.greenRingPts.map((p) => [p.lat, p.lng]) : null;
-    if (!ring) {
-      try {
-        const store = JSON.parse(
-          localStorage.getItem(OUTLINE_KEY) || '{}');
-        // v1.21.7 (Grok F9): trace store contract is {lat,lng,vertices} —
-        // keyed at 3 decimals (~111 m cells). The old lookup demanded a
-        // 4-decimal "lat,lng" key and a .pts field, so a trace James drew
-        // NEVER appeared on the sheet. Reuse greenmap's 100 m nearest scan.
-        let best = null, bestD = Infinity;
-        for (const k of Object.keys(store)) {
-          const o = store[k];
-          if (!o || !Array.isArray(o.vertices) || o.vertices.length < 3)
-            continue;
-          const d = Math.hypot(
-            (o.lat - boot.lat) * 111320,
-            (o.lng - boot.lng) * 111320 * Math.cos(boot.lat * Math.PI / 180));
-          if (d < bestD) { bestD = d; best = o; }
+    // Green outline (v1.23.0): the store's CHOSEN ring for this green wins
+    // (headless-guarded); the hole's greenRingPts stay the fallback. A tiny
+    // source chip names what is drawn. Non-interactive, as the sheet is.
+    let ring = null;
+    let ringSrc = null;
+    try {
+      if (window.OutlineStore && typeof window.OutlineStore.chosenRing ===
+        'function') {
+        const cr = window.OutlineStore.chosenRing(boot.lat, boot.lng);
+        if (cr && Array.isArray(cr.ring) && cr.ring.length >= 3) {
+          ring = cr.ring;
+          ringSrc = cr.source;
         }
-        if (best && bestD < 100) ring = best.vertices;
-      } catch (e) { /* no traced outline */ }
+      }
+    } catch (e) { /* headless / no store */ }
+    if (!ring && Array.isArray(hole.greenRingPts)) {
+      ring = hole.greenRingPts.map((p) => [p.lat, p.lng]);
+      ringSrc = 'osm';
     }
     if (ring && ring.length >= 3) {
       L.polygon(ring, {
-        color: '#7dff9b', weight: 2, fillOpacity: 0.25,
+        color: ringSrc === 'auto' ? '#ffd166' : '#7dff9b',
+        weight: 2, fillOpacity: 0.25,
         interactive: false,
       }).addTo(map);
+      const chipEl = document.getElementById('pshSrcChip');
+      if (chipEl) {
+        chipEl.textContent = ringSrc === 'auto' ? 'AUTO' : 'OSM';
+        chipEl.hidden = false;
+      }
       // v1.18.0: green tint from the (auto-built) green brief — the high
       // side half is brighter, the feed side dimmed. Read via briefFor
       // (sync); if the brief isn't built yet the ring stays neutral and

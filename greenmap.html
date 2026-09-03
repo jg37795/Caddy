@@ -9,7 +9,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>3D Green — Caddy</title>
-<script>window.CADDY_VERSION = 'v1.21.9';</script>
+<script>window.CADDY_VERSION = 'v1.23.0';</script>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="greenmap.css">
 <link rel="stylesheet" href="leaflet.css">
@@ -69,8 +69,10 @@
 </div>
 
 <!-- v1.21.8 dock: 3D + Hole only (no 2D). Exag defaults 1×. Hole view is
-     satellite-only (no Stylized/Photo). Outline source = Auto / OSM.
-     Flyover is an explicit Hole-view control. -->
+     satellite-only (no Stylized/Photo). Flyover is an explicit Hole-view
+     control. v1.23.0: ONE outline source row (OSM | Auto, the remembered
+     store's chosen source); the hole-view overlay toggles are replaced by a
+     single chosen-outline ring + corner chip. -->
 <div id="gm-dock" class="gm-chrome">
   <div class="gm-dock-row">
     <div class="gm-dock-group" role="radiogroup" aria-label="View">
@@ -83,24 +85,23 @@
       <span id="gm-exag-val">1×</span>
     </span>
     <button class="gm-btn" id="gm-flyover" title="Replay the tee-to-green flyover" style="display:none">Flyover</button>
-    <button class="gm-btn" id="gm-hole-auto-outline" title="Toggle auto-detected green outline on the hole" style="display:none">Auto outline</button>
-    <button class="gm-btn" id="gm-hole-osm-outline" title="Toggle OpenStreetMap green outline on the hole" style="display:none">OSM outline</button>
-    <span id="gm-outline-legend" hidden>OSM #7dff9b · Auto #ffd166</span>
+  </div>
+  <!-- v1.23.0: outline SOURCE row — its own dock row (never inside the
+       scrolling data row; that hid the OSM button on iPhone). Tap = set the
+       store's chosen source and reload with ?src=. Missing source = greyed
+       with an honest prompt. -->
+  <div class="gm-dock-row" id="gm-src-row" role="radiogroup" aria-label="Outline source">
+    <button class="gm-btn gm-src-btn" id="gm-src-osm" aria-pressed="false">OSM</button>
+    <button class="gm-btn gm-src-btn" id="gm-src-auto" aria-pressed="false">Auto</button>
   </div>
   <div class="gm-dock-row" id="gm-data-row">
     <div class="gm-dock-group" role="radiogroup" aria-label="Data">
       <button class="gm-btn gm-mode-btn active" data-mode="slope">Slope</button>
       <button class="gm-btn gm-mode-btn" data-mode="elev">Elev</button>
     </div>
-    <div class="gm-dock-group" id="gm-layer-group" role="radiogroup" aria-label="Layers">
-      <button class="gm-btn gm-layer-btn active" data-layer="both">Both</button>
-      <button class="gm-btn gm-layer-btn" data-layer="shading">Shading</button>
-      <button class="gm-btn gm-layer-btn" data-layer="arrows">Arrows</button>
-    </div>
-    <div class="gm-dock-group" id="gm-outline-group" role="group" aria-label="Green outline">
-      <button class="gm-btn" id="gm-auto-outline" title="Detect the green outline from LiDAR and imagery">Auto outline</button>
-      <button class="gm-btn" id="gm-osm-outline" title="Use the OpenStreetMap green outline">OSM outline</button>
-    </div>
+    <!-- v1.23.0: the Both/Shading/Arrows trio collapsed to ONE arrows
+         toggle — 3D/Hole always shade; this only gates the flow arrows. -->
+    <button class="gm-btn" id="gm-arrows" aria-pressed="true" title="Flow arrows on the surface">Arrows</button>
   </div>
   <div class="gm-dock-row">
     <div class="gm-dock-group" id="gm-action-group">
@@ -134,9 +135,20 @@
   <div class="gm-load-title">Reading the green…</div>
   <div class="gm-load-bar"></div>
   <div class="gm-load-status" id="gm-load-status">Fetching slope data</div>
+  <!-- v1.23.0 honest-card action: shown when NO outline source exists —
+       opens Check location with auto-detect pre-armed. -->
+  <button class="gm-btn" id="gm-load-detect" hidden
+    title="Open Check location and detect the outline">Open Check location &amp; detect</button>
 </div>
 
+<!-- v1.23.0: hole-view outline source chip — top-right under the topbar.
+     Text = the chosen outline's source; tap = switch (same ?src= reload as
+     the dock row). Hidden in 3D view / when no outline exists. -->
+<span id="gm-outline-chip" class="gm-chrome" role="button" aria-pressed="false"
+  title="Outline source — tap to switch" hidden>OSM</span>
+
 <script src="leaflet.js"></script>
+<script src="outlineStore.js"></script>
 <script src="caddy-elev.js"></script>
 <script src="green-detect.js"></script>
 <script src="satview.js"></script>

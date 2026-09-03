@@ -1446,6 +1446,24 @@ body.dark .prep-strat-advice {
   color: var(--text, #e8efe9);
 }
 .psh-map { flex: 1; min-height: 0; background: #0a0f0c; }
+/* v1.23.0: outline source chip (Prep satellite sheet) — tiny read-only
+   pill naming the chosen outline drawn on the sheet map. */
+.psh-src-chip {
+  position: absolute;
+  top: 64px;
+  right: 12px;
+  z-index: 500;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--text, #e8efe9);
+  background: rgba(10, 14, 12, 0.78);
+  border: 0.5px solid var(--glass-stroke, rgba(255,255,255,0.14));
+  border-radius: 999px;
+  padding: 3px 9px;
+  pointer-events: none;
+}
+.psh-src-chip[hidden] { display: none; }
 /* v1.17.0 premium pass */
 .psh-stats {
   display: flex;

@@ -56,7 +56,10 @@
       Number.isFinite(Number(hole.teePoint.lng))
       ? { lat: Number(hole.teePoint.lat), lng: Number(hole.teePoint.lng) }
       : null;
-    return { lat: g.lat, lng: g.lng, tee: t, hole: holeNum };
+    // v1.23.0: the marked pin IS today's greenCenter readout — pass it
+    // through so greenmap renders the flag exactly there.
+    const pin = g ? { lat: g.lat, lng: g.lng } : null;
+    return { lat: g.lat, lng: g.lng, tee: t, pin, hole: holeNum };
   }
 
   function pill() {
@@ -89,6 +92,12 @@
         '&lng=' + g.lng.toFixed(6);
       if (g.tee) url += '&teelat=' + g.tee.lat.toFixed(6) +
         '&teelng=' + g.tee.lng.toFixed(6);
+      // v1.23.0: carry the MARKED PIN (the green centre the app recorded —
+      // the same point the flag sits on in the app's map) so the 3D flag
+      // and putt solver aim there, not at a re-derived centre.
+      if (g.pin && Number.isFinite(g.pin.lat) && Number.isFinite(g.pin.lng))
+        url += '&pinlat=' + g.pin.lat.toFixed(6) +
+          '&pinlng=' + g.pin.lng.toFixed(6);
       // v1.21.7 (Grok F10): carry course+hole so Check location's
       // "Load this green" can persist a manual tee — the same contract the
       // Prep and satellite-sheet launches use. Without these the editor

@@ -622,6 +622,27 @@ body:not(.dark) #gm-stage {
 .gm-dock-row .gm-dock-group { flex: none; }   /* groups never shrink mid-scroll */
 #gm-exag-wrap { display: inline-flex; align-items: center; }
 #gm-exag { width: 96px; }
+/* v1.23.0: greyed source buttons (the store has no such outline here) —
+   still tappable so the tap can give the honest prompt. */
+.gm-btn-disabled {
+  opacity: 0.4;
+  box-shadow: none;
+}
+/* v1.23.0: hole-view outline source chip — top-right, just under the
+   topstack (the inset var tracks the stack height incl. status wrap). */
+#gm-outline-chip {
+  top: calc(var(--gm-top-inset, 118px) + 10px);
+  right: 10px;
+  left: auto;
+  bottom: auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#gm-outline-chip[hidden] { display: none; }
 @media (max-width: 560px) {
   #gm-exag { width: 78px; }
   .gm-dock-row { gap: 6px; }   /* v1.14.0 (R6-D4): row gap 6px on narrow */

@@ -54,6 +54,8 @@
       '<div class="gel-outline-row" id="gelOutlineRow">' +
       '  <button class="gel-btn" id="gelAutoOutline" aria-pressed="false">Auto outline</button>' +
       '  <button class="gel-btn" id="gelOsmOutline" aria-pressed="false">OSM outline</button>' +
+      '  <button class="gel-btn" id="gelUseOutline" aria-disabled="true" ' +
+      '    title="Keep the previewed outline for this green">Use this outline</button>' +
       '</div>' +
       '<div class="gel-map" id="gelMap"></div>' +
       '<div class="gel-hint">Tap to move the sample point · green outlines are the real mapped greens (OSM)</div>';
@@ -101,10 +103,14 @@
     // v1.21.9 re-scope (James): Auto / OSM outline preview on Check
     // location. One at a time; tapping the map re-anchors at the pin.
     // Preview only — Load this green still re-boots greenmap's ladder.
+    // v1.23.0: "Use this outline" SAVES the previewed ring into the
+    // OutlineStore (chosen + locked); high-bar auto detects auto-save.
     let gelOutlineMode = null;     // null | 'auto' | 'osm'
     let gelOutlineLayer = null;
     let gelOutlineHint = '';
     let gelOutlineGen = 0;
+    let gelPreviewRingLL = null;   // the ring on screen, [[lat,lng],...]
+    const OS = window.OutlineStore || null;
     const loadScriptOnce = (src) => new Promise((resolve, reject) => {
       if (typeof document === 'undefined') { resolve(); return; }
       const existing = document.querySelector(`script[src="${src}"]`);
@@ -121,6 +127,7 @@
     const syncOutlineBtns = () => {
       const autoBtn = sheet.querySelector('#gelAutoOutline');
       const osmBtn = sheet.querySelector('#gelOsmOutline');
+      const useBtn = sheet.querySelector('#gelUseOutline');
       if (autoBtn) {
         const on = gelOutlineMode === 'auto';
         autoBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -130,6 +137,14 @@
         const on = gelOutlineMode === 'osm';
         osmBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
         osmBtn.classList.toggle('gel-active', on);
+      }
+      // v1.23.0: "Use this outline" is enabled ONLY while a preview ring
+      // is on screen (Auto or OSM — whichever mode produced it).
+      if (useBtn) {
+        const on = !!(gelOutlineMode && gelPreviewRingLL);
+        useBtn.setAttribute('aria-disabled', on ? 'false' : 'true');
+        useBtn.classList.toggle('gel-active', false);
+        useBtn.classList.toggle('gel-disabled', !on);
       }
     };
     const setOutlineHint = (text) => {
@@ -145,6 +160,8 @@
       gelOutlineLayer = L.polygon(ll, {
         color, weight: 3, fillOpacity: 0, interactive: false,
       }).addTo(map);
+      gelPreviewRingLL = ll;
+      syncOutlineBtns();
     };
     const fetchNearestOsm = async (lat, lng) => {
       const res = await fetch(OVERPASS + '?data=' +
@@ -236,7 +253,28 @@
       const ll = detectRes.poly.map(([mx, my]) => [
         lat + my / mLat, lng + mx / mLng
       ]);
-      return { ll, conf: detectRes.confidence };
+      // v1.23.0: the auto-SAVE gate needs the in-mask cell count too
+      // (high bar = conf ≥ 0.75 AND ≥ 30 cells). Count here while the
+      // grid is in scope — point-in-polygon over the 64² sample grid.
+      let cells = 0;
+      {
+        const P = detectRes.poly;
+        const inPoly = (x, y) => {
+          let inside = false;
+          for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+            const xi = P[i][0], yi = P[i][1];
+            const xj = P[j][0], yj = P[j][1];
+            if (((yi > y) !== (yj > y)) &&
+                (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+          }
+          return inside;
+        };
+        for (let y = 0; y < H; y++)
+          for (let x = 0; x < W; x++)
+            if (Number.isFinite(g2[y * W + x]) &&
+                inPoly((x + 0.5 - W / 2) * cs, (H / 2 - y - 0.5) * cs)) cells++;
+      }
+      return { ll, conf: detectRes.confidence, cells };
     };
     const runAutoAt = async (ll) => {
       const gen = ++gelOutlineGen;
@@ -246,6 +284,7 @@
       catch (e) { res = { fail: 'err' }; }
       if (gen !== gelOutlineGen) return;
       if (!res || res.fail || !res.ll) {
+        // Below 0.6 → honest failure, keep the previous outline.
         const why = res && res.fail === 'low-conf'
           ? 'not confident here — try OSM or another point'
           : 'could not detect here — try OSM or another point';
@@ -253,7 +292,22 @@
         return;
       }
       drawPreviewRing(res.ll, '#ffd166');
-      setOutlineHint('Outline: Auto (detected)');
+      // v1.23.0 AUTO-SAVE RULES: conf ≥ 0.75 AND ≥ 30 cells → saveAuto
+      // (chosen unless the green is locked). 0.6..0.75 (or a too-small
+      // mask) → preview only, never saved.
+      if (res.conf >= 0.75 && (res.cells || 0) >= 30) {
+        if (OS) OS.saveAuto(ll.lat, ll.lng, res.ll, res.conf);
+        let locked = false;
+        if (OS && OS.get) {
+          const r = OS.get(ll.lat, ll.lng);
+          locked = !!(r && r.locked);
+        }
+        setOutlineHint(locked
+          ? 'Outline saved (Auto) — existing outline locked; Use this outline to replace it'
+          : 'Outline: Auto (saved — verify)');
+      } else {
+        setOutlineHint('Low confidence — not saved. Use this outline to keep it.');
+      }
     };
     const runOsmAt = async (ll) => {
       const gen = ++gelOutlineGen;
@@ -273,6 +327,7 @@
       gelOutlineMode = null;
       gelOutlineHint = '';
       gelOutlineGen++;
+      gelPreviewRingLL = null;
       if (gelOutlineLayer) { map.removeLayer(gelOutlineLayer); gelOutlineLayer = null; }
       syncOutlineBtns();
       if (!teeMode) {
@@ -280,9 +335,28 @@
         if (el) el.textContent = sampleHint(pin.getLatLng());
       }
     };
+    // v1.23.0: "Use this outline" — keep the ring on screen as THE outline
+    // for this green: written into the store under the current mode, chosen
+    // and locked (replaces anything, including an earlier lock).
+    const useOutlineNow = () => {
+      if (!gelOutlineMode || !gelPreviewRingLL) return;
+      const llPin = pin.getLatLng();
+      if (OS) OS.useThis(llPin.lat, llPin.lng, gelOutlineMode,
+        gelPreviewRingLL);
+      setOutlineHint(gelOutlineMode === 'osm'
+        ? 'Outline saved (OSM)'
+        : 'Outline saved (Auto) — locked');
+      gelPreviewRingLL = null;
+      syncOutlineBtns();
+    };
     window.__gelOutline = {
       get mode() { return gelOutlineMode; },
       get hint() { return (hintEl() && hintEl().textContent) || gelOutlineHint; },
+      // v1.23.0: testable seam — what "Use this outline" would write.
+      get ring() { return gelPreviewRingLL; },
+      get useEnabled() {
+        return !!(gelOutlineMode && gelPreviewRingLL);
+      },
     };
     // v1.14.0 (R6-D5): teeMarker must be REBINDABLE. It was `const`, so
     // setTee removed the old marker but the freshly created one was never
@@ -370,6 +444,9 @@
       syncOutlineBtns();
       runOsmAt(pin.getLatLng());
     });
+    // v1.23.0: keep the previewed ring as THE outline (store: chosen+locked).
+    const useBtn = sheet.querySelector('#gelUseOutline');
+    if (useBtn) useBtn.addEventListener('click', useOutlineNow);
     map.on('click', (e) => {
       // v1.12.0 (tee mode): in tee mode a map tap PLACES the tee
       // (disarming), exactly like Round's Set-tee flow.
@@ -543,6 +620,21 @@
           history.replaceState(null, '', u.toString());
         } catch (e) { /* file:// or privacy mode — worst case a refresh
                           re-arms the editor; harmless */ }
+      }));
+    }
+    // v1.23.0: &armdetect=1 — the honest card / greyed dock Auto button
+    // deep-link. Opens the editor AND immediately runs Auto detect at the
+    // pin (same double-rAF + replaceState contract as armtee).
+    if (new URLSearchParams(location.search).get('armdetect') === '1') {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        openEditor();
+        try {
+          const u = new URL(location.href);
+          u.searchParams.delete('armdetect');
+          history.replaceState(null, '', u.toString());
+        } catch (e) { /* harmless: worst case a refresh re-arms */ }
+        const autoBtn0 = document.getElementById('gelAutoOutline');
+        if (autoBtn0) autoBtn0.click();
       }));
     }
   }

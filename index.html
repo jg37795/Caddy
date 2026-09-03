@@ -1465,6 +1465,9 @@
        3D tool) — needs caddy-elev.js + greenmap.js GreenMapCore; prep.js
        triggers it on sheet open. -->
   <script src="./greenBriefCore.js"></script>
+  <!-- v1.23.0: per-green outline store — loaded before prep.js (the cartoon
+       and GreenBriefCore.build read OutlineStore.chosenRing). -->
+  <script src="./outlineStore.js"></script>
   <script defer src="./stats.js"></script>
   <script defer src="./bag.js"></script>
   <script defer src="./prep.js"></script>

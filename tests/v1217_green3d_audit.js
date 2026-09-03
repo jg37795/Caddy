@@ -96,28 +96,32 @@ check('F16 greenBriefCore uses fallBearingDeg convention',
   !/Math\.atan2\(gx,\s*gy\)/.test(coreSrc),
   coreSrc.split('\n').slice(138, 148).join('\n'));
 
-// F17. A tiny mask must fall through to the next rung, not abort the load.
+// F17. A tiny mask fails THAT RUNG (v1.23.0: no ellipse demotion exists —
+// when every rung fails the honest "isn't mapped yet" card appears).
 {
-  const abort = gmSrc.slice(gmSrc.indexOf('if (!chosen) {'),
-    gmSrc.indexOf('if (!chosen) {') + 900);
-  const tryOsmBlock = gmSrc.slice(gmSrc.indexOf("rung demoted (tiny mask)"),
-    gmSrc.indexOf("rung demoted (tiny mask)") + 600);
-  check('F17 tiny mask falls back before the honest abort',
+  const abort = gmSrc.slice(gmSrc.lastIndexOf('if (!chosenSrc) {'),
+    gmSrc.lastIndexOf('if (!chosenSrc) {') + 900);
+  const tryOsmBlock = gmSrc.slice(gmSrc.indexOf('osm rung failed (tiny mask)'),
+    gmSrc.indexOf('osm rung failed (tiny mask)') + 600);
+  check('F17 tiny mask fails the rung before the honest abort',
     /polySource = 'none'/.test(abort) &&
-    /continue;/.test(tryOsmBlock),
+    /chosenSrc = null/.test(tryOsmBlock),
     abort.slice(0, 200));
 }
 
-// F20. 3D/Hole views ignore the layer gate (dock copy says 3D always draws
-// both) — or the copy changed. Either way, gate + copy must agree.
+// F20. The arrows gate is the single #gm-arrows toggle (v1.23.0): shading
+// always draws in 3D/Hole; arrows obey state.arrowsOn. Gate + dock control
+// must agree.
 {
-  const gate3d = gmSrc.includes("state.layer !== 'shading'");
-  const comment = /always draw both|always draws both/i.test(htmlSrc);
-  check('F20 layer gate and dock copy agree about 3D arrows',
-    !comment || /viewMode === '2d'/.test(gmSrc.slice(
-      gmSrc.indexOf("state.layer !== 'shading'") - 200,
-      gmSrc.indexOf("state.layer !== 'shading'") + 400)),
-    `comment=${comment}`);
+  const gateIdx = gmSrc.indexOf('if (state.arrowsOn && !state.__exagPreview)');
+  const gate3d = gateIdx !== -1;
+  const btnExists = /id="gm-arrows"/.test(htmlSrc);
+  const wired = gmSrc.indexOf("getElementById('gm-arrows')") !== -1;
+  const staleGate = /state\.layer\b/.test(gmSrc) ||
+    /gm-layer-btn/.test(htmlSrc);
+  check('F20 arrows gate (arrowsOn) and the Arrows dock toggle agree',
+    gate3d && btnExists && wired && !staleGate,
+    `gate=${gate3d} btn=${btnExists} wired=${wired}`);
 }
 
 if (fails) { console.log(`${fails} FAILURE(S)`); process.exit(1); }

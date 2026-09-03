@@ -35,19 +35,19 @@ check('syncTopInset re-sizes canvas when the inset changes',
   /sizeCanvas\(\)/.test(gmSrc.slice(gmSrc.indexOf('function syncTopInset'),
     gmSrc.indexOf('function syncTopInset') + 900)));
 
-check('Hole view Auto/OSM overlay buttons exist in HTML',
-  /id="gm-hole-auto-outline"/.test(htmlSrc) &&
-  /id="gm-hole-osm-outline"/.test(htmlSrc) &&
-  />Auto outline</.test(htmlSrc) &&
-  />OSM outline</.test(htmlSrc));
+check('Hole view Auto/OSM overlay toggles are REPLACED by the single chosen ring + chip',
+  !/id="gm-hole-auto-outline"/.test(htmlSrc) &&
+  !/id="gm-hole-osm-outline"/.test(htmlSrc) &&
+  /id="gm-outline-chip"/.test(htmlSrc) &&
+  /state\.holeOutline/.test(gmSrc) &&
+  !/state\.overlays/.test(gmSrc));
 
-check('3D Auto/OSM source buttons remain (not moved away)',
-  /id="gm-auto-outline"/.test(htmlSrc) &&
-  /id="gm-osm-outline"/.test(htmlSrc));
+check('3D OSM/Auto source row remains (moved to its own dock row)',
+  /id="gm-src-osm"/.test(htmlSrc) && /id="gm-src-auto"/.test(htmlSrc));
 
-check('Hole overlay stroke uses OSM #7dff9b and Auto #ffd166',
-  /strokeOv\(state\.overlays\.osmPoly, '#7dff9b'\)/.test(gmSrc) &&
-  /strokeOv\(state\.overlays\.autoPoly, '#ffd166'\)/.test(gmSrc));
+check('hole-view chosen ring strokes with OSM #7dff9b or Auto #ffd166',
+  /strokeOv\(state\.holeOutline\.polyLocal,/.test(gmSrc) &&
+  /'#ffd166' : '#7dff9b'/.test(gmSrc));
 
 check('118px stage fallback is still first-paint only',
   /--gm-top-inset, calc\(var\(--safe-top, 0px\) \+ 118px\)/.test(cssSrc));
@@ -60,9 +60,10 @@ check('holeSat no longer builds Auto/OSM pills (moved to Check location)',
   /id="pshMoveTee"/.test(satSrc) &&
   /id="psh3d"/.test(satSrc));
 
-check('Check location editor has Auto/OSM outline buttons (second row)',
+check('Check location editor has Auto/OSM/Use-this outline buttons (outline row)',
   /id="gelAutoOutline"/.test(editSrc) &&
   /id="gelOsmOutline"/.test(editSrc) &&
+  /id="gelUseOutline"/.test(editSrc) &&
   /id="gelOutlineRow"/.test(editSrc) &&
   /gelOutlineMode/.test(editSrc));
 
@@ -77,10 +78,13 @@ check('Check location Load this green still re-boots at the sample point',
   function el(id) {
     return {
       id, textContent: '', innerHTML: '', style: {}, hidden: false,
-      value: '1', dataset: {},
+      value: '1', dataset: {}, _attrs: {},
       classList: { add() {}, remove() {}, toggle() {} },
       addEventListener(t, f) { (handlers[id + ':' + t] = handlers[id + ':' + t] || []).push(f); },
       appendChild() {},
+      setAttribute(k, v) { this._attrs[k] = String(v); },
+      removeAttribute(k) { delete this._attrs[k]; },
+      getAttribute(k) { return this._attrs[k] != null ? this._attrs[k] : null; },
       getContext: () => ({
         fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {},
         fill() {}, stroke() {}, arc() {}, ellipse() {},
@@ -101,8 +105,8 @@ check('Check location Load this green still re-boots at the sample point',
   ['gm-canvas','gm-status','gm-exag-wrap','gm-exag','gm-exag-val','gm-ball',
    'gm-recenter','gm-legend-title','gm-rampbar','gm-ramplabels','gm-tip',
    'gm-quality','gm-stimp','gm-loc','gm-loading','gm-load-status','gm-back',
-   'gm-editloc','gm-flyover','gm-auto-outline','gm-osm-outline','gm-topstack',
-   'gm-hole-auto-outline','gm-hole-osm-outline','gm-outline-legend','gm-outline-group'
+   'gm-editloc','gm-flyover','gm-src-osm','gm-src-auto','gm-arrows',
+   'gm-outline-chip','gm-topstack'
   ].forEach(id => els[id] = el(id));
 
   const DPR = 2;
@@ -143,21 +147,37 @@ check('Check location Load this green still re-boots at the sample point',
       const spanM = Math.max((e - w) * 111320 * Math.cos(lat * Math.PI / 180),
         (n - s) * 110540);
       return synthEg(spanM, Math.min(size, 64), lat, lng);
-    } }
+    } },
+    // v1.23.0: the boot loads a remembered OSM ring from the store (the
+    // ladder's first rung) so the mesh builds and the pick round-trip runs.
+    OutlineStore: (() => {
+      const rec = {
+        lat: 41.91314, lng: -93.60971, chosen: 'osm', osmDistM: 3,
+        osmRing: [[41.91324, -93.60981], [41.91304, -93.60981],
+          [41.91304, -93.60961], [41.91324, -93.60961]],
+      };
+      return {
+        get: () => rec,
+        has: (lat, lng, s) => s === 'osm' && !!rec.osmRing,
+        setChosen: (lat, lng, s) => { rec.chosen = s; return rec; },
+        chosenRing: () => ({ source: 'osm', ring: rec.osmRing }),
+        saveOsm: () => rec, saveAuto: () => rec,
+      };
+    })(),
   };
   global.document = {
     getElementById: (id) => els[id] || (els[id] = el(id)),
     querySelectorAll: (sel) => {
-      if (sel === '.gm-layer-btn')
-        return ['shading', 'arrows', 'both'].map(l => {
-          const e = el('layer-' + l); e.dataset.layer = l; return e; });
+      if (sel === '.gm-mode-btn')
+        return ['slope', 'elev'].map(m => {
+          const e = el('mode-' + m); e.dataset.mode = m; return e; });
       if (sel === '.gm-view-btn')
         return ['3d', 'hole'].map(v => {
           const e = el('view-' + v); e.dataset.view = v; return e; });
       if (sel === '#gm-ramplabels span') return [el('s0'), el('s1'), el('s2')];
       return [];
     },
-    querySelector: () => { const e = el('layer-both'); e.dataset.layer = 'both'; return e; },
+    querySelector: () => null,
     createElement: () => el('created'),
     addEventListener() {},
     documentElement: { style: { setProperty() {}, getPropertyValue: () => '' } }
@@ -188,11 +208,10 @@ check('Check location Load this green still re-boots at the sample point',
           els['gm-canvas'].height === wantH,
           `got ${els['gm-canvas'].height} want ${wantH} (viewport was ${VIEW_H * DPR})`);
 
-        // (4) Hole-view outline toggles are wired
-        check('Hole Auto outline button is wired',
-          !!(handlers['gm-hole-auto-outline:click']));
-        check('Hole OSM outline button is wired',
-          !!(handlers['gm-hole-osm-outline:click']));
+        // (4) The hole-view chip + single-ring model are wired via
+        // syncOutlineChrome (no toggle handlers anymore).
+        check('syncOutlineChrome exists (chip + source row sync)',
+          typeof global.window.__gmState === 'object');
 
         // (3) eventPos → pickCell3D round-trip
         const st = global.window.__gmState;
@@ -437,7 +456,9 @@ check('Check location Load this green still re-boots at the sample point',
       window.GreenDetect = {
         detect: () => ({
           confidence: 0.8,
-          poly: [[-8, -8], [8, -8], [8, 8], [-8, 8]]
+          // v1.23.0: the high-bar save ALSO needs >=30 in-mask cells —
+          // this fixture spans ~81 m of the 90 m sample grid, clearing it.
+          poly: [[-45, -45], [45, -45], [45, 45], [-45, 45]]
         })
       };
       window.CaddyElev = {
@@ -498,9 +519,11 @@ check('Check location Load this green still re-boots at the sample point',
       check('Auto button looks active (aria-pressed); OSM is off',
         auto && auto.getAttribute('aria-pressed') === 'true' &&
         osm && osm.getAttribute('aria-pressed') === 'false');
-      check('hint names Auto source',
-        !!(hint && /Outline: Auto \(detected\)/.test(hint.textContent)),
+      check('hint names Auto source (saved at the high bar)',
+        !!(hint && /Outline: Auto \(saved — verify\)/.test(hint.textContent)),
         hint && hint.textContent);
+      check('Use this outline is enabled while the auto ring previews',
+        !!(window.__gelOutline && window.__gelOutline.useEnabled));
 
       const autoCount = autoPolys.length;
       if (window.__gelMap && typeof window.__gelMap.fire === 'function') {
