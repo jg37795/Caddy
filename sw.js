@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.4'; // SAT SHEET = CARTOON FEATURE SET (James: still rendering unnecessary stuff): prep.js now filters the holeData payload before PrepHoleSat.open — hazards pass the same 20 yd strip test as the chips; water rings must touch the strip/chord OR overlap this hole's turf (ringWaterOnHole), passed at FULL bounds since real imagery is the background. Bunkers/turf/tees already matched (assignment-owned). Draw-time only — no Re-map.
+const CACHE_VERSION = 'v1.21.5'; // PREP AUDIT: typed course search works without GPS; Move tee persists as canonical manual geometry, survives re-map, and refreshes the open brief; shot expansion resets per hole; plan rows no longer contradict their chosen clubs with whole-hole “Lay up” copy; club memo keys include Bag values; duplicate Par/club chips removed; cartoon clearly opens Satellite and exposes expanded state to assistive tech.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

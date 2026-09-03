@@ -1274,6 +1274,25 @@ body.dark .prep-strat-advice {
    its one useful number (tee→green delta) rides the map corner instead. */
 .prep-hm-wrap {
   position: relative;
+  border-radius: 14px;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+.prep-hm-wrap[role="button"]:active {
+  background: rgba(127, 127, 127, 0.08);
+  transform: scale(0.99);
+}
+.prep-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.prep-section-head .prep-mini-label { margin-bottom: 7px; }
+.prep-map-action {
+  color: var(--green-2);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.01em;
 }
 .prep-hm-elev {
   position: absolute;
@@ -1693,43 +1712,6 @@ body.dark .prep-hm-fairway {
 
 .prep-hm-hz.water { fill: rgba(90, 170, 255, 0.9); }
 .prep-hm-hz.bunker { fill: rgba(228, 196, 116, 0.9); }
-
-.prep-seq-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.prep-seq-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(127, 127, 127, 0.1);
-  border: 1px solid var(--line);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.prep-seq-chip i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  background: currentColor;
-}
-
-.prep-seq-chip.s0 { color: #1a8a4a; }
-.prep-seq-chip.s1 { color: #3a8fd4; }
-.prep-seq-chip.s2 { color: #c48a12; }
-.prep-seq-chip.s3 { color: #d06a3a; }
-
-body.dark .prep-seq-chip.s0 { color: #63e89a; }
-body.dark .prep-seq-chip.s1 { color: #7ec8ff; }
-body.dark .prep-seq-chip.s2 { color: #ffd166; }
-body.dark .prep-seq-chip.s3 { color: #ff9f7a; }
 
 .prep-green-feed {
   margin-top: 10px;

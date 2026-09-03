@@ -363,26 +363,30 @@
         radius: 6, color: '#fff', weight: 2,
         fillColor: '#fff', fillOpacity: 0.9, interactive: false,
       }).addTo(map);
-      // persist to the course profile (same store greenedit wrote)
+      // Persist through app.js so its in-memory course and localStorage stay
+      // identical. Direct localStorage-only writes reopen stale geometry until
+      // the whole app reloads.
       try {
-        const profiles = JSON.parse(
-          localStorage.getItem('caddy:courseProfiles:v1') || '[]');
-        const c = profiles.find((p) => p && p.id === boot.courseId);
-        if (c && Array.isArray(c.holes) && boot.hole >= 1 &&
-            boot.hole <= c.holes.length) {
-          const h = c.holes[boot.hole - 1];
-          h.teePoint = { lat, lng };
-          h.teeSource = 'player';
-          c.updatedAt = Date.now();
-          localStorage.setItem('caddy:courseProfiles:v1',
-            JSON.stringify(profiles));
+        const saveHole = window.CaddyPrep &&
+          window.CaddyPrep.updateSavedCourseHole;
+        const saved = typeof saveHole === 'function'
+          ? saveHole(boot.courseId, boot.hole, {
+              teePoint: { lat, lng },
+              teeSource: 'manual',
+            })
+          : null;
+        if (saved) {
+          let live = false;
+          try {
+            live = typeof window.__prepRebind === 'function' &&
+              window.__prepRebind(boot.hole, { teePoint: { lat, lng } });
+          } catch (e2) { live = false; }
           const done = document.getElementById('pshTeeBanner');
           if (done) {
-            done.innerHTML = '<span class="psh-tee-ok">✓ Tee saved — Prep updates on the next bind</span>';
+            done.innerHTML = `<span class="psh-tee-ok">✓ Tee saved${live ? ' — Prep updated' : ''}</span>`;
             done.hidden = false;
             setTimeout(() => { done.hidden = true; }, 2600);
           }
-          try { if (window.__prepRebind) window.__prepRebind(); } catch (e2) {}
         }
       } catch (err) { /* storage failure: marker still moved visually */ }
     });

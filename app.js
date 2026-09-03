@@ -550,6 +550,31 @@
     save(COURSE_PROFILES_KEY, state.courseProfiles);
   }
 
+  // Shared write path for tools that edit one saved course hole outside this
+  // closure (Prep's satellite sheet). Keeps the in-memory source of truth and
+  // localStorage identical, so the very next hole bind sees the edit.
+  function updateSavedCourseHole(courseId, holeNumber, patch) {
+    const course = (state.courseProfiles || []).find((c) => c && c.id === courseId);
+    const idx = Number(holeNumber) - 1;
+    if (!course || !Array.isArray(course.holes) || idx < 0 ||
+        idx >= course.holes.length || !patch || typeof patch !== 'object') {
+      return null;
+    }
+    course.holes[idx] = { ...course.holes[idx], ...patch };
+    // A placed tee changes every tee-relative number. Do not leave the old
+    // scorecard yardage as the highest-priority value in planHoleYardage.
+    if (Object.prototype.hasOwnProperty.call(patch, 'teePoint')) {
+      const h = course.holes[idx];
+      if (h.teePoint && h.greenCenter) {
+        const yd = haversineMeters(h.teePoint, h.greenCenter) * M_TO_YD;
+        if (yd > 40 && yd < 900) h.yards = Math.round(yd);
+      }
+    }
+    course.updatedAt = Date.now();
+    saveCourseProfiles();
+    return normalizeCourse(course).holes[idx] || null;
+  }
+
   function scorecardForCourse(course) {
     const n = course && Number(course.holesCount) === 9 ? 9 : 18;
     return Array.from({ length: n }, (_, i) => ({
@@ -10535,8 +10560,12 @@ out geom;`;
     // to 4x per tap and repeat taps repeat the whole search. Memoize on the
     // rounded yardage + shot-log version (identical inputs ⇒ identical
     // recommendation). LRU 48.
-    const memoKey = Math.round(playsYd) + '|' + _shotLogVersion + '|' +
-      state.clubs.length;
+    // Names and carries are recommendation inputs. Keying only on club count
+    // served stale advice after a Bag edit until the page was restarted.
+    const bagSig = (state.clubs || [])
+      .map((c) => `${c.id || ''}:${c.name || ''}:${num(c.yards, 0)}`)
+      .join(',');
+    const memoKey = Math.round(playsYd) + '|' + _shotLogVersion + '|' + bagSig;
     const hit = _recClubMemo.get(memoKey);
     if (hit) return hit;
     const asc = sortedClubsAsc(), desc = sortedClubsDesc();
@@ -12676,11 +12705,11 @@ out geom;`;
           seen.add(key);
           return true;
         })
-        .sort(
-          (a, b) =>
-            haversineMeters(loc || { lat: 0, lng: 0 }, a) -
-            haversineMeters(loc || { lat: 0, lng: 0 }, b)
-        )
+        // With GPS, nearest-first is useful. Without it, preserve Photon's
+        // text-relevance order — sorting from coordinate 0,0 was arbitrary.
+        .sort(loc
+          ? (a, b) => haversineMeters(loc, a) - haversineMeters(loc, b)
+          : () => 0)
         .slice(0, COURSE_SEARCH_MAX_RESULTS);
     } finally {
       clearTimeout(timer);
@@ -12757,21 +12786,27 @@ out geom;`;
   // empty or fails. Used by BOTH the round-setup nearby list and the Prep
   // course picker, so there is exactly one network code path.
   async function courseNameSearch(term, loc) {
-    const { lat, lng } = loc;
+    // A typed course name is intent. Location improves ranking and enables
+    // the radius-bounded Overpass fallback, but Photon can search globally
+    // without it — Prep must still work the night before with GPS off.
+    const hasLoc = !!(loc && Number.isFinite(Number(loc.lat)) &&
+      Number.isFinite(Number(loc.lng)));
+    const lat = hasLoc ? Number(loc.lat) : null;
+    const lng = hasLoc ? Number(loc.lng) : null;
     const cacheKey =
       OSM_CACHE_PREFIX +
-      `search:${COURSE_SEARCH_RADIUS_M}:${lat.toFixed(2)},${lng.toFixed(
-        2
-      )}:${term.toLowerCase()}`;
+      (hasLoc
+        ? `search:${COURSE_SEARCH_RADIUS_M}:${lat.toFixed(2)},${lng.toFixed(2)}`
+        : 'search:global') + `:${term.toLowerCase()}`;
     const pat = osmEscapeQueryString(term);
-    const query = `
+    const query = hasLoc ? `
     [out:json][timeout:20];
     (
       nwr["leisure"="golf_course"]["name"~"${pat}",i](around:${COURSE_SEARCH_RADIUS_M},${lat},${lng});
       nwr["golf"="course"]["name"~"${pat}",i](around:${COURSE_SEARCH_RADIUS_M},${lat},${lng});
     );
     out center tags ${COURSE_SEARCH_FETCH_LIMIT};
-  `;
+  ` : '';
 
     let results = [];
     try {
@@ -12780,7 +12815,7 @@ out geom;`;
       console.warn('Photon search failed, falling back to Overpass:', photonError);
     }
 
-    if (!results.length) {
+    if (!results.length && hasLoc) {
       const data = await overpassFetch(query, {
         timeoutMs: 12000,
         cacheKey,
@@ -13341,6 +13376,9 @@ out geom;`;
   let planSearchResults = [];
   let planSearchSeq = 0;
   let planSearchTimer = null;
+  // The in-flight mapping request, if any. A new pick replaces it — this is
+  // the single guarantee that only the newest pick can bind a course.
+  let planMapSeq = 0;
 
   function planSearchStatus(html) {
     if (!els.planCourseSearchResults) return;
@@ -13387,12 +13425,6 @@ out geom;`;
     }
     const mySeq = ++planSearchSeq;
 
-    if (!state.loc) {
-      planSearchStatus('Turn on location to search courses near you.');
-      planSearchResults = [];
-      return;
-    }
-
     planSearchStatus(`Searching courses named “${escapeHtml(term)}”…`);
     try {
       const results = await courseNameSearch(term, state.loc);
@@ -13406,12 +13438,14 @@ out geom;`;
       // miles — consistent with the rest of the app.
       els.planCourseSearchResults.innerHTML = results
         .map((c, i) => {
-          const mi = haversineMeters(state.loc, c) / 1609.344;
-          const dist = mi >= 0.19 ? `${mi.toFixed(mi < 10 ? 1 : 0)} mi` : `${Math.round(mi * 1760)} yd`;
+          const mi = state.loc ? haversineMeters(state.loc, c) / 1609.344 : null;
+          const dist = mi == null ? 'Name match'
+            : mi >= 0.19 ? `${mi.toFixed(mi < 10 ? 1 : 0)} mi`
+              : `${Math.round(mi * 1760)} yd`;
           return `
             <button type="button" class="prep-search-row" data-idx="${i}">
               <b>${escapeHtml(c.name)}</b>
-              <span>${dist} away · not saved</span>
+              <span>${dist}${mi == null ? '' : ' away'} · not saved</span>
             </button>`;
         })
         .join('');
@@ -13443,6 +13477,11 @@ out geom;`;
   async function pickPlannerSearchedCourse(candidate) {
     if (!candidate) return;
 
+    // A new pick while one is mapping replaces it (the input stays live so
+    // the user can search a different name immediately). Sequence-guarded:
+    // a stale mapping response can never bind.
+    const myMapSeq = ++planMapSeq;
+
     // Already saved under this exact name? Just select the profile.
     const saved = getSavedCourseMatch(candidate.name);
     if (saved) {
@@ -13458,6 +13497,7 @@ out geom;`;
     planSearchStatus(`Mapping ${escapeHtml(candidate.name)}…`);
     try {
       const elements = await fetchAutoCourseScorecard(candidate);
+      if (myMapSeq !== planMapSeq) return; // superseded by a newer pick
       const course = normalizeCourse(buildAutoCourse(candidate, elements));
       // v-fix(map-empty) v1.7.1 (James: "it told me it couldn't map a golf
       // course"): a course with ZERO mapped holes used to bind silently —
@@ -13478,6 +13518,7 @@ out geom;`;
       bindEphemeralCourse(course);
     } catch (error) {
       console.warn('Planner course mapping failed:', error);
+      if (myMapSeq !== planMapSeq) return; // superseded by a newer pick
       planSearchResults = [];
       // v-fix(map-err) v1.7.1: distinguish offline/timeouts from unmapped,
       // and KEEP the typed search term so a retry doesn't need retyping.
@@ -13565,12 +13606,20 @@ out geom;`;
         if (btn) { btn.disabled = false; btn.textContent = 'Re-map course'; }
         return;
       }
-      // preserve player-placed tees per hole
+      // Preserve user-placed tees per hole (canonical source: manual). The
+      // placed tee IS the yardage now — recompute it from the new geometry
+      // (same rule updateSavedCourseHole uses) so planHoleYardage can't
+      // fall back to the freshly imported scorecard number and silently
+      // revert the move.
       (fresh.holes || []).forEach((h, i) => {
         const old = (course.holes || [])[i];
-        if (old && old.teeSource === 'player' && old.teePoint) {
+        if (old && old.teeSource === 'manual' && old.teePoint) {
           h.teePoint = old.teePoint;
-          h.teeSource = 'player';
+          h.teeSource = 'manual';
+          if (h.teePoint && h.greenCenter) {
+            const yd = haversineMeters(h.teePoint, h.greenCenter) * M_TO_YD;
+            if (yd > 40 && yd < 900) h.yards = Math.round(yd);
+          }
         }
       });
       fresh.osmType = candidate.osmType;
@@ -15238,6 +15287,9 @@ out geom;`;
     clubSequence(totalYd) {
       return planClubSequence(totalYd);
     },
+    // Narrow write seam for Prep's explicit Move tee action. All other bridge
+    // data remains read-only.
+    updateSavedCourseHole,
     // v1.15.0 (shot plan): read-only bag snapshot so Prep can resolve a
     // club name to its stock carry + Bag-tab category color.
     clubs() {

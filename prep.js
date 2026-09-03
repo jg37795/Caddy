@@ -431,8 +431,11 @@
       planShotIdx = planShotIdx === idx ? -1 : idx;
       haptic(6);
       document.querySelectorAll('#prepStratBody .prep-plan-shot')
-        .forEach((el) => el.classList.toggle('chosen',
-          Number(el.dataset.shot) === planShotIdx));
+        .forEach((el) => {
+          const chosen = Number(el.dataset.shot) === planShotIdx;
+          el.classList.toggle('chosen', chosen);
+          el.setAttribute('aria-expanded', String(chosen));
+        });
       ensureNumberElements();
       recompute({ pulse: true });
     });
@@ -620,7 +623,7 @@
     }
   }
 
-  function renderRecommendation(calc, rec) {
+  function renderRecommendation(calc, rec, pulse = false) {
     // v1.9.0: the number block lives INSIDE the hole card now — the sweep
     // animation targets it, not a separate card.
     // v1.15.2: it lives inside the SELECTED SHOT ROW (tap-a-shot).
@@ -637,12 +640,6 @@
     $('prepRecMain').textContent = `${fmt(calc.playsLikeYd)} yd → ${clubShort(rec.main)}`;
     // v1.15.2: prepEffortTag/prepEffortWrap were dropped in the inline
     // template — the effort tag now lives in the reason line instead.
-    if (eff.tag) {
-      const r2 = $('prepReason');
-      if (r2 && eff.tag && !r2.textContent.startsWith(eff.tag))
-        r2.textContent = `${eff.tag} — ${r2.textContent}`;
-    }
-
     // Reasoning sentence — every adjustment named, in golf language.
     const bits = [];
     const hw = calc.headwindMph;
@@ -731,7 +728,7 @@
       main.classList.add('prep-pulse');
     }
     lastShownYd = calc.playsLikeYd;
-    if (arguments[2]) {
+    if (pulse) {
       card.classList.remove('sweep');
       void card.offsetWidth;
       card.classList.add('sweep');
@@ -1064,6 +1061,18 @@
       // background but is NOT the clip. No green surround.
       const STRIP_YD = 20;
       const acPts = h.pathPts.map((ll) => toXY(ll));
+    // The tee dot anchors on the path start (v1.15.0). After a player moves
+    // the tee, the stored way may still begin at the old tee-set node — walk
+    // the path to the point closest to the NEW tee and drop the head before
+    // it, or the cartoon draws a phantom tail through the old tee.
+    {
+      let bi = 0, bd = Infinity;
+      acPts.forEach((p, i) => {
+        const d2 = p.along * p.along + p.cross * p.cross;
+        if (d2 < bd) { bd = d2; bi = i; }
+      });
+      if (bi > 0) acPts.splice(0, bi);
+    }
       {
         // extend the centerline one strip-width past each end
         const first = acPts[0], second = acPts[1];
@@ -1658,18 +1667,6 @@
   // cartoon's segments.
   window.PrepHoleCatHex = CLUB_CAT_HEX;
 
-  function seqChipsHtml(names) {
-    if (!names.length) {
-      return '<div class="prep-empty">Add carry distances in the Bag tab to get a shot sequence.</div>';
-    }
-    // v1.15.3 (James): the pills color-coordinate with the map segments —
-    // same bag-category hue per club.
-    return `<div class="prep-seq-row">${names.map((n) => {
-      const hex = CLUB_CAT_HEX[clubCatOf(n)] || '#5ea8ff';
-      return `<span class="prep-seq-chip" style="color:${hex}"><i style="background:${hex}"></i>${escapeHtml(n)}</span>`;
-    }).join('')}</div>`;
-  }
-
   function green3dButtonHtml(h) {
     const g = h.greenLatLng;
     if (!g || !Number.isFinite(g.lat) || !Number.isFinite(g.lng)) {
@@ -1916,8 +1913,8 @@
       return;
     }
 
+    // Par already lives in the header chip; don't repeat it one line below.
     const metaBits = [
-      h.par ? `Par ${h.par}` : null,
       h.yards ? `${Math.round(h.yards)} yd` : null,
       h.strokeIndex ? `SI ${h.strokeIndex}` : null,
       currentBearing() ? `${compass16(currentBearing())} off the tee` : null,
@@ -1938,7 +1935,7 @@
       // bring up a satellite view of the hole, kind of like check
       // location, but it would look similar to the play tab"): the map
       // is TAPPABLE — tap opens the satellite sheet (prepHoleSatSheet).
-      body.push('<div class="prep-section-gap"><div class="prep-mini-label">Hole map</div>');
+      body.push('<div class="prep-section-gap"><div class="prep-section-head"><div class="prep-mini-label">Hole map</div><span class="prep-map-action" aria-hidden="true">Satellite ›</span></div>');
       body.push('<div class="prep-hm-wrap" id="prepHoleMapTap" role="button" tabindex="0" aria-label="Open satellite view of this hole">' + map +
         (geDeltaHole === h.number ? `<div class="prep-hm-elev">${deltaChipHtml()}</div>` : '') +
         '</div>');
@@ -1976,22 +1973,17 @@
     }
     body.push('</div>');
 
-    body.push('<div class="prep-section-gap"><div class="prep-mini-label">How to play it</div>');
-    body.push(seqChipsHtml(names));
-    body.push('</div>');
-
-    // v1.15.0 (shot plan — James: the advice "is so basic it just says
+    // v1.15.0 (shot plan — James: "the advice "is so basic it just says
     // lay up"): the plan walks the ACTUAL shot sequence and gives each
     // shot a job — target number, plays-like, and the WHY (hazards near
     // the landing zone, dogleg shape, green depth, conditions). The tee
     // box and approach each get their own reasoning.
-    let teeCalc = null;
+    // No usable bag → no section at all; an empty heading helps nobody.
     const effYd = h.yards ? Math.round(h.yards) : 0;
     const haz = Array.isArray(h.hazards) ? h.hazards : [];
     const hzAlong = (hz) => Number.isFinite(hz.along)
       ? hz.along : hazardAlongYd(hz.sub);
-    if (effYd) {
-      teeCalc = solve(effYd);
+    if (effYd && names.length) {
       const seq = planSequenceFor(effYd, names);
       const landingNotes = (fromYd, toYd) => {
         // hazards whose along sits within the landing window
@@ -2079,7 +2071,7 @@
         // each plan row is a BUTTON. Tapping it loads that shot into the
         // inline number (expanded in place).
         lines.push(
-          `<button type="button" class="prep-plan-shot${planShotIdx === idx ? ' chosen' : ''}" data-shot="${idx}">` +
+          `<button type="button" class="prep-plan-shot${planShotIdx === idx ? ' chosen' : ''}" data-shot="${idx}" aria-expanded="${planShotIdx === idx}">` +
           `<span class="prep-plan-club">${escapeHtml(clubShort(shotName))}</span>` +
           `<span class="prep-plan-num">${fmt(segYd)} yd</span>` +
           `<span class="prep-plan-sub">${windTxt}${note ? ' · ' + escapeHtml(note) : ''}</span>` +
@@ -2090,18 +2082,9 @@
       // v1.16.1 (James: "I'm seeing duplicates of the clubs"): the tee-box
       // fold-in pushed the plan TWICE — once at the original push (line
       // above) and again after mutating lines[0]. Push once.
-      if (teeCalc && lines.length) {
-        const teeRec = api.recommendClub(teeCalc.playsLikeYd);
-        const delta = Math.round(teeCalc.playsLikeYd - effYd);
-        const why = Math.abs(delta) >= 2
-          ? `${delta >= 0 ? '+' : ''}${delta} yd — ${clubShort(teeRec.main)}`
-          : `${clubShort(teeRec.main)} — plays true`;
-        const first = lines[0];
-        lines[0] = first.replace(
-          /(<span class="prep-plan-sub">)[^<]*(<\/span>)/,
-          `$1${escapeHtml(why)}$2`);
-      }
+      body.push('<div class="prep-section-gap"><div class="prep-mini-label">How to play it</div>');
       body.push(`<div class="prep-plan">${lines.join('')}</div>`);
+      body.push('</div>');
     }
 
     // v1.17.0 (James: "that green advice box… it's so generic"): a real
@@ -2513,6 +2496,11 @@
     if (!info) return;
     boundHole = info;
     prepSearching = false;
+    // Expanded shot detail belongs to the hole it was opened on. A new hole
+    // always starts at the calm overview instead of inheriting another hole's
+    // row index and unexpectedly opening controls.
+    planShotIdx = -1;
+    _planShotYds = [];
     shot.greenPoint = 'middle';
     persist();
     // v-fix(tap-freeze) v1.7.3 (James: "when I tap one of the holes the app
@@ -2528,6 +2516,47 @@
       recompute({ pulse: true });
     }, 0);
   }
+
+  // holeSat's in-sheet Move tee saves through app.js (CaddyPrep bridge),
+  // then asks the already-open Prep brief to refresh. Patch the read-only
+  // snapshot in place so yardage/bearing/map/elevation all update immediately
+  // without forcing the user to back out and reopen the hole.
+  window.__prepRebind = (number, patch = {}) => {
+    if (!boundHole || Number(number) !== Number(boundHole.number)) return false;
+    if (patch.teePoint && Number.isFinite(patch.teePoint.lat) &&
+        Number.isFinite(patch.teePoint.lng) && boundHole.greenLatLng) {
+      const tee = { lat: patch.teePoint.lat, lng: patch.teePoint.lng };
+      boundHole.teeLatLng = tee;
+      // Same haversine app.js uses when persisting, so the live number
+      // matches what back-and-reopen will show.
+      const ydBetween = (a, b) => Math.round(metersApart(a, b) / 0.9144);
+      boundHole.yards = ydBetween(tee, boundHole.greenLatLng);
+      boundHole.bearing = (() => {
+        const a1 = tee.lat * Math.PI / 180;
+        const a2 = boundHole.greenLatLng.lat * Math.PI / 180;
+        const dl = (boundHole.greenLatLng.lng - tee.lng) * Math.PI / 180;
+        return norm360(Math.atan2(Math.sin(dl) * Math.cos(a2),
+          Math.cos(a1) * Math.sin(a2) -
+          Math.sin(a1) * Math.cos(a2) * Math.cos(dl)) * 180 / Math.PI);
+      })();
+      const green = boundHole.green || {};
+      const ydTo = (p) => p && Number.isFinite(p.lat)
+        ? Math.round(metersApart(tee, p) / 0.9144) : null;
+      green.center = ydTo(boundHole.greenLatLng);
+      if (green.center != null) {
+        const half = Number.isFinite(green.depth) ? green.depth / 2 : 0;
+        green.front = Math.round(green.center - half);
+        green.back = Math.round(green.center + half);
+      }
+      boundHole.green = green;
+    }
+    planShotIdx = -1;
+    _planShotYds = [];
+    _solveMemo.clear();
+    renderStrategy();
+    fetchGreenDelta();
+    return true;
+  };
 
   function unbindHoleIfGone() {
     const sel = document.getElementById('planCourseSelect');
