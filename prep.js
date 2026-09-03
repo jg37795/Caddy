@@ -921,13 +921,27 @@
     if (!hole || !hole.greenLatLng) return null;
     try {
       if (typeof localStorage === 'undefined') return null;
+      // v1.21.7 (Grok F4): the store now holds ONE shape — a MAP of briefs
+      // keyed "lat,lng" (greenBriefCore's shape; greenmap writes it too).
+      // Legacy single-object entries are read and left alone.
       const raw = localStorage.getItem(GREEN_BRIEF_KEY);
       if (!raw) return null;
-      const brief = JSON.parse(raw);
-      if (!brief || !Number.isFinite(brief.lat) || !Number.isFinite(brief.lng))
-        return null;
-      if (metersApart(hole.greenLatLng, brief) > GREEN_BRIEF_MATCH_M) return null;
-      return brief;
+      const parsed = JSON.parse(raw);
+      let best = null, bestD = Infinity;
+      const consider = (brief) => {
+        if (!brief || !Number.isFinite(brief.lat) ||
+            !Number.isFinite(brief.lng)) return;
+        const d = metersApart(hole.greenLatLng, brief);
+        if (d < bestD) { bestD = d; best = brief; }
+      };
+      if (parsed && typeof parsed === 'object' && parsed.zones == null &&
+          parsed.landing == null && !Number.isFinite(parsed.lat)) {
+        Object.values(parsed).forEach(consider);   // map shape
+      } else {
+        consider(parsed);                          // legacy single brief
+      }
+      if (!best || bestD > GREEN_BRIEF_MATCH_M) return null;
+      return best;
     } catch {
       return null;
     }

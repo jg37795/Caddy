@@ -64,6 +64,12 @@
         if (h && h.teePoint && Number.isFinite(h.teePoint.lat)) {
           hole.teePoint = h.teePoint;
         }
+        // v1.21.7 (Grok F9 follow-through): same freshness for the green
+        // ring — a remap that landed a better outline must win over the
+        // caller's snapshot on every sheet open.
+        if (h && Array.isArray(h.greenRingPts) && h.greenRingPts.length >= 3) {
+          hole.greenRingPts = h.greenRingPts;
+        }
       } catch (e) { /* best-effort fresh tee */ }
     }
 
@@ -193,9 +199,21 @@
       try {
         const store = JSON.parse(
           localStorage.getItem(OUTLINE_KEY) || '{}');
-        const key = `${boot.lat.toFixed(4)},${boot.lng.toFixed(4)}`;
-        const pts = store[key] && store[key].pts;
-        if (Array.isArray(pts)) ring = pts;
+        // v1.21.7 (Grok F9): trace store contract is {lat,lng,vertices} —
+        // keyed at 3 decimals (~111 m cells). The old lookup demanded a
+        // 4-decimal "lat,lng" key and a .pts field, so a trace James drew
+        // NEVER appeared on the sheet. Reuse greenmap's 100 m nearest scan.
+        let best = null, bestD = Infinity;
+        for (const k of Object.keys(store)) {
+          const o = store[k];
+          if (!o || !Array.isArray(o.vertices) || o.vertices.length < 3)
+            continue;
+          const d = Math.hypot(
+            (o.lat - boot.lat) * 111320,
+            (o.lng - boot.lng) * 111320 * Math.cos(boot.lat * Math.PI / 180));
+          if (d < bestD) { bestD = d; best = o; }
+        }
+        if (best && bestD < 100) ring = best.vertices;
       } catch (e) { /* no traced outline */ }
     }
     if (ring && ring.length >= 3) {

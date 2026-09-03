@@ -139,9 +139,11 @@
       const gx = field.gx[i], gy = field.gy[i];
       const g = Math.hypot(gx, gy);
       if (g < 1e-6) return deg || 0;
-      // grid +y is north: bearing = atan2(east, north)
-      const brg = Math.atan2(gx, gy) * 180 / Math.PI;
-      return Math.round((brg + 360) % 360);
+      // v1.21.7 (Grok F16): same sign convention as the 3D arrows —
+      // GreenMapCore.fallBearingDeg (downhill in (east, north) = (-gx, +gy);
+      // this file's grid frame has +y north, hence the +gy). The old
+      // atan2(gx, gy) here was 180°-flipped from the 3D view.
+      return Math.round(GreenMapCore.fallBearingDeg(gx, -gy));
     };
     const summarize = (ballM) => {
       if (!ballM) return { breakIn: 0, dirDeg: 0 };

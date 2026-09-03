@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.6'; // ACCESSIBILITY + HONEST MOVE-TEE (independent review): expanded shot is a role=button div (no nested buttons) with aria-pressed lie/shape toggles and Enter/Space support; satellite sheet is a labeled modal dialog with Escape-close and focus restore; Move-tee armed/saved states are announced, failures say "Tee not saved — save this course first"; 3D Green link and cartoon tee dot follow the moved tee.
+const CACHE_VERSION = 'v1.21.7'; // 3D GREEN FLOW FIX (Grok contract audit): arrows render again in 3D green view (TDZ fix); auto-detect actually runs (namespace init + fresh-grid features); one green-brief store shape (Prep advice no longer flips after 3D visits); OSM query uncapped (nearest-green really nearest); hole arrows survive view switches; badge offers every available outline source; trace fallback opens Check location instead of a fake ellipse; 3D defaults on; saved course green ring + traces shared with the sheet.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

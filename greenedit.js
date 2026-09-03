@@ -299,6 +299,10 @@
       const qs2 = new URLSearchParams(location.search);
       qs2.set('lat', clat.toFixed(6));
       qs2.set('lng', clng.toFixed(6));
+      // v1.21.7 (Grok F11): a fresh trace is ground truth — never reload
+      // with src=osm (or src=auto) still pinned, or the new trace loses to
+      // the old OSM ring and the save looks ignored.
+      if (qs2.get('src') === 'osm') qs2.delete('src');
       location.replace('?r=' + Date.now() + '&' + qs2.toString());
     });
 

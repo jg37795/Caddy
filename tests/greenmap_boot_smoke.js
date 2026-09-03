@@ -14,6 +14,11 @@ function el(id) {
     getContext: () => ({
       fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {},
       fill() {}, stroke() {}, arc() {}, ellipse() {},
+      quadraticCurveTo() {}, bezierCurveTo() {},
+      // v1.21.7: the tool boots straight into 3D now, so the smoke's canvas
+      // stub needs the save/restore pair render3D's dressing uses.
+      save() {}, restore() {},
+      createRadialGradient: () => ({ addColorStop() {} }),
       createLinearGradient: () => ({ addColorStop() {} }),
       createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
       putImageData() {}, setLineDash() {}, drawImage() {},

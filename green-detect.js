@@ -10,6 +10,11 @@
    "detected outline" — never presented as surveyed data.
    Exposes window.GreenDetect.detect(data) -> {poly, confidence} | null
    ========================================================================== */
+// v1.21.7 (Grok F2): the module only ever assigned .detect on an assumed
+// global — on first load window.GreenDetect was undefined, the assignment
+// threw, and auto-detection never ran (ladder silently became
+// trace → OSM → ellipse). Initialize the namespace first.
+window.GreenDetect = window.GreenDetect || {};
 window.GreenDetect.detect = function (data) {
   const g = data && data.grid, W = g && g.W | 0, H = g && g.H | 0, cs = g && g.cellSizeM, N = W * H;
   if (!g || !N || !g.z) { console.log("EXIT guard", !!g, N, g && !!g.z); return null; }

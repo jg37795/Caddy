@@ -1274,7 +1274,11 @@
     pin: null,               // local metre coords of pin marker
     ball: null,              // local metre coords for putt preview
     showPutt: false,
-    viewMode: '2d',          // 2d | 3d | hole
+    // v1.21.7 (Grok F12): the button is labelled "⛳ 3D Green" — landing on a
+    // 2D heatmap was the first confusion. 3D is the default; 2D stays one
+    // tap away. ?view=2d still forces the old behaviour for deep links.
+    viewMode: (qs.get('view') === '2d' || qs.get('view') === '3d' ||
+      qs.get('view') === 'hole') ? qs.get('view') : '3d',
     stimp: (() => {          // green speed for the putt preview (persisted)
       try {
         const v = parseInt(localStorage.getItem('gm-stimp'), 10);
@@ -1334,7 +1338,7 @@
       const q =
         `[out:json][timeout:15];` +
         `(way["golf"="green"](around:120,${lat},${lng}););` +
-        `out geom 1;`;
+        `out geom;`;
       const res = await fetch(
         'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q),
         { signal });
@@ -1385,6 +1389,24 @@
     const status = document.getElementById('gm-status');
     status.textContent = 'Fetching USGS 3DEP elevation…';
     setLoading('Fetching slope data');
+    // v1.21.7 (Grok F14): when Prep launches with course+hole, the course
+    // profile already carries a surveyed green ring (greenRingPts) — the
+    // SAME outline the cartoon and satellite sheet draw. Read it and treat
+    // it as an OSM-grade rung so the 3D tool shows the same green instead
+    // of re-querying (limited) Overpass or falling to detect/ellipse.
+    let savedRingLL = null;
+    try {
+      const profiles = JSON.parse(
+        localStorage.getItem('caddy:courseProfiles:v1') || '[]');
+      const courseId = qs.get('course');
+      const holeNum = parseInt(qs.get('hole'), 10);
+      const c = courseId
+        ? profiles.find((p) => p && p.id === courseId) : null;
+      const hz = c && Array.isArray(c.holes) && holeNum >= 1 &&
+        holeNum <= c.holes.length ? c.holes[holeNum - 1] : null;
+      if (hz && Array.isArray(hz.greenRingPts) && hz.greenRingPts.length >= 3)
+        savedRingLL = hz.greenRingPts;
+    } catch (e) { /* no profiles */ }
     const halfLat = (SPAN_M / 2) / 111320;
     const halfLng = (SPAN_M / 2) / (111320 * Math.cos(state.lat * Math.PI / 180));
     const bbox = [state.lng - halfLng, state.lat - halfLat,
@@ -1419,8 +1441,13 @@
 
     // v1.6.1 (AUTO-DETECT features): per-cell features for GreenDetect —
     // the same deterministic pipeline the calibration harness uses.
+    // v1.21.7 (Grok F3): this block used to read state.grid BEFORE the
+    // `state.grid = elev` assignment below — on first boot state.grid was
+    // null, so features were skipped and the detect rung could never fire
+    // (and then threw on undefined slope/tex fields). Read the FRESH grid
+    // (elev) directly; state ownership doesn't change.
     {
-      const g2 = state.grid ? state.grid.grid : null;
+      const g2 = elev ? elev.grid : null;
       if (g2) {
         const W = elev.W, H = elev.H, cs = elev.cellSizeM;
         const N2 = W * H;
@@ -1489,7 +1516,45 @@
                   }
                 }
               // Satellite features landed — if the first detection ran
-              // LiDAR-only and produced no outline, retry with imagery.
+              // LiDAR-only and produced no outline, retry the DETECT RUNG
+              // with imagery (v1.21.7, Grok F18): the old code only called
+              // render(), which could never upgrade an ellipse to a
+              // detected outline. Re-run detection and swap the outline
+              // ONLY when the current source is the ellipse fallback
+              // (never steal a trace/OSM/already-detected green).
+              if (state.polySource === 'ellipse' &&
+                  window.GreenDetect && state.grid && state.__r4Slope) {
+                try {
+                  const retry = window.GreenDetect.detect({
+                    grid: {
+                      W: elev.W, H: elev.H, cellSizeM: elev.cellSizeM,
+                      z: state.grid.grid, slope: state.__r4Slope,
+                      smooth3: state.__r4Smooth3, tex5: state.__r4Tex5,
+                      exg: state.__r4Exg, bright: state.__r4Bright
+                    },
+                    satSample: state.__r4SatSample || (() => null)
+                  });
+                  if (retry && retry.confidence >= 0.6 && retry.poly) {
+                    const m2 = GreenMapCore.polyMask(retry.poly,
+                      elev.W, elev.H, elev.cellSizeM);
+                    let cells2 = 0;
+                    for (let j = 0; j < m2.length; j++) if (m2[j]) cells2++;
+                    if (cells2 >= 30) {
+                      state.polyLocal = retry.poly;
+                      state.polySource = 'detected';
+                      state.mask = m2;
+                      state.datasets.green.mask = m2;
+                      state.datasets.green.polyLocal = retry.poly;
+                      state.datasets.green.polySource = 'detected';
+                      buildScene();
+                      fitView();
+                      buildHeatImage();
+                      setLocLabel('detected');
+                      console.log('[greenmap] detect upgraded after imagery');
+                    }
+                  }
+                } catch (e2) { /* retry is best-effort */ }
+              }
               if (state.polySource !== 'detected' &&
                   state.polySource !== 'traced' && state.polySource !== 'osm')
                 render();
@@ -1528,15 +1593,20 @@
       try {
         const store = JSON.parse(
           localStorage.getItem('caddy:greenOutline:v1') || '{}');
+        // v1.21.7 (Grok F21): pick the NEAREST trace within 100 m — the old
+        // first-hit scan could load an older outline from a nearby key.
+        let best = null, bestD = Infinity;
         for (const k of Object.keys(store)) {
           const o = store[k];
           if (!o || !Array.isArray(o.vertices) || o.vertices.length < 3)
             continue;
-          if (Math.hypot(
-                (o.lat - state.lat) * 111320,
-                (o.lng - state.lng) * 111320 * Math.cos(
-                  state.lat * Math.PI / 180)) < 100) return o;
+          const d = Math.hypot(
+            (o.lat - state.lat) * 111320,
+            (o.lng - state.lng) * 111320 * Math.cos(
+              state.lat * Math.PI / 180));
+          if (d < bestD) { bestD = d; best = o; }
         }
+        return bestD < 100 ? best : null;
       } catch (e) { /* no store */ }
       return null;
     })();
@@ -1548,9 +1618,19 @@
     // shows, gated at confidence >= 0.6, with the badge reading
     // "⚠ detected outline" so it never masquerades as surveyed data.
     // Trace remains ground truth; ?src=auto|osm|traced forces a rung.
-    const useTrace = tracedHit && srcPref !== 'osm' && srcPref !== 'auto';
+    // v1.21.7 (Grok F13/F22): surveyed OSM data beats a derived blob. When
+    // OSM has a green, detection only runs as a FALLBACK (and src=auto —
+    // which nothing writes — is retired as a trace-killer).
+    const useTrace = tracedHit && srcPref !== 'osm';
+    // v1.21.7 (Grok F14): the course's saved green ring counts as the
+    // surveyed (OSM-grade) rung — Prep/cartoon/sheet and 3D now agree.
+    const courseRingLL = (!savedRingLL || srcPref === 'traced') ? null
+      : savedRingLL.map((p) =>
+        Array.isArray(p) ? [p[0], p[1]] : [p.lng, p.lat]);
+    const mappedRingLL = polyLL || courseRingLL;
     let detectRes = null;
-    if (!useTrace && window.GreenDetect && state.grid) {
+    const osmRungAvailable = !!mappedRingLL && srcPref !== 'traced';
+    if (!useTrace && !osmRungAvailable && window.GreenDetect && state.grid) {
       stageDetect();
       try {
         detectRes = window.GreenDetect.detect({
@@ -1569,54 +1649,64 @@
     // near zero — show an honest "couldn't map this green" state with a
     // direct path to the editor, instead of rendering an empty square.
     stageShape();
-    const useDetect = !useTrace && detectRes && detectRes.confidence >= 0.6 &&
-      srcPref !== 'osm' && srcPref !== 'traced';
-    const useOsm = polyLL && !useTrace && !useDetect && srcPref !== 'traced';
-    state.__altOsm = !!(tracedHit && polyLL);   // both available → badge offers switch
-    state.__altTrace = state.__altOsm;
-    if (useTrace) {
-      const mLat = 111320;
-      const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);
-      state.polyLocal = tracedHit.vertices.map(([la, ln]) => [
-        (ln - state.lng) * mLng, (la - state.lat) * mLat ]);
-      state.polySource = 'traced';
-      mask = GreenMapCore.polyMask(state.polyLocal,
-        elev.W, elev.H, elev.cellSizeM);
-    } else if (useDetect) {
-      state.polyLocal = detectRes.poly;
-      state.polySource = 'detected';
-      mask = GreenMapCore.polyMask(detectRes.poly,
-        elev.W, elev.H, elev.cellSizeM);
-    } else if (useOsm) {
-      const polyLocal = polyLL.map(([lon, la]) => [
-        (lon - state.lng) * 111320 * Math.cos(state.lat * Math.PI / 180),
-        (la - state.lat) * 111320
-      ]);
-      state.polyLocal = polyLocal;
-      state.polySource = 'osm';
-      mask = GreenMapCore.polyMask(polyLocal, elev.W, elev.H, elev.cellSizeM);
-    } else {
-      // v1.6.1 (NOTHING guard): no trace / no detection / no OSM — the
-      // ellipse fallback used to render silently. Now: keep the ellipse
-      // (it IS the approximation the tool needs to function) but the
-      // status + badge say so LOUDLY, and the status offers the editor.
-      const rM = SPAN_M * 0.36;
-      const poly = [];
-      for (let a = 0; a < 48; a++) {
-        const th = a / 48 * Math.PI * 2;
-        poly.push([Math.cos(th) * rM, Math.sin(th) * rM]);
+    // Detection only wins when it is the ONLY mapped-source rung available;
+    // otherwise OSM (surveyed) keeps priority.
+    const useDetect = !useTrace && !mappedRingLL && detectRes &&
+      detectRes.confidence >= 0.6 && srcPref !== 'traced';
+    const useOsm = mappedRingLL && !useTrace && !useDetect &&
+      srcPref !== 'traced';
+    // v1.21.7 (Grok F17): rungs are TRIED IN ORDER and a tiny degenerate
+    // mask (<30 cells) DEMOTES to the next rung instead of aborting the
+    // whole load — an off-centre pin or a collapsed detection used to kill
+    // loads that OSM or a trace would have saved. Only when EVERY rung
+    // fails does the honest "couldn't map a green" state appear.
+    const mLat = 111320;
+    const mLng = 111320 * Math.cos(state.lat * Math.PI / 180);
+    const rungs = [];
+    if (useTrace) rungs.push('traced');
+    if (useOsm) rungs.push('osm');
+    if (useDetect) rungs.push('detected');
+    rungs.push('ellipse');   // last resort (kept honest by the badge)
+    let chosen = null;
+    const acceptedSrcs = new Set();
+    for (const rung of rungs) {
+      let poly = null;
+      if (rung === 'traced') {
+        poly = tracedHit.vertices.map(([la, ln]) =>
+          [(ln - state.lng) * mLng, (la - state.lat) * mLat]);
+      } else if (rung === 'osm') {
+        poly = mappedRingLL.map(([lon, la]) => [
+          (lon - state.lng) * mLng, (la - state.lat) * mLat]);
+      } else if (rung === 'detected') {
+        poly = detectRes.poly;
+      } else {
+        const rM = SPAN_M * 0.36;
+        poly = [];
+        for (let a = 0; a < 48; a++) {
+          const th = a / 48 * Math.PI * 2;
+          poly.push([Math.cos(th) * rM, Math.sin(th) * rM]);
+        }
       }
-      state.polyLocal = poly;
-      state.polySource = 'ellipse';
-      mask = GreenMapCore.polyMask(state.polyLocal,
-        elev.W, elev.H, elev.cellSizeM);
+      const m = GreenMapCore.polyMask(poly, elev.W, elev.H, elev.cellSizeM);
+      let cells = 0;
+      for (let i = 0; i < m.length; i++) if (m[i]) cells++;
+      if (cells < 30) {
+        console.warn('[greenmap] rung demoted (tiny mask):', rung, cells);
+        continue;
+      }
+      chosen = { poly, src: rung, mask: m };
+      acceptedSrcs.add(rung);
+      break;
     }
-    // v1.6.1 (NOTHING guard, part 2): a mask with almost no cells means
-    // the polygon is degenerate (off-green pin, detection collapsed).
-    // Render nothing and tell the user exactly what to do instead.
-    let maskCells = 0;
-    for (let i = 0; i < mask.length; i++) if (mask[i]) maskCells++;
-    if (maskCells < 30) {
+    // v1.21.7 (Grok F8): alternatives computed from ACCEPTED rungs only —
+    // the badge never offers a source whose mask collapsed.
+    state.__altOsm = acceptedSrcs.has('osm') &&
+      chosen && chosen.src !== 'osm';
+    state.__altTrace = acceptedSrcs.has('traced') &&
+      chosen && chosen.src !== 'traced';
+    state.__altDetect = acceptedSrcs.has('detected') &&
+      chosen && chosen.src !== 'detected';
+    if (!chosen) {
       status.textContent = 'Couldn\'t map a green here — the pin may be off the green.';
       setLoading(false);
       setLoading(true);
@@ -1632,6 +1722,9 @@
       }, 1600);
       return;
     }
+    state.polyLocal = chosen.poly;
+    state.polySource = chosen.src;
+    mask = chosen.mask;
     state.mask = mask;
     state.field = field;
     state.pin = [0, 0]; // pin at green centre
@@ -1811,7 +1904,23 @@
           { id: 'back', breakIn: back.breakIn, dirDeg: back.dirDeg },
         ],
       };
-      localStorage.setItem('caddy:greenBrief:v1', JSON.stringify(brief));
+      // v1.21.7 (Grok F4): ONE on-disk shape — a MAP keyed "lat,lng", the
+      // same shape greenBriefCore.js writes. The old single-object write
+      // destroyed GreenBriefCore's map (and vice versa) on the same key,
+      // flipping Prep's feed advice whenever the 3D tool ran.
+      const KEY = 'caddy:greenBrief:v1';
+      let map = {};
+      try {
+        const raw = localStorage.getItem(KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (parsed && !Array.isArray(parsed) &&
+            typeof parsed === 'object' && parsed.zones == null &&
+            parsed.landing == null) {
+          map = parsed; // already the map shape
+        }
+      } catch { map = {}; }
+      map[`${state.lat.toFixed(4)},${state.lng.toFixed(4)}`] = brief;
+      localStorage.setItem(KEY, JSON.stringify(map));
     } catch (e) { /* quota / private mode / headless — non-fatal */ }
   }
 
@@ -2623,9 +2732,12 @@
     if (isHole) {
       buildHoleScene();
       state.mesh = ds.mesh;
-      // v1.3.1: rebuildHoleScene already rebuilt arrows via rebuildMeshArrows
-      // (ds.arrows mirrors state.meshArrows — keep them in sync).
-      ds.arrows = state.meshArrows;
+      // v1.21.7 (Grok F6): buildHoleScene writes ds.arrows = arr (the hole
+      // corridor's own arrows). The old line overwrote that with
+      // state.meshArrows — the GREEN frame's arrows from the previous view —
+      // so the first Exag/Slope/Elev change floated or emptied hole arrows
+      // and __arrowsStale never fired. Sync the OTHER way.
+      state.meshArrows = ds.arrows || [];
       return;
     }
     // Green mesh: 2× bilinear refinement (128-class internal grid when the
@@ -4041,12 +4153,20 @@
     // handler with fresh arrows, so the first frame floated and the slider
     // "snapped" them. Rebuild arrows right here when the mesh was rebuilt
     // after them (cheap: ~90 arrows), or draw nothing — never stale floats.
-    if (state.layer !== 'shading') {
+    // v1.21.7 (Grok F15): during an exag drag the mesh lags the slider —
+    // skip the dressing entirely for those preview frames instead of
+    // floating it off the surface.
+    if (state.layer !== 'shading' && !state.__exagPreview) {
       if (state.__arrowsStale) {
         state.__arrowsStale = false;
         rebuildMeshArrows();
       }
       const dpr = window.devicePixelRatio || 1;
+      // v1.21.7 (Grok F1): the overlay half-length `len` is used by the
+      // silhouette gate BELOW (insetM). It was declared 30 lines later —
+      // strict-mode TDZ threw on every green-view arrow, killing the whole
+      // loop (arrows never rendered in 3D green view). Hoist it.
+      const len = 9 * dpr;
     ctx.lineCap = 'round';
     for (const a of state.meshArrows) {
       // v1.1.3 (18Birdies look): arrows are UNIFORM screen-space dashes.
@@ -4117,7 +4237,6 @@
       if ((pMid && occ(pMid)) || (p1 && occ(p1)) || (p2 && occ(p2))) continue;
       // Uniform screen-space arrow along the horizontal downhill direction.
       const ang = Math.atan2(pH[1] - pC[1], pH[0] - pC[0]);
-      const len = 9 * dpr;
       const ax = pC[0], ay = pC[1];
       const bx = ax + Math.cos(ang) * len, by = ay + Math.sin(ang) * len;
       const cx0 = ax - Math.cos(ang) * len, cy0 = ay - Math.sin(ang) * len;
@@ -4891,9 +5010,16 @@
       state.v3.exag = parseFloat(exagEl.value);
       document.getElementById('gm-exag-val').textContent =
         state.v3.exag + '×';
+      // v1.21.7 (Grok F15): DURING the drag the mesh is still the old-exag
+      // mesh while walls/labels/arrows sample the live exag — dressing
+      // floated off the surface until the 140 ms rebuild. Mid-drag frames
+      // skip the floating dressing (arrows/putt) entirely; the settled
+      // rebuild below repaints everything at the new exag.
+      state.__exagPreview = true;
       if (state.viewMode === '3d' || state.viewMode === 'hole') render();
       clearTimeout(exagDebounce);
       exagDebounce = setTimeout(() => {
+        state.__exagPreview = false;
         buildScene();
         render();
       }, 140);
@@ -5013,15 +5139,41 @@
         location.replace('?r=' + Date.now() + '&' + qs2.toString());
       };
     } else if (polySource === 'detected') {
-      // v1.6.0: a detected outline is always overridable — trace or OSM.
-      el.textContent += ' · tap to trace the true outline';
+      // v1.6.0: a detected outline is always overridable — OSM first when
+      // it exists (surveyed beats derived), else start a trace.
+      // v1.21.7 (Grok F7): the old handler force-set src=traced, which on a
+      // reload with no saved trace BLOCKED the OSM rung and fell to a fake
+      // ellipse instead of opening Check location.
+      if (state.__altOsm) {
+        el.textContent += ' · tap to switch to OSM';
+        el.style.cursor = 'pointer';
+        el.onclick = () => {
+          const qs2 = new URLSearchParams(location.search);
+          qs2.set('src', 'osm');
+          location.replace('?r=' + Date.now() + '&' + qs2.toString());
+        };
+      } else {
+        el.textContent += ' · tap to trace the true outline';
+        el.style.cursor = 'pointer';
+        el.onclick = () => {
+          const qs2 = new URLSearchParams(location.search);
+          // Launch the editor in trace mode (armtee style: ?trace=1 handled
+          // by greenedit) instead of a doomed src=traced reload.
+          const qs3 = new URLSearchParams({
+            lat: state.lat.toFixed(6), lng: state.lng.toFixed(6),
+            trace: '1' });
+          location.href = 'greenmap.html?' + qs3.toString();
+        };
+      }
+    } else if (polySource === 'osm' && state.__altTrace) {
+      el.textContent += ' · tap to switch to your trace';
       el.style.cursor = 'pointer';
       el.onclick = () => {
         const qs2 = new URLSearchParams(location.search);
         qs2.set('src', 'traced');
         location.replace('?r=' + Date.now() + '&' + qs2.toString());
       };
-    } else if (polySource === 'osm' && state.__altTrace) {
+    } else if (polySource === 'ellipse' && state.__altTrace) {
       el.textContent += ' · tap to switch to your trace';
       el.style.cursor = 'pointer';
       el.onclick = () => {
@@ -5082,5 +5234,22 @@
      ====================================================================== */
   wireChrome();
   wireLocationTools();
+  // v1.21.7 (Grok F12): ?view=3d is the default. setViewModeInternal is
+  // scoped inside wireChrome, so the boot-time UI sync is done inline:
+  // dock buttons, exag slider and texture group all agree with the
+  // initial view before the first load (was: 2D active while the state
+  // said 3D — the camera stayed 2D until the first manual view tap).
+  {
+    document.querySelectorAll('.gm-view-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.view === state.viewMode));
+    const ex = document.getElementById('gm-exag-wrap');
+    if (ex) ex.style.display =
+      state.viewMode === '2d' ? 'none' : 'inline-flex';
+    const tex = document.getElementById('gm-tex-group');
+    if (tex) tex.style.display =
+      state.viewMode === 'hole' ? '' : 'none';
+    // Camera fit happens in loadGreen() (fitView) / setViewMode paths;
+    // frameCameraForView is scoped elsewhere — do NOT touch it at boot.
+  }
   loadGreen();
 })();

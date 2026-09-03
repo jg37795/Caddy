@@ -89,6 +89,13 @@
         '&lng=' + g.lng.toFixed(6);
       if (g.tee) url += '&teelat=' + g.tee.lat.toFixed(6) +
         '&teelng=' + g.tee.lng.toFixed(6);
+      // v1.21.7 (Grok F10): carry course+hole so Check location's
+      // "Load this green" can persist a manual tee — the same contract the
+      // Prep and satellite-sheet launches use. Without these the editor
+      // could not remember tee placements made from a Round launch.
+      const courseId = course && course.id ? String(course.id) : null;
+      if (courseId) url += '&course=' + encodeURIComponent(courseId) +
+        '&hole=' + g.hole;
       // Same-tab navigation (not window.open) so the tool's ‹ Back returns
       // straight to the Play map on the phone.
       location.href = url;
