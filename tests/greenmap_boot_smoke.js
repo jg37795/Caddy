@@ -77,13 +77,15 @@ global.document = {
       return ['shading', 'arrows', 'both'].map(l => {
         const e = el('layer-' + l); e.dataset.layer = l; return e; });
     if (sel === '.gm-view-btn')
-      return ['2d', '3d', 'hole'].map(v => {
+      return ['3d', 'hole'].map(v => {
         const e = el('view-' + v); e.dataset.view = v; return e; });
     if (sel === '#gm-ramplabels span') return [el('s0'), el('s1'), el('s2')];
     return [];
   },
   querySelector: () => { const e = el('layer-both'); e.dataset.layer = 'both'; return e; },
-  createElement: () => el('created')
+  createElement: () => el('created'),
+  addEventListener() {},
+  documentElement: { style: { setProperty() {} } }
 };
 global.location = { search: "" };
 global.innerWidth = 800; global.innerHeight = 600;
@@ -117,9 +119,8 @@ setTimeout(async () => {
     check('hole status set', /Whole-hole|Fetching/.test(els['gm-status'].textContent) ||
       els['gm-status'].textContent.length > 0, els['gm-status'].textContent);
 
-    // Back to 2D and 3D — must not throw.
-    await handlers['view-2d:click'][0]();
-    await handlers['view-3d:click'][0]();
+    // 3D toggle — must not throw. (2D was removed in v1.21.8.)
+    if (handlers['view-3d:click']) await handlers['view-3d:click'][0]();
     // Exaggeration slider input.
     els['gm-exag'].value = '10';
     await handlers['gm-exag:input'][0].call(els['gm-exag']);

@@ -1274,18 +1274,20 @@
     pin: null,               // local metre coords of pin marker
     ball: null,              // local metre coords for putt preview
     showPutt: false,
-    // v1.21.7 (Grok F12): the button is labelled "⛳ 3D Green" — landing on a
-    // 2D heatmap was the first confusion. 3D is the default; 2D stays one
-    // tap away. ?view=2d still forces the old behaviour for deep links.
-    viewMode: (qs.get('view') === '2d' || qs.get('view') === '3d' ||
-      qs.get('view') === 'hole') ? qs.get('view') : '3d',
+    // v1.21.8: 3D + Hole only (2D removed). ?view=2d deep-links land on 3D.
+    viewMode: (qs.get('view') === 'hole') ? 'hole'
+      : '3d',
     stimp: (() => {          // green speed for the putt preview (persisted)
       try {
         const v = parseInt(localStorage.getItem('gm-stimp'), 10);
         return [8, 10, 12].includes(v) ? v : 10;
       } catch (e) { return 10; }
     })(),
-    v3: { yaw: 0, pitch: 35, dist: 62, exag: 8 },
+    // v1.21.8: 1× exaggeration + near-vertical (top-down) camera on first
+    // load. pitch 88 ≈ straight down (makeCam clamps just shy of 90°);
+    // dist 40 fills a typical green in the inset canvas. Orbit/pinch still
+    // work (pitch clamp 22..88).
+    v3: { yaw: 0, pitch: 88, dist: 40, exag: 1 },
     mesh: null,              // built 3D mesh (per grid load / exag change)
     meshArrows: [],          // subsampled downhill arrows on the surface
     // Precision bookkeeping
@@ -1610,27 +1612,29 @@
       } catch (e) { /* no store */ }
       return null;
     })();
-    // v1.2.5 (source choice): ?src=osm|traced overrides the default order
-    // (trace first) — set by tapping the loc badge when both exist.
+    // v1.2.5 (source choice): ?src=osm|traced|auto overrides the default
+    // order. v1.21.8: Auto outline / OSM outline buttons write src=auto
+    // and src=osm. src=auto IGNORES trace and OSM and requires detect ≥0.6.
     const srcPref = qs.get('src');
+    const forceAuto = srcPref === 'auto';
+    const forceOsm = srcPref === 'osm';
     // v1.6.0 (AUTO-DETECT): the detected outline slots in ABOVE OSM when
     // no trace exists — it's derived from the same LiDAR+imagery the tool
     // shows, gated at confidence >= 0.6, with the badge reading
     // "⚠ detected outline" so it never masquerades as surveyed data.
-    // Trace remains ground truth; ?src=auto|osm|traced forces a rung.
-    // v1.21.7 (Grok F13/F22): surveyed OSM data beats a derived blob. When
-    // OSM has a green, detection only runs as a FALLBACK (and src=auto —
-    // which nothing writes — is retired as a trace-killer).
-    const useTrace = tracedHit && srcPref !== 'osm';
+    // v1.21.7 (Grok F13/F22): surveyed OSM data beats a derived blob when
+    // the user didn't force Auto. v1.21.8: src=auto is a real button.
+    const useTrace = tracedHit && !forceOsm && !forceAuto;
     // v1.21.7 (Grok F14): the course's saved green ring counts as the
     // surveyed (OSM-grade) rung — Prep/cartoon/sheet and 3D now agree.
-    const courseRingLL = (!savedRingLL || srcPref === 'traced') ? null
+    const courseRingLL = (!savedRingLL || srcPref === 'traced' || forceAuto) ? null
       : savedRingLL.map((p) =>
         Array.isArray(p) ? [p[0], p[1]] : [p.lng, p.lat]);
-    const mappedRingLL = polyLL || courseRingLL;
+    const mappedRingLL = forceAuto ? null : (polyLL || courseRingLL);
     let detectRes = null;
-    const osmRungAvailable = !!mappedRingLL && srcPref !== 'traced';
-    if (!useTrace && !osmRungAvailable && window.GreenDetect && state.grid) {
+    const osmRungAvailable = !!mappedRingLL && srcPref !== 'traced' && !forceAuto;
+    if ((forceAuto || (!useTrace && !osmRungAvailable)) &&
+        window.GreenDetect && state.grid) {
       stageDetect();
       try {
         detectRes = window.GreenDetect.detect({
@@ -1649,12 +1653,15 @@
     // near zero — show an honest "couldn't map this green" state with a
     // direct path to the editor, instead of rendering an empty square.
     stageShape();
-    // Detection only wins when it is the ONLY mapped-source rung available;
-    // otherwise OSM (surveyed) keeps priority.
-    const useDetect = !useTrace && !mappedRingLL && detectRes &&
-      detectRes.confidence >= 0.6 && srcPref !== 'traced';
-    const useOsm = mappedRingLL && !useTrace && !useDetect &&
-      srcPref !== 'traced';
+    // Detection only wins when it is the ONLY mapped-source rung available
+    // (or the user forced Auto outline); otherwise OSM (surveyed) keeps
+    // priority. src=auto requires conf ≥ 0.6 and skips trace/OSM.
+    const useDetect = forceAuto
+      ? !!(detectRes && detectRes.confidence >= 0.6)
+      : (!useTrace && !mappedRingLL && detectRes &&
+         detectRes.confidence >= 0.6 && srcPref !== 'traced');
+    const useOsm = forceAuto ? false : (mappedRingLL && !useTrace &&
+      !useDetect && srcPref !== 'traced');
     // v1.21.7 (Grok F17): rungs are TRIED IN ORDER and a tiny degenerate
     // mask (<30 cells) DEMOTES to the next rung instead of aborting the
     // whole load — an off-centre pin or a collapsed detection used to kill
@@ -1992,12 +1999,9 @@
       }
       const eg = await window.CaddyElev.fetchElevGrid(bb, HOLE_N);
       if (!eg || !eg.grid) throw new Error('no corridor coverage');
-      // v1.12.0: pull the persisted texture mode into the dataset before
-      // any bake (wireChrome reads localStorage; this copies it across).
-      try {
-        const savedTex = localStorage.getItem('caddy.holeTexMode');
-        var TEXMODE = savedTex === 'photo' ? 'photo' : 'stylized';
-      } catch (e) { var TEXMODE = 'stylized'; }
+      // v1.21.8: hole view is always satellite photo. Mosaic failure falls
+      // back to LiDAR colouring silently (status says so once).
+      var TEXMODE = 'photo';
       const [w, s, e, n] = bb;
       const midLat = ((s + n) / 2) * Math.PI / 180;
       const mLng = 111320 * Math.cos(midLat), mLat = 110540;
@@ -2111,6 +2115,10 @@
         window.CaddySat.load(bb).then((sat) => {
           if (sat.fail) {
             console.log('[greenmap] satellite tiles unavailable — topo colours');
+            if (!ds.__satFailTold) {
+              ds.__satFailTold = true;
+              setStatus('Satellite unavailable — showing LiDAR colouring');
+            }
             return;
           }
           ds.sat = sat;
@@ -2121,7 +2129,12 @@
           // so render3D does ZERO photo work per frame. Rotation lag gone.
           bakeSatelliteTexture(ds);
           if (state.viewMode === 'hole' && state.active === 'hole') render();
-        }).catch(() => { /* topo colours stay */ });
+        }).catch(() => {
+          if (!ds.__satFailTold) {
+            ds.__satFailTold = true;
+            setStatus('Satellite unavailable — showing LiDAR colouring');
+          }
+        });
       }
       // If the user is already waiting in Hole view, land them on it now.
       // v-fix(hole-race) v1.11.0 (James: "if I click hole view while the
@@ -2177,12 +2190,9 @@
     const mLng = 111320 * Math.cos(ds.centerLL[1] * Math.PI / 180);
     const zone = ds.zoneMask;
     const FLOOR = 42;
-    // v1.12.0 (Option B — stylized default + Photo toggle): the texture
-    // mode decides the colour source.
-    //   'stylized' → 100% our LiDAR tint (fairway/rough tones + green
-    //                slope ramp + hillshade). No satellite sampling.
-    //   'photo'    → the v1.11 blend (satellite-dominant) + hillshade.
-    const texMode = ds.texMode || 'stylized';
+    // v1.21.8: hole view is always satellite photo. Mosaic failure falls
+    // back to LiDAR colouring (photoShare 0) silently except one status.
+    const texMode = ds.texMode || 'photo';
     const qPhoto = new Array(M.count).fill(null);
     // per-corner: vcol layout is 12 floats/quad (4 corners × RGB)
     const vcol = new Float32Array(M.vcol ? M.vcol.length : M.count * 12);
@@ -4534,7 +4544,7 @@
         // skirt interior shows through as a hollow shell).
         // Drag DOWN tilts camera DOWN; drag RIGHT rotates view naturally.
         state.v3.yaw = (state.v3.yaw + dx * 0.35) % 360;
-        state.v3.pitch = Math.max(22, Math.min(70, state.v3.pitch + dy * 0.25));
+        state.v3.pitch = Math.max(22, Math.min(88, state.v3.pitch + dy * 0.25));
       } else {
         state.view.ox += dx;
         state.view.oy += dy;
@@ -4551,9 +4561,14 @@
   });
   canvas.addEventListener('pointerup', (ev) => {
     activePtrs = Math.max(0, activePtrs - 1);
+    const [px, py] = eventPos(ev);
+    // v1.21.8: wasDrag used to compare DEVICE pixels against a bare `4`,
+    // so on a 3× iPhone a 1.3 CSS-px finger jitter counted as a drag and
+    // handleTap never ran — Drop ball stayed armed with "Tap a spot…".
+    const dprUp = window.devicePixelRatio || 1;
     const wasDrag = dragging && lastPt &&
-      (Math.abs(eventPos(ev)[0] - lastPt[0]) > 4 ||
-       Math.abs(eventPos(ev)[1] - lastPt[1]) > 4);
+      (Math.abs(px - lastPt[0]) > 10 * dprUp ||
+       Math.abs(py - lastPt[1]) > 10 * dprUp);
     dragging = false; lastPt = null;
     cancelLongPress();
     // v-fix(pinch-tap) v1.5.2 (audit #8): a pinch's second finger-up has
@@ -4711,12 +4726,15 @@
   // status line still said "Tap a spot…", nothing ever happened. Now an
   // armed tap retries with an UNLIMITED pick radius (nearest masked cell
   // wins), and if there is genuinely nothing under the tap it says so.
+  // v1.21.8: (1) tolerant retry no longer requires active==='green' — Hole
+  // view kept the arm live then silently dropped the tap; (2) ball coords
+  // always come from the 3D pick, never fromScreen (which is the 2D path
+  // and was used for viewMode==='hole'); (3) dropping in Hole stores
+  // green-local metres so the putt solver still sees the green dataset.
   function handleTap([px, py], clientX = null, clientY = null) {
-    let s = (state.viewMode === '3d' || state.viewMode === 'hole')
-      ? pickCell3D(px, py)
-      : sampleAtScreen(px, py);
-    if ((!s || !state.mask[s.i] || !state.field?.valid?.[s.i]) &&
-        armBallNext && state.active === 'green') {
+    const is3 = state.viewMode === '3d' || state.viewMode === 'hole';
+    let s = is3 ? pickCell3D(px, py) : sampleAtScreen(px, py);
+    if ((!s || !state.mask[s.i] || !state.field?.valid?.[s.i]) && armBallNext) {
       s = pickCell3DAny(px, py);          // tolerant: nearest masked cell
     }
     if (!s || !state.mask[s.i] || !state.field.valid[s.i]) {
@@ -4728,17 +4746,24 @@
       }
       return;
     }
-    if (state.viewMode === '3d' || state.viewMode === 'hole') {
+    if (is3) {
       tip.innerHTML = tipReadout(s);
       tip.style.display = 'block';
       tip.style.left = ((clientX ?? px) + 14) + 'px';
       tip.style.top = ((clientY ?? py) + 14) + 'px';
       setTimeout(() => { tip.style.display = 'none'; }, 2600);
     }
-    const [mx, my] = state.viewMode === '3d'
-      ? [s.mx, s.my]
-      : fromScreen(px, py);
-    if (armBallNext && state.active === 'green') {
+    let mx = s.mx, my = s.my;
+    if (!is3) {
+      const p = fromScreen(px, py);
+      mx = p[0]; my = p[1];
+    }
+    if (armBallNext) {
+      if (state.viewMode === 'hole' && state.datasets.hole &&
+          state.datasets.hole.gOff) {
+        const [gox, goy] = state.datasets.hole.gOff;
+        mx = mx - gox; my = my - goy;
+      }
       state.ball = [mx, my];
       state.showPutt = true;
       armBallNext = false;
@@ -4747,12 +4772,120 @@
     }
     render();
   }
+  window.__handleTap = handleTap;
+  window.__gmGetBall = () => state.ball;
   let armBallNext = false;
   let longPressTimer = null;
 
   function cancelLongPress() { clearTimeout(longPressTimer); }
 
-  function setStatus(msg) { document.getElementById('gm-status').textContent = msg; }
+  function setStatus(msg) {
+    const el = document.getElementById('gm-status');
+    if (el) el.textContent = msg;
+    syncTopInset();
+  }
+
+  // v1.21.8: when Drop ball is armed, a tap that lands on the dock (the
+  // green is often behind it on iPhone) never reached the canvas. Capture
+  // the next pointerup on the document and convert it to canvas space,
+  // unless it was a real chrome control.
+  if (document.addEventListener) {
+    document.addEventListener('pointerup', (ev) => {
+      if (!armBallNext) return;
+      const t = ev.target;
+      if (t === canvas) return;
+      if (t && typeof t.closest === 'function' &&
+          t.closest('#gm-ball, #gm-stimp, #gm-back, #gm-editloc, #gm-recenter, #gm-flyover, .gm-view-btn, .gm-mode-btn, .gm-layer-btn, #gm-auto-outline, #gm-osm-outline, #gm-exag, #gm-topbar'))
+        return;
+      handleTap(eventPos(ev), ev.clientX, ev.clientY);
+    }, true);
+  }
+
+  /* ---- v1.21.8 HOLE FLYOVER (hoisted out of wireChrome) ---------------
+     Camera flies tee → green. 3.2 s, ease-in-out, skippable. The AUTO
+     path still fires once per corridor; the Flyover BUTTON replays any
+     time. loadCorridor used to call flyoverStart() while the function
+     still lived inside wireChrome — a ReferenceError, so the Hole
+     button looked dead whenever the corridor landed after the tap. */
+  let flyover = null;   // { t0, from:{yaw,pitch,dist}, raf }
+  const REDUCED_MOTION = () =>
+    window.matchMedia && window.matchMedia(
+      '(prefers-reduced-motion: reduce)').matches;
+
+  function flyoverStart(force) {
+    if (REDUCED_MOTION() && !force) return;
+    if (flyover) flyoverCancel();
+    const ds = state.datasets.hole;
+    if (!ds || !ds.mesh || !ds.eg) return;
+    const mLat = 110540;
+    const mLng = 111320 * Math.cos(ds.centerLL[1] * Math.PI / 180);
+    const teeM = state.teeLL ? [
+      (state.teeLL.lng - ds.centerLL[0]) * mLng,
+      (state.teeLL.lat - ds.centerLL[1]) * mLat] : null;
+    const toYaw = state.v3.yaw;
+    const toPitch = state.v3.pitch;
+    const toDist = state.v3.dist;
+    let startYaw = toYaw;
+    if (teeM) startYaw = Math.atan2(teeM[0], teeM[1]) * 180 / Math.PI;
+    else startYaw = toYaw + 180;
+    const from = {
+      yaw: startYaw,
+      pitch: 16,
+      dist: Math.max(120, toDist * 1.45)
+    };
+    flyover = { t0: performance.now(), from,
+                to: { yaw: toYaw, pitch: toPitch, dist: toDist } };
+    const easeInOut = (t) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    const DUR = 3200;
+    const flyoverEnd = { yaw: toYaw, pitch: toPitch, dist: toDist };
+    const step = () => {
+      if (!flyover) return;
+      const t = Math.min(1, (performance.now() - flyover.t0) / DUR);
+      const k = easeInOut(t);
+      const arc = 1 + 0.18 * Math.sin(Math.PI * k);
+      state.v3.yaw = flyover.from.yaw +
+        (flyover.to.yaw - flyover.from.yaw) * k;
+      state.v3.pitch = flyover.from.pitch +
+        (flyover.to.pitch - flyover.from.pitch) * k;
+      state.v3.dist = (flyover.from.dist +
+        (flyover.to.dist - flyover.from.dist) * k) * arc;
+      render();
+      if (t < 1) flyover.raf = requestAnimationFrame(step);
+      else { flyover = null;
+             state.v3.yaw = flyoverEnd.yaw;
+             state.v3.pitch = flyoverEnd.pitch;
+             state.v3.dist = flyoverEnd.dist;
+             render(); }
+    };
+    flyover.raf = requestAnimationFrame(step);
+    canvas.addEventListener('pointerdown', flyoverCancel, { once: true });
+  }
+  function flyoverCancel() {
+    if (!flyover) return;
+    if (flyover.raf) cancelAnimationFrame(flyover.raf);
+    const end = flyover.to;
+    flyover = null;
+    state.v3.yaw = end.yaw;
+    state.v3.pitch = end.pitch;
+    state.v3.dist = end.dist;
+    render();
+  }
+  window.__flyoverStart = flyoverStart;
+  window.__flyoverCancel = flyoverCancel;
+
+  function syncTopInset() {
+    try {
+      const stack = document.getElementById('gm-topstack');
+      if (!stack || !stack.getBoundingClientRect) return;
+      const r = stack.getBoundingClientRect();
+      const h = (r && Number.isFinite(r.bottom)) ? r.bottom : 0;
+      const root = document.documentElement;
+      if (root && root.style && root.style.setProperty)
+        root.style.setProperty('--gm-top-inset', Math.max(0, h) + 'px');
+    } catch (e) { /* headless stub / no layout */ }
+  }
+  window.__syncTopInset = syncTopInset;
 
   /* ======================================================================
      5. CHROME WIRING
@@ -4800,127 +4933,26 @@
     });
     document.querySelector(`.gm-layer-btn[data-layer="both"]`).classList.add('active');
 
-    // v1.12.0 (Option B): Photo/Stylized texture toggle for hole view.
-    // Stylized = 100% our LiDAR tint (default); Photo = satellite blend.
-    // Persisted so the choice survives launches. Re-bakes colours only.
-    const TEX_KEY = 'caddy.holeTexMode';
-    let texMode = 'stylized';
-    try {
-      const saved = localStorage.getItem(TEX_KEY);
-      if (saved === 'photo') texMode = 'photo';
-    } catch (e) { /* default stylized */ }
-    const applyTexMode = () => {
-      const ds = state.datasets.hole;
-      if (!ds || !ds.mesh) return;
-      ds.texMode = texMode;
-      bakeSatelliteTexture(ds);
-      render();
-    };
-    document.querySelectorAll('.gm-tex-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        texMode = btn.dataset.tex === 'photo' ? 'photo' : 'stylized';
-        document.querySelectorAll('.gm-tex-btn').forEach(b =>
-          b.classList.toggle('active', b === btn));
-        try { localStorage.setItem(TEX_KEY, texMode); } catch (e) {}
-        applyTexMode();
-        setStatus(texMode === 'photo'
-          ? 'Photo texture — satellite imagery on the terrain'
-          : 'Stylized texture — LiDAR terrain colours');
-      });
-    });
-    // mark the active chip on boot
-    document.querySelectorAll('.gm-tex-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.tex === texMode));
-    // apply the persisted mode whenever the corridor mesh is rebuilt
-    window.__holeTexMode = () => texMode;
+    // v1.21.8: hole view is always satellite — no Stylized/Photo toggle.
+    window.__holeTexMode = () => 'photo';
 
-    // 2D | 3D | Hole view toggle — keeps pin/ball/mode state; just re-renders.
+    // 3D | Hole view toggle — keeps pin/ball/mode state; just re-renders.
     function frameCameraForView(v) {
       if (v === 'hole' && state.datasets.hole && !state.datasets.hole.failed) {
         fitHoleView();
       } else if (v === '3d') {
-        state.v3.yaw = 0; state.v3.pitch = 35; state.v3.dist = 62;
+        state.v3.yaw = 0; state.v3.pitch = 88; state.v3.dist = 40;
       }
     }
 
-    /* ---- v1.5.0 HOLE FLYOVER ----------------------------------------
-       Camera flies tee → green once per hole reveal. 3.2 s, ease-in-out,
-       skippable (any pointer/touch), skipped entirely under reduced
-       motion. Position-based interpolation: the eye arcs up mid-flight
-       then settles into fitHoleView's final orbit. */
-    let flyover = null;   // { t0, from:{yaw,pitch,dist}, raf }
-    const REDUCED_MOTION = () =>
-      window.matchMedia && window.matchMedia(
-        '(prefers-reduced-motion: reduce)').matches;
+    function syncFlyoverBtn() {
+      const fb = document.getElementById('gm-flyover');
+      if (!fb) return;
+      fb.style.display = state.viewMode === 'hole' ? '' : 'none';
+    }
 
-    function flyoverStart() {
-      // Only once per corridor reveal; skip when the user prefers calm.
-      if (flyover || REDUCED_MOTION()) return;
-      const ds = state.datasets.hole;
-      if (!ds || !ds.mesh || !ds.eg) return;
-      // Eye the tee end: yaw toward the tee's bearing, low pitch, close.
-      // Tee in corridor-local metres:
-      const mLat = 110540;
-      const mLng = 111320 * Math.cos(ds.centerLL[1] * Math.PI / 180);
-      const teeM = state.teeLL ? [
-        (state.teeLL.lng - ds.centerLL[0]) * mLng,
-        (state.teeLL.lat - ds.centerLL[1]) * mLat] : null;
-      const toYaw = state.v3.yaw;      // final view (fitHoleView just ran)
-      const toPitch = state.v3.pitch;
-      const toDist = state.v3.dist;
-      // Start: behind the tee looking down-corridor. If no tee, start
-      // from the corridor's long axis at low altitude.
-      let startYaw = toYaw;
-      if (teeM) startYaw = Math.atan2(teeM[0], teeM[1]) * 180 / Math.PI;
-      else startYaw = toYaw + 180;
-      const from = {
-        yaw: startYaw,
-        pitch: 16,                   // low, at the trees
-        dist: Math.max(120, toDist * 1.45)   // start close-ish, arc out
-      };
-      flyover = { t0: performance.now(), from,
-                  to: { yaw: toYaw, pitch: toPitch, dist: toDist } };
-      const easeInOut = (t) =>
-        t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      const DUR = 3200;
-      const step = () => {
-        if (!flyover) return;                    // cancelled
-        const t = Math.min(1, (performance.now() - flyover.t0) / DUR);
-        const k = easeInOut(t);
-        // Gentle arc: dist swells to ~1.18× mid-flight then settles.
-        const arc = 1 + 0.18 * Math.sin(Math.PI * k);
-        state.v3.yaw = flyover.from.yaw +
-          (flyover.to.yaw - flyover.from.yaw) * k;
-        state.v3.pitch = flyover.from.pitch +
-          (flyover.to.pitch - flyover.from.pitch) * k;
-        state.v3.dist = (flyover.from.dist +
-          (flyover.to.dist - flyover.from.dist) * k) * arc;
-        render();
-        if (t < 1) flyover.raf = requestAnimationFrame(step);
-        else { flyover = null;
-               state.v3.yaw = flyoverEnd.yaw;
-               state.v3.pitch = flyoverEnd.pitch;
-               state.v3.dist = flyoverEnd.dist;
-               render(); }
-      };
-      const flyoverEnd = { ...flyover.to };
-      flyover.raf = requestAnimationFrame(step);
-      // Skippable: any pointerdown on the canvas cancels + snaps to end.
-      canvas.addEventListener('pointerdown', flyoverCancel, { once: true });
-    }
-    function flyoverCancel() {
-      if (!flyover) return;
-      if (flyover.raf) cancelAnimationFrame(flyover.raf);
-      const end = flyover.to;
-      flyover = null;
-      state.v3.yaw = end.yaw;
-      state.v3.pitch = end.pitch;
-      state.v3.dist = end.dist;
-      render();
-    }
-    window.__flyoverCancel = flyoverCancel;
     function setViewModeInternal(v) {
-      state.viewMode = v === 'hole' ? 'hole' : (v === '3d' ? '3d' : '2d');
+      state.viewMode = v === 'hole' ? 'hole' : '3d';
       // v-fix(arm-sweep) v1.5.2 (Grok audit #9): an armed "Drop ball"
       // survives view switches, so a tap minutes later (status long gone)
       // silently dropped the ball. Disarm on every view change; the button
@@ -4932,17 +4964,11 @@
       }
       document.querySelectorAll('.gm-view-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.view === state.viewMode));
-      document.getElementById('gm-exag-wrap').style.display =
-        state.viewMode === '2d' ? 'none' : 'inline-flex';
-      // v1.12.0: the Stylized/Photo texture group is a hole-view control.
-      const texGroup = document.getElementById('gm-tex-group');
-      if (texGroup) texGroup.style.display =
-        state.viewMode === 'hole' ? '' : 'none';
-      // v1.4.3 (controls stay visible — James's rule): the layer group is
-      // wanted in EVERY view; v1.4.0 hid it in 3D/Hole and he read that
-      // as "no buttons for shading or arrows". Always shown.
+      const ex = document.getElementById('gm-exag-wrap');
+      if (ex) ex.style.display = 'inline-flex';
       const lg = document.getElementById('gm-layer-group');
       if (lg) lg.style.display = '';
+      syncFlyoverBtn();
       if (state.viewMode === 'hole') {
         const h = state.datasets.hole;
         if (h && !h.failed && h.mesh) {
@@ -4951,25 +4977,20 @@
           frameCameraForView('hole');
           setStatus('Whole-hole 3D — drag = orbit · pinch/scroll = zoom · ' +
             'green highlighted, blue flag = tee');
-          // v1.5.0: fly the tee→green reveal once per corridor.
+          // Auto flyover still fires once per corridor; the Flyover button
+          // replays anytime (seenFlyover no longer blocks the button).
           if (firstReveal) { h.seenFlyover = true; flyoverStart(); }
         } else if (h && h.failed) {
           // Graceful fallback: green-only 3D with an inline explanation.
           state.viewMode = '3d';
           document.querySelectorAll('.gm-view-btn').forEach(b =>
             b.classList.toggle('active', b.dataset.view === '3d'));
+          syncFlyoverBtn();
           setStatus(h.msg);
         } else {
           // Corridor still fetching — visible loading state + auto-land when
           // loadCorridor completes (it re-renders into hole view).
-          // v-fix: was unconditional below, overwriting the ready-status set
-          // by the success branch above every time Hole was tapped.
-          // v-fix(hole-race) v1.11.0: DO NOT activateDataset here. The
-          // corridor mesh isn't attached yet; activating mirrors half a
-          // dataset (green grid + hole arrows) and the completion path
-          // then fits a half-mirrored state = the broken view. Stay on
-          // the current dataset; the spinner shows, and loadCorridor's
-          // completion path is the single owner of activate + fit.
+          // v-fix(hole-race) v1.11.0: DO NOT activateDataset here.
           setStatus('Preparing hole flyover…');
         }
         render();
@@ -4988,11 +5009,33 @@
       setViewModeInternal(v);
       if (state.viewMode === '3d')
         setStatus('3D green view — drag = orbit · pinch/scroll = zoom · tap = readout');
-      else if (state.viewMode === '2d') setStatus('2D map');
     }
     document.querySelectorAll('.gm-view-btn').forEach(btn => {
       btn.addEventListener('click', () => setViewMode(btn.dataset.view));
     });
+
+    const flyBtn = document.getElementById('gm-flyover');
+    if (flyBtn) {
+      flyBtn.addEventListener('click', () => {
+        if (state.viewMode !== 'hole') return;
+        const h = state.datasets.hole;
+        if (!h || h.failed || !h.mesh) {
+          setStatus('Hole flyover unavailable here');
+          return;
+        }
+        flyoverStart(true);
+      });
+    }
+
+    const reloadWithSrc = (src) => {
+      const qs2 = new URLSearchParams(location.search);
+      qs2.set('src', src);
+      location.replace('?r=' + Date.now() + '&' + qs2.toString());
+    };
+    const autoBtn = document.getElementById('gm-auto-outline');
+    if (autoBtn) autoBtn.addEventListener('click', () => reloadWithSrc('auto'));
+    const osmBtn = document.getElementById('gm-osm-outline');
+    if (osmBtn) osmBtn.addEventListener('click', () => reloadWithSrc('osm'));
 
     // Vertical exaggeration slider (3D only).
     // v1.3.2 (smooth exag): 'input' fired buildScene per tick — a full mesh
@@ -5094,9 +5137,9 @@
     document.getElementById('gm-recenter').addEventListener('click', () => {
       if (state.viewMode === 'hole') {
         frameCameraForView('hole');
-      } else if (state.viewMode === '3d') {
-        state.v3.yaw = 0; state.v3.pitch = 35; state.v3.dist = 62;
-      } else fitView();
+      } else {
+        state.v3.yaw = 0; state.v3.pitch = 88; state.v3.dist = 40;
+      }
       render(); setStatus('View reset');
     });
   }
@@ -5119,7 +5162,7 @@
         : polySource === 'detected'
           ? '⚠ detected outline — verify via Check location'
           : polySource === 'ellipse'
-            ? '⚠ approx outline — trace it via Check location'
+            ? '⚠ approx outline — use Auto outline or OSM outline'
             : '…';
     el.textContent = `${la}, ${ln} · ${src}` +
       // v-fix(dist-badge) v1.5.2 (audit #12): surface the centroid distance
@@ -5153,16 +5196,12 @@
           location.replace('?r=' + Date.now() + '&' + qs2.toString());
         };
       } else {
-        el.textContent += ' · tap to trace the true outline';
+        el.textContent += ' · tap Auto outline or OSM outline';
         el.style.cursor = 'pointer';
         el.onclick = () => {
           const qs2 = new URLSearchParams(location.search);
-          // Launch the editor in trace mode (armtee style: ?trace=1 handled
-          // by greenedit) instead of a doomed src=traced reload.
-          const qs3 = new URLSearchParams({
-            lat: state.lat.toFixed(6), lng: state.lng.toFixed(6),
-            trace: '1' });
-          location.href = 'greenmap.html?' + qs3.toString();
+          qs2.set('src', 'auto');
+          location.replace('?r=' + Date.now() + '&' + qs2.toString());
         };
       }
     } else if (polySource === 'osm' && state.__altTrace) {
@@ -5220,6 +5259,7 @@
     // v-fix(hole-race) v1.11.0: the old handler ran fitView() in every
     // mode — in hole view that re-fit the GREEN camera, not the hole
     // camera (a resize mid-hole-view squished the frame). Route by mode.
+    syncTopInset();
     if (state.viewMode === 'hole' && state.datasets.hole &&
         !state.datasets.hole.failed && state.datasets.hole.mesh) {
       fitHoleView();
@@ -5234,22 +5274,20 @@
      ====================================================================== */
   wireChrome();
   wireLocationTools();
-  // v1.21.7 (Grok F12): ?view=3d is the default. setViewModeInternal is
-  // scoped inside wireChrome, so the boot-time UI sync is done inline:
-  // dock buttons, exag slider and texture group all agree with the
-  // initial view before the first load (was: 2D active while the state
-  // said 3D — the camera stayed 2D until the first manual view tap).
+  // v1.21.8: 3D is the only default. Dock buttons + exag slider agree
+  // with the initial view before the first load.
   {
     document.querySelectorAll('.gm-view-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.view === state.viewMode));
     const ex = document.getElementById('gm-exag-wrap');
-    if (ex) ex.style.display =
-      state.viewMode === '2d' ? 'none' : 'inline-flex';
-    const tex = document.getElementById('gm-tex-group');
-    if (tex) tex.style.display =
-      state.viewMode === 'hole' ? '' : 'none';
-    // Camera fit happens in loadGreen() (fitView) / setViewMode paths;
-    // frameCameraForView is scoped elsewhere — do NOT touch it at boot.
+    if (ex) ex.style.display = 'inline-flex';
+    const exagEl0 = document.getElementById('gm-exag');
+    const exagVal0 = document.getElementById('gm-exag-val');
+    if (exagEl0) exagEl0.value = String(state.v3.exag);
+    if (exagVal0) exagVal0.textContent = state.v3.exag + '×';
+    const fly = document.getElementById('gm-flyover');
+    if (fly) fly.style.display = state.viewMode === 'hole' ? '' : 'none';
+    syncTopInset();
   }
   loadGreen();
 })();

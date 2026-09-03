@@ -48,17 +48,11 @@
       '<div class="gel-head">' +
       '  <button class="gel-btn" id="gelCancel">‹ Cancel</button>' +
       '  <div class="gel-title">Verify green location</div>' +
-      '  <button class="gel-btn" id="gelTrace">Trace outline</button>' +
       '  <button class="gel-btn" id="gelTee">Move tee</button>' +
       '  <button class="gel-btn" id="gelLoad">Load this green</button>' +
       '</div>' +
       '<div class="gel-map" id="gelMap"></div>' +
-      '<div class="gel-hint">Tap to move the sample point · green outlines are the real mapped greens (OSM)</div>' +
-      '<div class="gel-tracebar" id="gelTraceBar" hidden>' +
-      '  <span id="gelTraceCount">0 pts</span>' +
-      '  <button class="gel-btn" id="gelTraceUndo">Undo</button>' +
-      '  <button class="gel-btn gel-primary" id="gelTraceSave">Save &amp; load this outline</button>' +
-      '</div>';
+      '<div class="gel-hint">Tap to move the sample point · green outlines are the real mapped greens (OSM)</div>';
 
     document.body.appendChild(sheet);
 
@@ -161,9 +155,6 @@
 
     // Live crosshair readout.
     const readout = sheet.querySelector('.gel-hint');
-    // v-fix(trace-pin) v1.5.2 (Grok audit #10): `tracing` declared BEFORE
-    // the click handler below so the trace-mode guard can see it.
-    let tracing = false;
     const setReadout = (ll) => {
       readout.textContent =
         `Sample point: ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
@@ -171,11 +162,7 @@
     setReadout(pin.getLatLng());
     // v1.13.0: armtee deep-link re-syncs the UI once readout exists.
     if (teeMode) syncTeeUI();
-    // v-fix(trace-pin) v1.5.2 (Grok audit #10): in trace mode this handler
-    // must not move the pin / overwrite the trace instruction. `tracing`
-    // is declared below; the guard reads it lazily via the shared scope.
     map.on('click', (e) => {
-      if (typeof tracing !== 'undefined' && tracing) return;
       // v1.12.0 (tee mode): in tee mode a map tap PLACES the tee
       // (disarming), exactly like Round's Set-tee flow.
       if (teeMode) {
@@ -185,126 +172,6 @@
       pin.setLatLng(e.latlng); setReadout(e.latlng);
     });
     pin.on('drag', (e) => setReadout(e.target.getLatLng()));
-
-    /* ---- Outline tracing (unmapped greens — e.g. Westwood) --------------
-       Tap points around the green on the satellite imagery once; the polygon
-       is saved on this device and the green tool uses it instead of the
-       ellipse approximation. */
-    const OUTLINE_KEY = 'caddy:greenOutline:v1';
-    let tracePts = [];
-    let traceLine = null;
-    let traceFill = null;
-    let snapMarker = null;   // v1.3.1: pulsing first-point handle
-
-    const traceBar = sheet.querySelector('#gelTraceBar');
-    const traceCount = sheet.querySelector('#gelTraceCount');
-    const btnTrace = sheet.querySelector('#gelTrace');
-
-    const redrawTrace = () => {
-      if (traceLine) { map.removeLayer(traceLine); traceLine = null; }
-      if (traceFill) { map.removeLayer(traceFill); traceFill = null; }
-      traceCount.textContent = tracePts.length + ' pts';
-      if (!tracePts.length) return;
-      if (tracePts.length >= 3) {
-        traceFill = L.polygon(tracePts, {
-          color: '#ffd166', weight: 2, fillOpacity: 0.12, dashArray: null,
-        }).addTo(map);
-      }
-      // v1.2.5 (clean close): show the LIVE closing edge from the last point
-      // back to the first as a distinct dashed segment, so the ring James
-      // sees is exactly the ring he saves — no surprise tail on load.
-      traceLine = L.polyline(tracePts.concat([tracePts[0]]), {
-        color: '#ffd166', weight: 2, dashArray: '4 5',
-      }).addTo(map);
-    };
-
-    // v1.2.5 (snap-close): a tap near the FIRST point (within 18 px)
-    // finishes the ring instead of adding a cramped vertex — the natural
-    // "close the loop" gesture. Verified distance in SCREEN space, not
-    // metres, so it works at any zoom.
-    // v1.3.1 (snap-close v2): 18 px was too tight on a 3× phone — James
-    // could never hit it ("still doesn't snap, I keep adding points").
-    // 34 px + a pulsing first-point handle so the target is VISIBLE.
-    const SNAP_PX = 34;
-    const screenDist = (a, b) => {
-      const p1 = map.latLngToContainerPoint(a);
-      const p2 = map.latLngToContainerPoint(b);
-      return Math.hypot(p1.x - p2.x, p1.y - p2.y);
-    };
-
-    btnTrace.addEventListener('click', () => {
-      tracing = !tracing;
-      btnTrace.classList.toggle('gel-active', tracing);
-      traceBar.hidden = !tracing;
-      if (!tracing && snapMarker) {
-        map.removeLayer(snapMarker); snapMarker = null;   // v1.3.1
-      }
-      readout.textContent = tracing
-        ? 'Trace mode — tap points AROUND the green edge; tap the pulsing ring to close.'
-        : 'Tap to move the sample point.';
-    });
-
-    map.on('click', (e) => {
-      if (!tracing) return;
-      // v1.2.5 (snap-close): tapping near the first point (>=3 pts) closes
-      // the ring — do NOT add the point.
-      if (tracePts.length >= 3 &&
-          screenDist(e.latlng, L.latLng(tracePts[0][0], tracePts[0][1]))
-            < SNAP_PX) {
-        readout.textContent =
-          'Outline closed — “Save & load this outline” when it looks right.';
-        return;
-      }
-      tracePts.push([e.latlng.lat, e.latlng.lng]);
-      // v1.3.1: first-point handle appears once the ring can close (>=3
-      // pts) — a pulsing gold circle marks the tap target; removes it when
-      // tracing turns off.
-      if (tracePts.length >= 3 && !snapMarker) {
-        snapMarker = L.marker(tracePts[0], {
-          interactive: false,
-          icon: L.divIcon({ className: 'gel-snaphandle',
-            html: '<div class="gel-snaphandle-ring"></div>',
-            iconSize: [44, 44], iconAnchor: [22, 22] }),
-        }).addTo(map);
-      }
-      redrawTrace();
-    });
-
-    sheet.querySelector('#gelTraceUndo').addEventListener('click', () => {
-      tracePts.pop();
-      redrawTrace();
-    });
-
-    sheet.querySelector('#gelTraceSave').addEventListener('click', () => {
-      if (tracePts.length < 3) {
-        readout.textContent = 'Need at least 3 points to outline a green.';
-        return;
-      }
-      // Centroid of the traced ring (simple average — greens are small).
-      let clat = 0, clng = 0;
-      tracePts.forEach(([a, b]) => { clat += a; clng += b; });
-      clat /= tracePts.length; clng /= tracePts.length;
-      let store = {};
-      try {
-        store = JSON.parse(localStorage.getItem(OUTLINE_KEY) || '{}');
-      } catch (err) { store = {}; }
-      store[clat.toFixed(3) + ',' + clng.toFixed(3)] = {
-        lat: clat, lng: clng,
-        vertices: tracePts.map(([a, b]) => [a, b]),
-        updatedAt: Date.now(),
-      };
-      try {
-        localStorage.setItem(OUTLINE_KEY, JSON.stringify(store));
-      } catch (err) { /* private mode — proceed anyway for this session */ }
-      const qs2 = new URLSearchParams(location.search);
-      qs2.set('lat', clat.toFixed(6));
-      qs2.set('lng', clng.toFixed(6));
-      // v1.21.7 (Grok F11): a fresh trace is ground truth — never reload
-      // with src=osm (or src=auto) still pinned, or the new trace loses to
-      // the old OSM ring and the save looks ignored.
-      if (qs2.get('src') === 'osm') qs2.delete('src');
-      location.replace('?r=' + Date.now() + '&' + qs2.toString());
-    });
 
     // Real OSM greens around the boot point (60 m) — drawn so James can SEE
     // which green is which. v1.2.5: each green gets a HOLE label (H3, H7…)
@@ -380,7 +247,7 @@
           e.tags && e.tags.golf === 'green').length;
         if (!greens) {
           readout.textContent =
-            'No mapped greens within 60 m — the tool will approximate. Trace this green (“Trace outline”) or tap where it is and “Load this green”.';
+            'No mapped greens within 60 m — the tool will approximate. Use Auto outline or OSM outline, or tap where the green is and “Load this green”.';
         }
       })
       .catch(() => { /* offline: map still works for manual placement */ });

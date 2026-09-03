@@ -9,21 +9,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>3D Green — Caddy</title>
-<script>window.CADDY_VERSION = 'v1.21.7';</script>
+<script>window.CADDY_VERSION = 'v1.21.8';</script>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="greenmap.css">
 <link rel="stylesheet" href="leaflet.css">
 </head>
 <body>
-<!-- v1.4.3: topbar + legend in one flex column wrapper — the legend is a
-     layout child, not an overlay, so it can never overlap the bar. -->
+<!-- v1.21.8: two-line topbar (title · status · loc) so status never ends in
+     a silent ellipsis; loc sits on its own row. In-flow in #gm-topstack so
+     the canvas can inset below the chrome and the heat/3D never sits under
+     the bar. -->
 <div id="gm-topstack" style="position:fixed; top:0; left:0; right:0; z-index:30; display:flex; flex-direction:column; pointer-events:none; padding-top: var(--safe-top, 0px);">
 <div id="gm-topbar" class="gm-chrome" style="pointer-events:auto;">
-  <button class="gm-btn" id="gm-back" title="Back to the Caddy app" style="display:none">‹ Back</button>
-  <span id="gm-title">⛳ 3D Green</span>
-  <span id="gm-loc" title="The green this view loaded"></span>
-  <span id="gm-status">Loading…</span>
-  <span id="gm-ver" title="App version — if this is old after an update, the service worker is stale: kill the app and reopen" style="color:var(--muted,#9db3a6); font-size:10px; font-weight:700; opacity:0.85; flex:none;"></span>
+  <div class="gm-top-row" id="gm-top-title-row">
+    <button class="gm-btn" id="gm-back" title="Back to the Caddy app" style="display:none">‹ Back</button>
+    <span id="gm-title">⛳ 3D Green</span>
+    <span id="gm-ver" title="App version — if this is old after an update, the service worker is stale: kill the app and reopen" style="color:var(--muted,#9db3a6); font-size:10px; font-weight:700; opacity:0.85; flex:none;"></span>
+  </div>
+  <div class="gm-top-row" id="gm-top-status-row">
+    <span id="gm-status">Loading…</span>
+  </div>
+  <div class="gm-top-row" id="gm-top-loc-row">
+    <span id="gm-loc" title="The green this view loaded"></span>
+  </div>
 </div>
 
 <!-- v1.4.3/v1.14.1: legend = seamless second row of the top bar — same
@@ -60,22 +68,21 @@
   <canvas id="gm-canvas"></canvas>
 </div>
 
-<!-- v1.4.0 dock redesign: 3 contextual rows. Row 1 = view segment (+exag
-     in 3D/Hole). Row 2 = data layers (2D gets Shading/Arrows; 3D+ always
-     draws both tastefully). Row 3 = actions: ONE ball toggle, Stimp chip
-     only while a ball is down, Check location, Fit. -->
+<!-- v1.21.8 dock: 3D + Hole only (no 2D). Exag defaults 1×. Hole view is
+     satellite-only (no Stylized/Photo). Outline source = Auto / OSM.
+     Flyover is an explicit Hole-view control. -->
 <div id="gm-dock" class="gm-chrome">
   <div class="gm-dock-row">
     <div class="gm-dock-group" role="radiogroup" aria-label="View">
-      <button class="gm-btn gm-view-btn" data-view="2d">2D</button>
       <button class="gm-btn gm-view-btn active" data-view="3d">3D</button>
       <button class="gm-btn gm-view-btn" data-view="hole">Hole</button>
     </div>
-    <span id="gm-exag-wrap" style="display:none" title="Vertical exaggeration">
+    <span id="gm-exag-wrap" title="Vertical exaggeration">
       <label for="gm-exag">Exag</label>
-      <input type="range" id="gm-exag" min="1" max="15" step="0.5" value="8">
-      <span id="gm-exag-val">8×</span>
+      <input type="range" id="gm-exag" min="1" max="15" step="0.5" value="1">
+      <span id="gm-exag-val">1×</span>
     </span>
+    <button class="gm-btn" id="gm-flyover" title="Replay the tee-to-green flyover" style="display:none">Flyover</button>
   </div>
   <div class="gm-dock-row" id="gm-data-row">
     <div class="gm-dock-group" role="radiogroup" aria-label="Data">
@@ -87,11 +94,9 @@
       <button class="gm-btn gm-layer-btn" data-layer="shading">Shading</button>
       <button class="gm-btn gm-layer-btn" data-layer="arrows">Arrows</button>
     </div>
-    <!-- v1.12.0: hole-view texture — Stylized (LiDAR colours, default)
-         or Photo (satellite blend). Visible only in hole view. -->
-    <div class="gm-dock-group" id="gm-tex-group" role="radiogroup" aria-label="Texture" style="display:none">
-      <button class="gm-btn gm-tex-btn active" data-tex="stylized">Stylized</button>
-      <button class="gm-btn gm-tex-btn" data-tex="photo">Photo</button>
+    <div class="gm-dock-group" id="gm-outline-group" role="group" aria-label="Green outline">
+      <button class="gm-btn" id="gm-auto-outline" title="Detect the green outline from LiDAR and imagery">Auto outline</button>
+      <button class="gm-btn" id="gm-osm-outline" title="Use the OpenStreetMap green outline">OSM outline</button>
     </div>
   </div>
   <div class="gm-dock-row">

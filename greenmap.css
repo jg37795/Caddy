@@ -44,6 +44,11 @@ body:not(.dark) #gm-stage {
 #gm-stage {
   position: fixed;
   inset: 0;
+  /* v1.21.8: keep the heat/3D surface below the in-flow topstack so the
+     slope heatmap never sits under the fixed top bar (James: heatmap
+     behind the top bar). --gm-top-inset is written from JS after layout;
+     the CSS fallback covers first paint / no-JS. */
+  top: var(--gm-top-inset, calc(var(--safe-top, 0px) + 118px));
   touch-action: none;
   cursor: crosshair;
   -webkit-user-select: none;
@@ -69,17 +74,28 @@ body:not(.dark) #gm-stage {
 }
 
 #gm-topbar {
-  top: calc(var(--safe-top) + 10px);
+  position: relative;
+  top: auto;
   left: 10px;
   right: 10px;
   display: flex;
-  align-items: center;
-  gap: 8px 7px;          /* v1.2.3: row-gap + column-gap — wrapping rows no longer touch */
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   border-radius: 22px;
   padding: 10px 14px;
-  row-gap: 8px;
+  margin: 10px 10px 0;
+  width: auto;
 }
+.gm-top-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+#gm-top-title-row { flex-wrap: nowrap; }
+#gm-top-status-row { align-items: flex-start; }
+#gm-top-loc-row { align-items: flex-start; }
 
 /* v1.2.5: bottom dock. v1.5.1: cohesive instrument bar — the dock is THE
    control surface, spaced like a console, not floating pill clutter. */
@@ -140,8 +156,24 @@ body:not(.dark) #gm-stage {
   #gm-legend { max-width: 200px !important; }
 }
 
-#gm-title { font-weight: 800; letter-spacing: -0.01em; margin-right: 2px; }
-#gm-status { color: var(--muted); flex: 1; min-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+#gm-title { font-weight: 800; letter-spacing: -0.01em; margin-right: 2px; flex: 1; min-width: 0; }
+/* v1.21.8: wrap status to two lines instead of a silent "…" — James:
+   "text in the top bar can get too long and the ending is …". Full text
+   stays tappable on the status row. */
+#gm-status {
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: unset;
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.35;
+  word-break: break-word;
+}
 
 /* Buttons: glass pills; active = app green gradient (matches Play seg) */
 .gm-btn {
@@ -448,14 +480,18 @@ body:not(.dark) #gm-stage {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5);
 }
 
-/* Header location badge */
+/* Header location badge — own row, wrap instead of ellipsis (v1.21.8) */
 #gm-loc {
   font-size: 10.5px;
   color: var(--muted);
-  white-space: nowrap;
-  max-width: 210px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  max-width: none;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.35;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Trace mode (greenedit.js) — outline tracing on the satellite map */

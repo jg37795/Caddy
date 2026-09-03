@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.7'; // 3D GREEN FLOW FIX (Grok contract audit): arrows render again in 3D green view (TDZ fix); auto-detect actually runs (namespace init + fresh-grid features); one green-brief store shape (Prep advice no longer flips after 3D visits); OSM query uncapped (nearest-green really nearest); hole arrows survive view switches; badge offers every available outline source; trace fallback opens Check location instead of a fake ellipse; 3D defaults on; saved course green ring + traces shared with the sheet.
+const CACHE_VERSION = 'v1.21.8'; // JAMES FIELD ROUND (Grok edit pass): 2D view removed (3D + Hole only); default 1x exaggeration with near-vertical top-down camera; manual green trace removed — Auto outline + OSM outline buttons instead; Drop ball fixed (dpr-scaled drag threshold, tolerant pick in every view, dock-eaten taps captured); Hole Flyover button added and the auto-flyover scope bug fixed; Hole view is satellite-only (Stylized removed); slope/heat canvas insets below the top bar; top bar status wraps to two lines instead of a silent ellipsis.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
