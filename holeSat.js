@@ -29,6 +29,7 @@
   let sheet = null;
   let teeArmed = false;   // v1.17.1: two-tap tee placement state
   let teeMarker = null;   // the current tee marker layer
+  let lastFocus = null;   // v1.21.6: restore focus on close
 
   function bootValues(opts) {
     return {
@@ -52,9 +53,28 @@
     const hole = opts.holeData || {};
     boot.courseId = opts.courseId || null;
     boot.hole = opts.hole || null;
+    // v1.21.6: the tee marker/3D-Green link follows any in-session tee move —
+    // a second open of the sheet must not act on the caller's stale snapshot.
+    if (hole.teePoint) {
+      try {
+        const profiles = JSON.parse(
+          localStorage.getItem('caddy:courseProfiles:v1') || '[]');
+        const c = profiles.find((p) => p && p.id === boot.courseId);
+        const h = c && Array.isArray(c.holes) ? c.holes[boot.hole - 1] : null;
+        if (h && h.teePoint && Number.isFinite(h.teePoint.lat)) {
+          hole.teePoint = h.teePoint;
+        }
+      } catch (e) { /* best-effort fresh tee */ }
+    }
 
     sheet = document.createElement('div');
     sheet.id = 'prep-sat-sheet';
+    // v1.21.6: real dialog semantics — modal, labeled, Escape closes,
+    // focus moves in on open and back to the cartoon on close.
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-label',
+      `Hole ${boot.hole || ''} satellite view`);
     // v1.17.0 premium pass: a stats strip under the header (distance /
     // par / elevation), halo ribbon, labeled landing dots, styled pills.
     const meta = [];
@@ -71,18 +91,27 @@
             `<span>${m}</span>`).join('<i>·</i>')}</div>` : '') +
       '<div class="psh-map" id="pshMap"></div>' +
       // v1.17.1: tap-to-place tee banner (hidden until Move tee armed).
-      '<div class="psh-tee-banner" id="pshTeeBanner" hidden>Tap your tee box on the map · <button type="button" class="psh-tee-cancel" id="pshTeeCancel">Cancel</button></div>' +
+      '<div class="psh-tee-banner" id="pshTeeBanner" role="status" aria-live="polite" hidden>Tap your tee box on the map · <button type="button" class="psh-tee-cancel" id="pshTeeCancel">Cancel</button></div>' +
       // v1.16.1: Move tee + 3D Green live HERE (James) — the card's
       // buttons are gone; the sheet is where hole actions happen.
       // v1.17.1: Move tee = in-sheet two-tap placement (no navigation);
       // 3D Green keeps its (working) deep-link.
       '<div class="psh-actions">' +
-      `  <button class="psh-act" id="pshMoveTee">✛ Move tee</button>` +
+      `  <button class="psh-act" id="pshMoveTee" aria-pressed="false">✛ Move tee</button>` +
       `  <button class="psh-act psh-act-primary" id="psh3d">⛳ 3D Green</button>` +
       '</div>' +
       '<div class="psh-hint">Your hole on the ground — fairway ribbon, landing spots, green &amp; hazards (OSM)</div>';
 
     document.body.appendChild(sheet);
+    lastFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement : null;
+    const pshDoneBtn = sheet.querySelector('#pshDone');
+    if (pshDoneBtn) pshDoneBtn.focus();
+    sheet.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      closeSheet();
+    });
 
     // Same layout contract as greenedit: the sheet must be in the DOM AND
     // laid out before L.map measures it (0x0 container = dead map).
@@ -312,12 +341,15 @@
     // The sheet draws ONLY this hole's stored payload: its assigned
     // shapes, path, green, tee, hazards, landing dots.
 
-    sheet.querySelector('#pshDone').addEventListener('click', () => {
+    function closeSheet() {
       map.remove();
       sheet.remove();
       sheet = null;
       window.__pshMap = null;
-    });
+      if (lastFocus) { try { lastFocus.focus(); } catch { } }
+      lastFocus = null;
+    }
+    sheet.querySelector('#pshDone').addEventListener('click', closeSheet);
 
     // v1.17.1 (James: "the move tee button kicks me out… opens the verify
     // green location screen… back takes me to the 3d green"): Move tee no
@@ -332,12 +364,15 @@
       const bar = document.getElementById('pshTeeBanner');
       if (bar) bar.hidden = false;
       sheet.querySelector('#pshMoveTee').classList.add('armed');
+      sheet.querySelector('#pshMoveTee').setAttribute('aria-pressed', 'true');
     });
     sheet.querySelector('#pshTeeCancel').addEventListener('click',
       disarmTee);
 
     // v1.17.1: 3D Green keeps its deep-link (the 3D tool is a separate
     // page; this worked before and James only flagged the TEE flow).
+    // v1.21.6: navigation goes through a testable seam; jsdom Location is
+    // frozen, so the harness can swap this instead of location.assign.
     sheet.querySelector('#psh3d').addEventListener('click', () => {
       const u = new URLSearchParams();
       if (boot.lat != null) {
@@ -350,7 +385,9 @@
       }
       if (boot.courseId) u.set('course', boot.courseId);
       if (boot.hole) u.set('hole', String(boot.hole));
-      location.assign('greenmap.html?' + u.toString());
+      const target = 'greenmap.html?' + u.toString();
+      if (typeof window.__pshNavigate === 'function') window.__pshNavigate(target);
+      else location.assign(target);
     });
 
     map.on('click', (e) => {
@@ -365,30 +402,36 @@
       }).addTo(map);
       // Persist through app.js so its in-memory course and localStorage stay
       // identical. Direct localStorage-only writes reopen stale geometry until
-      // the whole app reloads.
+      // the whole app reloads. v1.21.6: failures are HONEST — no "Tee saved"
+      // banner when nothing persisted.
+      let saved = null;
       try {
         const saveHole = window.CaddyPrep &&
           window.CaddyPrep.updateSavedCourseHole;
-        const saved = typeof saveHole === 'function'
+        saved = typeof saveHole === 'function'
           ? saveHole(boot.courseId, boot.hole, {
               teePoint: { lat, lng },
               teeSource: 'manual',
             })
           : null;
+      } catch (err) { saved = null; }
+      const done = document.getElementById('pshTeeBanner');
+      if (done) {
         if (saved) {
           let live = false;
           try {
             live = typeof window.__prepRebind === 'function' &&
               window.__prepRebind(boot.hole, { teePoint: { lat, lng } });
           } catch (e2) { live = false; }
-          const done = document.getElementById('pshTeeBanner');
-          if (done) {
-            done.innerHTML = `<span class="psh-tee-ok">✓ Tee saved${live ? ' — Prep updated' : ''}</span>`;
-            done.hidden = false;
-            setTimeout(() => { done.hidden = true; }, 2600);
-          }
+          done.innerHTML =
+            `<span class="psh-tee-ok">✓ Tee saved${live ? ' — Prep updated' : ''}</span>`;
+        } else {
+          done.innerHTML =
+            '<span class="psh-tee-warn">Tee not saved — save this course first, then move the tee</span>';
         }
-      } catch (err) { /* storage failure: marker still moved visually */ }
+        done.hidden = false;
+        setTimeout(() => { done.hidden = true; }, 3200);
+      }
     });
   }
 
@@ -399,6 +442,7 @@
     if (bar) bar.hidden = true;
     const btn = sheet.querySelector('#pshMoveTee');
     if (btn) btn.classList.remove('armed');
+    if (btn) btn.setAttribute('aria-pressed', 'false');
   }
 
   function mount() {

@@ -401,8 +401,10 @@
         haptic(6);
         persist();
         [...lie.parentNode.children].forEach((c) =>
-          c.classList.toggle('active', c === lie)
-        );
+        {
+          c.classList.toggle('active', c === lie);
+          c.setAttribute('aria-pressed', String(c === lie));
+        });
         recompute({ pulse: true });
         return;
       }
@@ -412,10 +414,21 @@
         haptic(6);
         persist();
         [...shape.parentNode.children].forEach((c) =>
-          c.classList.toggle('active', c === shape)
-        );
+        {
+          c.classList.toggle('active', c === shape);
+          c.setAttribute('aria-pressed', String(c === shape));
+        });
         recompute({ pulse: true });
       }
+    });
+
+    // v1.21.6: plan rows are role=button divs — activate with Enter/Space.
+    $('prepStratBody').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const row = e.target.closest('.prep-plan-shot');
+      if (!row || row.dataset.shot == null) return;
+      e.preventDefault();
+      row.click();
     });
 
     // v1.15.1 (tap-a-shot → number): tapping a "How to play it" row loads
@@ -583,12 +596,12 @@
       <div class="prep-tweaks">
         <div class="prep-mini-label">Lie</div>
         <div class="prep-lie-row" id="prepLieRow">
-          ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}
+          ${LIES.map((l) => `<button type="button" class="prep-lie-chip${shot.lie === l.id ? ' active' : ''}" data-lie="${l.id}" aria-pressed="${shot.lie === l.id}"><b>${l.name}</b><span>${l.sub}</span></button>`).join('')}
         </div>
         <div class="prep-mini-label" style="margin-top: 11px">Intended shape</div>
         <div class="prep-shape-row" id="prepShapeRow">
           ${SHAPES.map((s) => `
-            <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}">
+            <button type="button" class="prep-shape-btn${shot.shape === s.id ? ' active' : ''}" data-shape="${s.id}" aria-pressed="${shot.shape === s.id}">
               <svg viewBox="0 0 60 46">${SHAPE_GLYPHS[s.id]}</svg>
               <b>${s.name}</b><span>${s.sub}</span>
             </button>`).join('')}
@@ -1568,7 +1581,20 @@
 
       // v1.15.0: tee dot AT the path's first point (never floating off the
       // line on a tee-set offset); flag at the path's real end.
-      const teeP = P.toXY(h.pathPts[0]);
+      // v1.21.6: after a player MOVES the tee, the dot follows the placed
+      // tee (teeLatLng) — the stored way still starts at the old node.
+      const teeP = (() => {
+        const fromPath = P.toXY(h.pathPts[0]);
+        if (h.teeLatLng && Number.isFinite(h.teeLatLng.lat)) {
+          const placed = P.toXY(h.teeLatLng);
+          // Within ~15 yd of the path start, keep the honest on-line dot.
+          const d2 = (placed.along - fromPath.along) ** 2 +
+            (placed.cross - fromPath.cross) ** 2;
+          if (d2 <= 15 * 15) return fromPath;
+          return placed;
+        }
+        return fromPath;
+      })();
       const teeXY = { x: P.X(teeP.along), y: P.Y(teeP.cross) };
       parts.push(`<circle class="prep-hm-tee" cx="${teeXY.x.toFixed(1)}" cy="${teeXY.y.toFixed(1)}" r="5.5"/>`);
       const gEnd = P.toXY(h.greenLatLng);
@@ -2068,14 +2094,16 @@
         }
         // v1.15.1 (James: "the number box is useless — let users tap the
         // shots caddy recommends and that's what the number reflects"):
-        // each plan row is a BUTTON. Tapping it loads that shot into the
-        // inline number (expanded in place).
+        // each plan row is a disclosure. v1.21.6: a DIV with role=button,
+        // NOT a <button> — the expanded panel injects Lie/Shape buttons
+        // inside the row, and nested interactive elements are invalid HTML
+        // that breaks keyboard/AT behaviour.
         lines.push(
-          `<button type="button" class="prep-plan-shot${planShotIdx === idx ? ' chosen' : ''}" data-shot="${idx}" aria-expanded="${planShotIdx === idx}">` +
+          `<div class="prep-plan-shot${planShotIdx === idx ? ' chosen' : ''}" data-shot="${idx}" role="button" tabindex="0" aria-expanded="${planShotIdx === idx}">` +
           `<span class="prep-plan-club">${escapeHtml(clubShort(shotName))}</span>` +
           `<span class="prep-plan-num">${fmt(segYd)} yd</span>` +
           `<span class="prep-plan-sub">${windTxt}${note ? ' · ' + escapeHtml(note) : ''}</span>` +
-          `</button>`
+          `</div>`
         );
         prev = toYd;
       });

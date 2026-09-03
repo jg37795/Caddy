@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.5'; // PREP AUDIT: typed course search works without GPS; Move tee persists as canonical manual geometry, survives re-map, and refreshes the open brief; shot expansion resets per hole; plan rows no longer contradict their chosen clubs with whole-hole “Lay up” copy; club memo keys include Bag values; duplicate Par/club chips removed; cartoon clearly opens Satellite and exposes expanded state to assistive tech.
+const CACHE_VERSION = 'v1.21.6'; // ACCESSIBILITY + HONEST MOVE-TEE (independent review): expanded shot is a role=button div (no nested buttons) with aria-pressed lie/shape toggles and Enter/Space support; satellite sheet is a labeled modal dialog with Escape-close and focus restore; Move-tee armed/saved states are announced, failures say "Tee not saved — save this course first"; 3D Green link and cartoon tee dot follow the moved tee.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

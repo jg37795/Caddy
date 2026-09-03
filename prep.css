@@ -1503,6 +1503,7 @@ body.dark .prep-strat-advice {
   padding: 0 2px;
 }
 .psh-tee-banner .psh-tee-ok { color: #7dff9b; }
+.psh-tee-banner .psh-tee-warn { color: #ffd166; }
 .psh-act-primary {
   background: linear-gradient(135deg, #1aa45b, #0e8c4d);
   border-color: transparent;

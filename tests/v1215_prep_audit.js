@@ -132,6 +132,25 @@ const check=(name,cond,detail='')=>{
       !/How to play it/.test(bodyText),bodyText.slice(0,160));
   }
 
+  // 3c. v1.21.6: the row is a disclosure DIV (role=button) — Lie/Shape
+  // buttons must not be nested inside a <button>; toggles carry aria-pressed.
+  {
+    const {w}=boot();await wait(40);
+    const sel=w.document.getElementById('planCourseSelect');sel.value='audit-course';
+    sel.dispatchEvent(new w.Event('change'));await wait(40);
+    w.document.querySelector('.plan-hole-row').click();await wait(220);
+    const first=w.document.querySelector('.prep-plan-shot');
+    check('plan row is not a nested-button <button>',
+      first.tagName==='DIV' && first.getAttribute('role')==='button' &&
+      first.getAttribute('tabindex')==='0',
+      first.outerHTML.slice(0,140));
+    first.click();await wait(220);
+    check('lie/shape toggles expose aria-pressed',
+      [...w.document.querySelectorAll('.prep-lie-chip,.prep-shape-btn')]
+        .every((b)=>b.getAttribute('aria-pressed')!==null),
+      w.document.querySelector('.prep-lie-chip')?.outerHTML.slice(0,120));
+  }
+
   // 4. Recommendation memo must include actual bag values, not only count.
   {
     const clubs=[{id:'a',name:'Long',yards:200},{id:'b',name:'Short',yards:100}];
@@ -207,6 +226,48 @@ const check=(name,cond,detail='')=>{
       'fetchGreenDelta writes cond.elevFt');
   }
 
+  // 8. v1.21.6: satellite sheet is a real dialog; cartoon tee dot follows a
+  // moved tee; unsaved-course moves report honestly instead of "Tee saved".
+  {
+    const {w,maps}=boot();w.eval(satSrc);await wait(40);
+    const sel=w.document.getElementById('planCourseSelect');sel.value='audit-course';
+    sel.dispatchEvent(new w.Event('change'));await wait(40);
+    w.document.querySelector('.plan-hole-row').click();await wait(220);
+    const cartoonBefore=w.document.querySelector('.prep-hm-tee');
+    w.document.getElementById('prepHoleMapTap').click();await wait(50);
+    const sheetEl=w.document.getElementById('prep-sat-sheet');
+    check('satellite sheet is a labeled modal dialog',
+      sheetEl && sheetEl.getAttribute('role')==='dialog' &&
+      sheetEl.getAttribute('aria-modal')==='true' &&
+      /satellite/i.test(sheetEl.getAttribute('aria-label')||''));
+    w.document.getElementById('pshMoveTee').click();
+    check('Move tee exposes armed state',
+      w.document.getElementById('pshMoveTee').getAttribute('aria-pressed')==='true');
+    // Move tee onto a clearly different point, then close.
+    const moved=ll(25,30);maps[maps.length-1].fire('click',{latlng:moved});await wait(80);
+    check('honest banner when persistence succeeds',/Tee saved/.test(
+      w.document.getElementById('pshTeeBanner').textContent));
+    w.document.getElementById('pshDone').click();await wait(50);
+    // Second open: sheet tee follows the saved point, 3D Green link too.
+    w.document.getElementById('prepHoleMapTap').click();await wait(50);
+    // Intercept navigation through the sheet's testable seam.
+    let assigned='';
+    w.__pshNavigate=(url)=>{assigned=String(url);};
+    w.document.getElementById('psh3d').click();
+    const expectedLat=moved.lat.toFixed(6);
+    check('3D Green link uses the moved tee coordinates',
+      assigned.includes(`teelat=${expectedLat}`),
+      assigned);
+    w.document.getElementById('pshDone').click();await wait(50);
+    const cartoonAfter=w.document.querySelector('.prep-hm-tee');
+    check('cartoon tee dot follows the moved tee',
+      cartoonBefore && cartoonAfter &&
+      (cartoonAfter.getAttribute('cx')!==cartoonBefore.getAttribute('cx') ||
+       cartoonAfter.getAttribute('cy')!==cartoonBefore.getAttribute('cy')),
+      `${cartoonBefore?.getAttribute('cx')},${cartoonBefore?.getAttribute('cy')} -> `+
+      `${cartoonAfter?.getAttribute('cx')},${cartoonAfter?.getAttribute('cy')}`);
+  }
+
   if(fails){console.log(`${fails} FAILURE(S)`);process.exit(1);}
-  console.log('v1.21.5 PREP AUDIT PASSED');process.exit(0);
+  console.log('v1.21.6 PREP AUDIT PASSED');process.exit(0);
 })().catch(e=>{console.error(e.stack||e);process.exit(2);});
