@@ -51,6 +51,10 @@
       '  <button class="gel-btn" id="gelTee">Move tee</button>' +
       '  <button class="gel-btn" id="gelLoad">Load this green</button>' +
       '</div>' +
+      '<div class="gel-outline-row" id="gelOutlineRow">' +
+      '  <button class="gel-btn" id="gelAutoOutline" aria-pressed="false">Auto outline</button>' +
+      '  <button class="gel-btn" id="gelOsmOutline" aria-pressed="false">OSM outline</button>' +
+      '</div>' +
       '<div class="gel-map" id="gelMap"></div>' +
       '<div class="gel-hint">Tap to move the sample point · green outlines are the real mapped greens (OSM)</div>';
 
@@ -94,6 +98,192 @@
     //   Prep, Round and hole view all agree.
     let teeLL = boot.tee;          // current tee (null = not set)
     let teeMode = false;           // armed by "Move tee"
+    // v1.21.9 re-scope (James): Auto / OSM outline preview on Check
+    // location. One at a time; tapping the map re-anchors at the pin.
+    // Preview only — Load this green still re-boots greenmap's ladder.
+    let gelOutlineMode = null;     // null | 'auto' | 'osm'
+    let gelOutlineLayer = null;
+    let gelOutlineHint = '';
+    let gelOutlineGen = 0;
+    const loadScriptOnce = (src) => new Promise((resolve, reject) => {
+      if (typeof document === 'undefined') { resolve(); return; }
+      const existing = document.querySelector(`script[src="${src}"]`);
+      if (existing) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('load ' + src));
+      document.head.appendChild(s);
+    });
+    const hintEl = () => sheet.querySelector('.gel-hint');
+    const sampleHint = (ll) =>
+      `Sample point: ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
+    const syncOutlineBtns = () => {
+      const autoBtn = sheet.querySelector('#gelAutoOutline');
+      const osmBtn = sheet.querySelector('#gelOsmOutline');
+      if (autoBtn) {
+        const on = gelOutlineMode === 'auto';
+        autoBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        autoBtn.classList.toggle('gel-active', on);
+      }
+      if (osmBtn) {
+        const on = gelOutlineMode === 'osm';
+        osmBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        osmBtn.classList.toggle('gel-active', on);
+      }
+    };
+    const setOutlineHint = (text) => {
+      gelOutlineHint = text || '';
+      if (teeMode) return;
+      const el = hintEl();
+      if (!el) return;
+      el.textContent = gelOutlineHint || sampleHint(pin.getLatLng());
+    };
+    const drawPreviewRing = (ll, color) => {
+      if (!ll || ll.length < 3) return;
+      if (gelOutlineLayer) { map.removeLayer(gelOutlineLayer); gelOutlineLayer = null; }
+      gelOutlineLayer = L.polygon(ll, {
+        color, weight: 3, fillOpacity: 0, interactive: false,
+      }).addTo(map);
+    };
+    const fetchNearestOsm = async (lat, lng) => {
+      const res = await fetch(OVERPASS + '?data=' +
+        encodeURIComponent(overpassQ(lat, lng, 120)));
+      if (!res.ok) throw new Error('overpass ' + res.status);
+      const data = await res.json();
+      let best = null, bestD = Infinity;
+      for (const el of (data.elements || [])) {
+        if (!el || !el.tags || el.tags.golf !== 'green') continue;
+        if (!el.geometry || !el.geometry.length) continue;
+        let cLat = 0, cLng = 0;
+        for (const p of el.geometry) { cLat += p.lat; cLng += p.lon; }
+        cLat /= el.geometry.length; cLng /= el.geometry.length;
+        const d = Math.hypot(
+          (cLat - lat) * 111320,
+          (cLng - lng) * 111320 * Math.cos(lat * Math.PI / 180));
+        if (d < bestD) { bestD = d; best = el; }
+      }
+      if (!best || bestD > 120) return null;
+      return {
+        ll: best.geometry.map((g) => [g.lat, g.lon]),
+        distM: bestD,
+      };
+    };
+    const detectAutoAt = async (lat, lng) => {
+      if (!(window.GreenDetect && typeof window.GreenDetect.detect === 'function')) {
+        try { await loadScriptOnce('./green-detect.js'); } catch (e) { /* offline */ }
+      }
+      if (!(window.GreenDetect && typeof window.GreenDetect.detect === 'function'))
+        return { fail: 'no-detect' };
+      if (!(window.CaddyElev && typeof window.CaddyElev.fetchElevGrid === 'function'))
+        return { fail: 'no-elev' };
+      const spanM = 90, N = 64;
+      const halfLat = (spanM / 2) / 111320;
+      const halfLng = (spanM / 2) / (111320 * Math.cos(lat * Math.PI / 180));
+      const bbox = [lng - halfLng, lat - halfLat, lng + halfLng, lat + halfLat];
+      const elev = await window.CaddyElev.fetchElevGrid(bbox, N);
+      if (!elev || !elev.grid) return { fail: 'no-grid' };
+      const g2 = elev.grid, W = elev.W, H = elev.H, cs = elev.cellSizeM;
+      const N2 = W * H;
+      const idx2 = (x, y) => y * W + x;
+      const val2 = (x, y) => (x >= 0 && y >= 0 && x < W && y < H &&
+        Number.isFinite(g2[idx2(x, y)])) ? g2[idx2(x, y)] : null;
+      const sl2 = new Float64Array(N2).fill(NaN);
+      const s32 = new Float64Array(N2).fill(NaN);
+      const t52 = new Float64Array(N2).fill(NaN);
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const i = idx2(x, y);
+          const zc = val2(x, y); if (zc === null) continue;
+          const zx1 = val2(x + 1, y), zx0 = val2(x - 1, y);
+          const zy1 = val2(x, y + 1), zy0 = val2(x, y - 1);
+          if (zx1 !== null && zx0 !== null && zy1 !== null && zy0 !== null)
+            sl2[i] = Math.hypot(zx1 - zx0, zy1 - zy0) / (2 * cs) * 100;
+          let sA = 0, nA = 0, vA = [];
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              const v = val2(x + dx, y + dy);
+              if (v !== null) { sA += v; nA++; vA.push(v); }
+            }
+          if (nA >= 5) {
+            const m = sA / nA;
+            s32[i] = Math.sqrt(vA.reduce((a, v) => a + (v - m) * (v - m), 0) / nA);
+          }
+          let nB = 0, vB = [];
+          for (let dy = -2; dy <= 2; dy++)
+            for (let dx = -2; dx <= 2; dx++) {
+              const sv = sl2[idx2(Math.min(W - 1, Math.max(0, x + dx)),
+                Math.min(H - 1, Math.max(0, y + dy)))];
+              if (Number.isFinite(sv)) { nB++; vB.push(sv); }
+            }
+          if (nB >= 12) {
+            const m = vB.reduce((a, v) => a + v, 0) / nB;
+            t52[i] = Math.sqrt(vB.reduce((a, v) => a + (v - m) * (v - m), 0) / nB);
+          }
+        }
+      const detectRes = window.GreenDetect.detect({
+        grid: {
+          W, H, cellSizeM: cs, z: g2, slope: sl2, smooth3: s32, tex5: t52,
+          exg: new Float64Array(N2).fill(NaN),
+          bright: new Float64Array(N2).fill(NaN)
+        },
+        satSample: () => null
+      });
+      if (!detectRes || detectRes.confidence < 0.6 || !detectRes.poly)
+        return { fail: 'low-conf', conf: detectRes && detectRes.confidence };
+      const mLat = 111320;
+      const mLng = 111320 * Math.cos(lat * Math.PI / 180);
+      const ll = detectRes.poly.map(([mx, my]) => [
+        lat + my / mLat, lng + mx / mLng
+      ]);
+      return { ll, conf: detectRes.confidence };
+    };
+    const runAutoAt = async (ll) => {
+      const gen = ++gelOutlineGen;
+      setOutlineHint('Outline: Auto (detecting…)');
+      let res = null;
+      try { res = await detectAutoAt(ll.lat, ll.lng); }
+      catch (e) { res = { fail: 'err' }; }
+      if (gen !== gelOutlineGen) return;
+      if (!res || res.fail || !res.ll) {
+        const why = res && res.fail === 'low-conf'
+          ? 'not confident here — try OSM or another point'
+          : 'could not detect here — try OSM or another point';
+        setOutlineHint('Outline: Auto (' + why + ')');
+        return;
+      }
+      drawPreviewRing(res.ll, '#ffd166');
+      setOutlineHint('Outline: Auto (detected)');
+    };
+    const runOsmAt = async (ll) => {
+      const gen = ++gelOutlineGen;
+      setOutlineHint('Outline: OSM (fetching…)');
+      let hit = null;
+      try { hit = await fetchNearestOsm(ll.lat, ll.lng); }
+      catch (e) { hit = null; }
+      if (gen !== gelOutlineGen) return;
+      if (!hit || !hit.ll) {
+        setOutlineHint('Outline: OSM (no mapped green near this point)');
+        return;
+      }
+      drawPreviewRing(hit.ll, '#7dff9b');
+      setOutlineHint('Outline: OSM (mapped green ' + Math.round(hit.distM) + ' m away)');
+    };
+    const clearOutline = () => {
+      gelOutlineMode = null;
+      gelOutlineHint = '';
+      gelOutlineGen++;
+      if (gelOutlineLayer) { map.removeLayer(gelOutlineLayer); gelOutlineLayer = null; }
+      syncOutlineBtns();
+      if (!teeMode) {
+        const el = hintEl();
+        if (el) el.textContent = sampleHint(pin.getLatLng());
+      }
+    };
+    window.__gelOutline = {
+      get mode() { return gelOutlineMode; },
+      get hint() { return (hintEl() && hintEl().textContent) || gelOutlineHint; },
+    };
     // v1.14.0 (R6-D5): teeMarker must be REBINDABLE. It was `const`, so
     // setTee removed the old marker but the freshly created one was never
     // tracked — every "Move tee" placement stacked ANOTHER marker on the
@@ -116,7 +306,7 @@
         readout2.textContent = teeMode
           ? (teeLL ? 'Tap the map to move the tee — or tap the tee to remove it'
                    : 'Tap your tee box on the map')
-          : `Sample point: ${pin.getLatLng().lat.toFixed(5)}, ${pin.getLatLng().lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
+          : (gelOutlineHint || sampleHint(pin.getLatLng()));
       }
     };
     const setTee = (ll) => {
@@ -156,12 +346,30 @@
     // Live crosshair readout.
     const readout = sheet.querySelector('.gel-hint');
     const setReadout = (ll) => {
-      readout.textContent =
-        `Sample point: ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)} — tap the map to move it, then “Load this green”`;
+      if (teeMode) return;
+      if (gelOutlineHint) {
+        readout.textContent = gelOutlineHint;
+        return;
+      }
+      readout.textContent = sampleHint(ll);
     };
     setReadout(pin.getLatLng());
     // v1.13.0: armtee deep-link re-syncs the UI once readout exists.
     if (teeMode) syncTeeUI();
+    const autoBtn = sheet.querySelector('#gelAutoOutline');
+    const osmBtn = sheet.querySelector('#gelOsmOutline');
+    if (autoBtn) autoBtn.addEventListener('click', () => {
+      if (gelOutlineMode === 'auto') { clearOutline(); return; }
+      gelOutlineMode = 'auto';
+      syncOutlineBtns();
+      runAutoAt(pin.getLatLng());
+    });
+    if (osmBtn) osmBtn.addEventListener('click', () => {
+      if (gelOutlineMode === 'osm') { clearOutline(); return; }
+      gelOutlineMode = 'osm';
+      syncOutlineBtns();
+      runOsmAt(pin.getLatLng());
+    });
     map.on('click', (e) => {
       // v1.12.0 (tee mode): in tee mode a map tap PLACES the tee
       // (disarming), exactly like Round's Set-tee flow.
@@ -169,9 +377,21 @@
         setTee({ lat: e.latlng.lat, lng: e.latlng.lng });
         return;
       }
-      pin.setLatLng(e.latlng); setReadout(e.latlng);
+      pin.setLatLng(e.latlng);
+      if (gelOutlineMode === 'auto') runAutoAt(e.latlng);
+      else if (gelOutlineMode === 'osm') runOsmAt(e.latlng);
+      else setReadout(e.latlng);
     });
-    pin.on('drag', (e) => setReadout(e.target.getLatLng()));
+    pin.on('dragend', (e) => {
+      const ll = e.target.getLatLng();
+      if (gelOutlineMode === 'auto') runAutoAt(ll);
+      else if (gelOutlineMode === 'osm') runOsmAt(ll);
+      else setReadout(ll);
+    });
+    pin.on('drag', (e) => {
+      if (gelOutlineMode) return;
+      setReadout(e.target.getLatLng());
+    });
 
     // Real OSM greens around the boot point (60 m) — drawn so James can SEE
     // which green is which. v1.2.5: each green gets a HOLE label (H3, H7…)
@@ -245,7 +465,7 @@
         });
         const greens = els.filter((e) =>
           e.tags && e.tags.golf === 'green').length;
-        if (!greens) {
+        if (!greens && !gelOutlineMode && !teeMode) {
           readout.textContent =
             'No mapped greens within 60 m — the tool will approximate. Use Auto outline or OSM outline, or tap where the green is and “Load this green”.';
         }

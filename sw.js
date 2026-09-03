@@ -1,5 +1,5 @@
 /* sw.js — offline-first service worker for Caddy. */
-const CACHE_VERSION = 'v1.21.9'; // TAP ACCURACY + SATELLITE OUTLINES (James round 2): canvas bitmap now sized to the stage box (was full-viewport → CSS squash = taps/flag/ball landed off-target, drop-ball flaky, flyover vertically squashed); Auto outline + OSM outline toggles on the Hole/satellite view (amber/green depth-tested rings, on-demand Overpass/GreenDetect) and on the holeSat sheet with a source chip; tap→pick round-trip regression locks projection accuracy.
+const CACHE_VERSION = 'v1.22.0'; // OUTLINE CONTROLS RESCOPED (James): Auto outline + OSM outline removed from the Prep satellite sheet (back to Move tee + 3D Green); they now live in Check location — mutually exclusive one-at-a-time preview rings (Auto amber via on-demand GreenDetect, OSM green via nearest Overpass green), re-anchored by tapping the map or dragging the pin, source named in the hint; 3D source buttons and Hole-view overlay toggles unchanged.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

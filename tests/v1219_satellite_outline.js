@@ -1,9 +1,10 @@
 'use strict';
 /* tests/v1219_satellite_outline.js — James v1.21.9 field-report regressions
    (1) canvas bitmap == stage box * dpr after fitView
-   (2) holeSat Auto/OSM toggle buttons paint overlay rings
+   (2) holeSat Auto/OSM pills ABSENT (re-scoped to Check location)
    (3) eventPos → pickCell3D round-trip (flag/drop-ball tap accuracy)
    (4) greenmap Hole view gets outline toggles
+   (5) Check location (greenedit) Auto/OSM: mutual exclusion, tap re-anchor
    Run: node tests/v1219_satellite_outline.js */
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +14,7 @@ const gmSrc = fs.readFileSync(path.join(__dirname, '..', 'greenmap.js'), 'utf8')
 const htmlSrc = fs.readFileSync(path.join(__dirname, '..', 'greenmap.html'), 'utf8');
 const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'greenmap.css'), 'utf8');
 const satSrc = fs.readFileSync(path.join(__dirname, '..', 'holeSat.js'), 'utf8');
+const editSrc = fs.readFileSync(path.join(__dirname, '..', 'greenedit.js'), 'utf8');
 
 let fails = 0;
 const check = (n, c, d = '') => {
@@ -50,10 +52,24 @@ check('Hole overlay stroke uses OSM #7dff9b and Auto #ffd166',
 check('118px stage fallback is still first-paint only',
   /--gm-top-inset, calc\(var\(--safe-top, 0px\) \+ 118px\)/.test(cssSrc));
 
-check('holeSat builds Auto/OSM toggle buttons',
-  /id="pshAutoOutline"/.test(satSrc) &&
-  /id="pshOsmOutline"/.test(satSrc) &&
-  /id="pshOutlineChip"/.test(satSrc));
+check('holeSat no longer builds Auto/OSM pills (moved to Check location)',
+  !/id="pshAutoOutline"/.test(satSrc) &&
+  !/id="pshOsmOutline"/.test(satSrc) &&
+  !/id="pshOutlineChip"/.test(satSrc) &&
+  !/id="pshOutlineRow"/.test(satSrc) &&
+  /id="pshMoveTee"/.test(satSrc) &&
+  /id="psh3d"/.test(satSrc));
+
+check('Check location editor has Auto/OSM outline buttons (second row)',
+  /id="gelAutoOutline"/.test(editSrc) &&
+  /id="gelOsmOutline"/.test(editSrc) &&
+  /id="gelOutlineRow"/.test(editSrc) &&
+  /gelOutlineMode/.test(editSrc));
+
+check('Check location Load this green still re-boots at the sample point',
+  /location\.replace\('\?r='/.test(editSrc) &&
+  /qs2\.set\('lat'/.test(editSrc) &&
+  /qs2\.set\('lng'/.test(editSrc));
 
 /* ---- (1) canvas bitmap == stage box * dpr ----------------------------- */
 {
@@ -222,11 +238,29 @@ check('holeSat builds Auto/OSM toggle buttons',
   });
 
   liveDone.then(async () => {
-    /* ---- (2) holeSat Auto/OSM toggle buttons paint overlay rings ------ */
-    let prevWindow, prevDocument;
-    try {
-      const LAT0 = 41.778, LNG0 = -93.782;
-      let leafletCalls = [];
+    /* ---- (2) holeSat Auto/OSM pills are gone from the Prep sheet ------ */
+    let prevWindow, prevDocument, prevL, prevFetch, prevHTMLElement, prevElement, prevNode, prevRAF;
+    const snapshotGlobals = () => {
+      prevWindow = global.window;
+      prevDocument = global.document;
+      prevL = global.L;
+      prevFetch = global.fetch;
+      prevHTMLElement = global.HTMLElement;
+      prevElement = global.Element;
+      prevNode = global.Node;
+      prevRAF = global.requestAnimationFrame;
+    };
+    const restoreGlobals = () => {
+      if (prevWindow) global.window = prevWindow;
+      if (prevDocument) global.document = prevDocument;
+      if (prevL !== undefined) global.L = prevL;
+      if (prevFetch !== undefined) global.fetch = prevFetch;
+      if (prevHTMLElement) global.HTMLElement = prevHTMLElement;
+      if (prevElement) global.Element = prevElement;
+      if (prevNode) global.Node = prevNode;
+      if (prevRAF) global.requestAnimationFrame = prevRAF;
+    };
+    const makeFakeL = (leafletCalls, mapHandlers) => {
       function fakeLayer(kind, opts) {
         return {
           __kind: kind, __opts: opts || {},
@@ -234,7 +268,7 @@ check('holeSat builds Auto/OSM toggle buttons',
           on() { return this; },
         };
       }
-      const FAKE_L = {
+      return {
         control: { zoom: () => ({ addTo: () => {} }) },
         DomEvent: new Proxy({}, { get: () => () => {} }),
         DomUtil: new Proxy({}, { get: () => () => '' }),
@@ -255,7 +289,16 @@ check('holeSat builds Auto/OSM toggle buttons',
             getPane: () => ({ style: {} }),
             createPane: () => ({ style: {} }),
             getBounds: () => ({ pad: () => ({}) }),
-            on() { return this; },
+            on(ev, fn) {
+              if (mapHandlers) {
+                (mapHandlers[ev] = mapHandlers[ev] || []).push(fn);
+              }
+              return this;
+            },
+            fire(ev, payload) {
+              if (mapHandlers && mapHandlers[ev])
+                mapHandlers[ev].forEach((fn) => fn(payload));
+            },
             off() { return this; },
             fitBounds() { return this; },
             invalidateSize() { return this; },
@@ -266,35 +309,122 @@ check('holeSat builds Auto/OSM toggle buttons',
         polyline: (ll, o) => fakeLayer('polyline', Object.assign({ __ll: ll }, o)),
         polygon: (ll, o) => fakeLayer('polygon', Object.assign({ __ll: ll }, o)),
         circleMarker: (ll, o) => fakeLayer('circle', Object.assign({ __ll: ll }, o)),
-        marker: (ll, o) => fakeLayer('marker', Object.assign({ __ll: ll }, o)),
+        marker: (ll, o) => {
+          const latlng = Array.isArray(ll)
+            ? { lat: ll[0], lng: ll[1] }
+            : { lat: ll.lat, lng: ll.lng };
+          const m = fakeLayer('marker', Object.assign({ __ll: ll }, o));
+          m.getLatLng = () => latlng;
+          m.setLatLng = (ll2) => {
+            if (ll2 && ll2.lat != null) { latlng.lat = ll2.lat; latlng.lng = ll2.lng; }
+            else if (Array.isArray(ll2)) { latlng.lat = ll2[0]; latlng.lng = ll2[1]; }
+            return m;
+          };
+          const hs = {};
+          m.on = (ev, fn) => { (hs[ev] = hs[ev] || []).push(fn); return m; };
+          return m;
+        },
         divIcon: (o) => o,
       };
+    };
+    try {
+      const LAT0 = 41.778, LNG0 = -93.782;
+      const leafletCalls = [];
+      const FAKE_L = makeFakeL(leafletCalls, null);
       const html = '<html><body></body></html>';
       const dom = new JSDOM(html, { url: 'https://caddy.local/index.html', pretendToBeVisual: true });
       const { window } = dom;
       window.L = FAKE_L;
+      snapshotGlobals();
       global.L = FAKE_L;
-      prevWindow = global.window;
-      prevDocument = global.document;
       global.window = window;
       global.document = window.document;
       global.HTMLElement = window.HTMLElement;
       global.Element = window.Element;
       global.Node = window.Node;
       global.requestAnimationFrame = (f) => setTimeout(f, 0);
+      window.fetch = async () => { throw new Error('offline'); };
+      global.fetch = window.fetch;
+      eval(satSrc);
+      check('PrepHoleSat mounted on the sheet window',
+        !!(window.PrepHoleSat && typeof window.PrepHoleSat.open === 'function'));
+      window.PrepHoleSat.open({
+        greenLatLng: { lat: LAT0, lng: LNG0 },
+        courseId: 'test-course',
+        hole: 1,
+        holeData: {
+          par: 4, yards: 387,
+          pathPts: [{ lat: LAT0, lng: LNG0 }, { lat: LAT0 - 0.001, lng: LNG0 }],
+          greenRingPts: [
+            { lat: LAT0, lng: LNG0 }, { lat: LAT0, lng: LNG0 + 0.0001 },
+            { lat: LAT0 - 0.0001, lng: LNG0 + 0.0001 }, { lat: LAT0, lng: LNG0 }
+          ],
+          teePoint: { lat: LAT0, lng: LNG0 },
+          greenCenter: { lat: LAT0, lng: LNG0 },
+          shapes: {},
+          hazards: [],
+        },
+        teeLL: { lat: LAT0, lng: LNG0 },
+      });
+      await new Promise((r) => setTimeout(r, 80));
+      check('holeSat Auto outline button is ABSENT',
+        !window.document.getElementById('pshAutoOutline'));
+      check('holeSat OSM outline button is ABSENT',
+        !window.document.getElementById('pshOsmOutline'));
+      check('holeSat source chip is ABSENT',
+        !window.document.getElementById('pshOutlineChip'));
+      check('holeSat outline row is ABSENT',
+        !window.document.getElementById('pshOutlineRow'));
+      check('holeSat keeps Move tee + 3D Green',
+        !!window.document.getElementById('pshMoveTee') &&
+        !!window.document.getElementById('psh3d'));
+    } catch (e) {
+      fails++;
+      console.error('FAIL - holeSat overlay harness', e.stack);
+    } finally {
+      restoreGlobals();
+    }
+
+    /* ---- (5) Check location Auto/OSM outline (greenedit) -------------- */
+    try {
+      const LAT0 = 41.778, LNG0 = -93.782;
+      const LAT1 = LAT0 + 0.0004;
+      const leafletCalls = [];
+      const mapHandlers = {};
+      const FAKE_L = makeFakeL(leafletCalls, mapHandlers);
+      const html = '<html><body><button id="gm-editloc">Check location</button></body></html>';
+      const dom = new JSDOM(html, {
+        url: `https://caddy.local/greenmap.html?lat=${LAT0}&lng=${LNG0}`,
+        pretendToBeVisual: true,
+      });
+      const { window } = dom;
+      window.L = FAKE_L;
+      snapshotGlobals();
+      global.L = FAKE_L;
+      global.window = window;
+      global.document = window.document;
+      global.HTMLElement = window.HTMLElement;
+      global.Element = window.Element;
+      global.Node = window.Node;
+      global.requestAnimationFrame = (f) => setTimeout(f, 0);
+      global.location = window.location;
       window.fetch = async (url) => {
         const u = String(url);
         if (u.includes('overpass')) {
+          const m = decodeURIComponent(u).match(/around:\d+,([-\d.]+),([-\d.]+)/);
+          const lat = m ? parseFloat(m[1]) : LAT0;
+          const lng = m ? parseFloat(m[2]) : LNG0;
+          const gLat = lat + 23 / 111320;
           return {
             ok: true,
             json: async () => ({
               elements: [{
                 type: 'way', tags: { golf: 'green' },
                 geometry: [
-                  { lat: LAT0, lon: LNG0 },
-                  { lat: LAT0 + 0.0002, lon: LNG0 },
-                  { lat: LAT0 + 0.0002, lon: LNG0 + 0.0002 },
-                  { lat: LAT0, lon: LNG0 + 0.0002 },
+                  { lat: gLat, lon: lng },
+                  { lat: gLat + 0.0002, lon: lng },
+                  { lat: gLat + 0.0002, lon: lng + 0.0002 },
+                  { lat: gLat, lon: lng + 0.0002 },
                 ]
               }]
             }),
@@ -310,7 +440,6 @@ check('holeSat builds Auto/OSM toggle buttons',
           poly: [[-8, -8], [8, -8], [8, 8], [-8, 8]]
         })
       };
-      global.window.GreenDetect = window.GreenDetect;
       window.CaddyElev = {
         fetchElevGrid: async () => {
           const N = 16, cs = 90 / N, grid = new Float32Array(N * N);
@@ -318,64 +447,83 @@ check('holeSat builds Auto/OSM toggle buttons',
           return { grid, W: N, H: N, cellSizeM: cs };
         }
       };
-      window.eval = undefined;
-      eval(satSrc);
-      check('PrepHoleSat mounted on the sheet window',
-        !!(window.PrepHoleSat && typeof window.PrepHoleSat.open === 'function'));
-      const holeData = {
-        par: 4, yards: 387,
-        pathPts: [{ lat: LAT0, lng: LNG0 }, { lat: LAT0 - 0.001, lng: LNG0 }],
-        greenRingPts: [
-          { lat: LAT0, lng: LNG0 }, { lat: LAT0, lng: LNG0 + 0.0001 },
-          { lat: LAT0 - 0.0001, lng: LNG0 + 0.0001 }, { lat: LAT0, lng: LNG0 }
-        ],
-        teePoint: { lat: LAT0, lng: LNG0 },
-        greenCenter: { lat: LAT0, lng: LNG0 },
-        shapes: {},
-        hazards: [],
-      };
-      leafletCalls = [];
-      window.PrepHoleSat.open({
-        greenLatLng: { lat: LAT0, lng: LNG0 },
-        courseId: 'test-course',
-        hole: 1,
-        holeData,
-        teeLL: { lat: LAT0, lng: LNG0 },
-      });
+      eval(editSrc);
+      if (window.document.readyState === 'loading') {
+        window.document.dispatchEvent(new window.Event('DOMContentLoaded'));
+      }
+      const openBtn = window.document.getElementById('gm-editloc');
+      check('Check location button is wired', !!openBtn);
+      if (openBtn) openBtn.click();
       await new Promise((r) => setTimeout(r, 80));
-      const auto = window.document.getElementById('pshAutoOutline');
-      const osm = window.document.getElementById('pshOsmOutline');
-      const chip = window.document.getElementById('pshOutlineChip');
-      check('holeSat Auto outline button is in the sheet', !!auto);
-      check('holeSat OSM outline button is in the sheet', !!osm);
-      check('holeSat source chip is in the sheet', !!chip);
-      const polysBefore = leafletCalls.filter((c) => c[0] === 'polygon').length;
+      const auto = window.document.getElementById('gelAutoOutline');
+      const osm = window.document.getElementById('gelOsmOutline');
+      const hint = window.document.querySelector('.gel-hint');
+      check('greenedit Auto outline button is in the sheet', !!auto);
+      check('greenedit OSM outline button is in the sheet', !!osm);
+      check('greenedit hint line exists', !!hint);
+
       if (osm) osm.click();
       await new Promise((r) => setTimeout(r, 80));
       const osmPolys = leafletCalls.filter((c) =>
-        c[0] === 'polygon' && c[1] && c[1].color === '#7dff9b' && c[1].fillOpacity === 0);
-      check('OSM toggle draws a #7dff9b overlay ring',
+        c[0] === 'polygon' && c[1] && c[1].color === '#7dff9b' && c[1].weight === 3);
+      check('OSM outline draws a #7dff9b weight-3 ring',
         osmPolys.length >= 1,
-        `osm overlay polys=${osmPolys.length} total polys=${leafletCalls.filter(c=>c[0]==='polygon').length} before=${polysBefore}`);
+        `osm preview polys=${osmPolys.length}`);
+      check('OSM button looks active (aria-pressed)',
+        osm && osm.getAttribute('aria-pressed') === 'true');
+      check('Auto button is not pressed while OSM is on',
+        auto && auto.getAttribute('aria-pressed') === 'false');
+      check('hint names OSM source with distance',
+        !!(hint && /Outline: OSM \(mapped green \d+ m away\)/.test(hint.textContent)),
+        hint && hint.textContent);
+
+      const osmCountAfterClick = osmPolys.length;
+      if (window.__gelMap && typeof window.__gelMap.fire === 'function') {
+        window.__gelMap.fire('click', { latlng: { lat: LAT1, lng: LNG0 } });
+      }
+      await new Promise((r) => setTimeout(r, 80));
+      const osmPolysAfterTap = leafletCalls.filter((c) =>
+        c[0] === 'polygon' && c[1] && c[1].color === '#7dff9b' && c[1].weight === 3);
+      check('OSM tap re-fetches and draws a new ring at the tapped point',
+        osmPolysAfterTap.length > osmCountAfterClick,
+        `beforeTap=${osmCountAfterClick} afterTap=${osmPolysAfterTap.length}`);
+
       if (auto) auto.click();
       await new Promise((r) => setTimeout(r, 80));
       const autoPolys = leafletCalls.filter((c) =>
-        c[0] === 'polygon' && c[1] && c[1].color === '#ffd166');
-      check('Auto toggle draws a #ffd166 overlay ring',
+        c[0] === 'polygon' && c[1] && c[1].color === '#ffd166' && c[1].weight === 3);
+      check('Auto outline runs detect and draws a #ffd166 weight-3 ring',
         autoPolys.length >= 1,
-        `auto overlay polys=${autoPolys.length}`);
-      // Toggle OSM off — layer is removed (removeLayer called; overlay count can stay in the call log)
-      if (osm) osm.click();
+        `auto preview polys=${autoPolys.length}`);
+      check('Auto button looks active (aria-pressed); OSM is off',
+        auto && auto.getAttribute('aria-pressed') === 'true' &&
+        osm && osm.getAttribute('aria-pressed') === 'false');
+      check('hint names Auto source',
+        !!(hint && /Outline: Auto \(detected\)/.test(hint.textContent)),
+        hint && hint.textContent);
+
+      const autoCount = autoPolys.length;
+      if (window.__gelMap && typeof window.__gelMap.fire === 'function') {
+        window.__gelMap.fire('click', { latlng: { lat: LAT0, lng: LNG0 } });
+      }
+      await new Promise((r) => setTimeout(r, 80));
+      const autoPolysAfterTap = leafletCalls.filter((c) =>
+        c[0] === 'polygon' && c[1] && c[1].color === '#ffd166' && c[1].weight === 3);
+      check('Auto tap re-runs detect at the tapped point',
+        autoPolysAfterTap.length > autoCount,
+        `beforeTap=${autoCount} afterTap=${autoPolysAfterTap.length}`);
+
+      if (auto) auto.click();
       await new Promise((r) => setTimeout(r, 40));
-      check('OSM toggle off clears ov.osmOn',
-        window.__pshOutline && window.__pshOutline.osmOn === false,
-        JSON.stringify(window.__pshOutline && { osmOn: window.__pshOutline.osmOn, autoOn: window.__pshOutline.autoOn }));
+      check('tapping the active Auto button turns it off',
+        window.__gelOutline && window.__gelOutline.mode === null &&
+        auto.getAttribute('aria-pressed') === 'false',
+        window.__gelOutline && window.__gelOutline.mode);
     } catch (e) {
       fails++;
-      console.error('FAIL - holeSat overlay harness', e.stack);
+      console.error('FAIL - greenedit outline harness', e.stack);
     } finally {
-      if (prevWindow) global.window = prevWindow;
-      if (prevDocument) global.document = prevDocument;
+      restoreGlobals();
     }
 
     if (fails) { console.log(`${fails} FAILURE(S)`); process.exit(1); }
