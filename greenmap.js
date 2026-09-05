@@ -1654,7 +1654,24 @@
     // (2) ?course&hole + profile greenRingPts + no stored OSM ring →
     // adopt the course ring as this green's OSM identity (Prep cartoon,
     // satellite sheet and 3D then all draw the same green).
-    if (osm && savedRingLL && (!rec || !Array.isArray(rec.osmRing))) {
+    // Adoption only applies when the pin sits ON the profile ring's green.
+    // Check-location relocations carry course/hole AND the original ring,
+    // but the pin now names a different green: caching that ring here would
+    // pin the wrong outline to the wrong coordinates and shadow the lookup.
+    const ringContainsPin = (ring) => ring && ring.length >= 3 && (() => {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const yi = Array.isArray(ring[i]) ? ring[i][0] : ring[i].lat;
+        const xi = Array.isArray(ring[i]) ? ring[i][1] : ring[i].lng;
+        const yj = Array.isArray(ring[j]) ? ring[j][0] : ring[j].lat;
+        const xj = Array.isArray(ring[j]) ? ring[j][1] : ring[j].lng;
+        if (((yi > state.lat) !== (yj > state.lat)) &&
+            state.lng < (xj - xi) * (state.lat - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    })();
+    if (osm && savedRingLL && (!rec || !Array.isArray(rec.osmRing)) &&
+        ringContainsPin(savedRingLL)) {
       osm.saveOsm(state.lat, state.lng,
         savedRingLL.map((p) => Array.isArray(p) ? [p[0], p[1]]
           : [p.lat, p.lng]), 0);
