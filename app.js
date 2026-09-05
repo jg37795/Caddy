@@ -1997,32 +1997,36 @@
       clearTimeout(t);
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
-      save(fullKey, { ts: now, data });
-      // v-fix(api-cache-evict) v1.5.2 (audit #5): these keys had no
-      // eviction — every ~1 km-weather / ~110 m-elev grid point saved a
-      // fresh localStorage entry forever. On quota error, sweep the oldest
-      // caddy:api:* entries (this write included) and retry once.
+      // Cache writes are best-effort, separate from network success.
+      // save() intentionally swallows errors for other callers, so catch
+      // setItem itself here. Evict disposable API data only, never rounds,
+      // courses or shots, and retry once on an actual quota failure.
       try {
-        return { data, offline: false, ts: now };
+        localStorage.setItem(fullKey, JSON.stringify({ ts: now, data }));
       } catch (quotaErr) {
-        try {
-          const entries = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k && k.indexOf('caddy:api:') === 0) {
-              let ts = 0;
-              try { ts = (JSON.parse(localStorage.getItem(k)) || {}).ts || 0; }
-              catch (e2) { ts = 0; }
-              entries.push([k, ts]);
+        const isQuota = quotaErr && (quotaErr.name === 'QuotaExceededError' ||
+          quotaErr.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+          quotaErr.code === 22 || quotaErr.code === 1014);
+        if (isQuota) {
+          try {
+            const entries = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (k && k.indexOf('caddy:api:') === 0) {
+                let ts = 0;
+                try { ts = (JSON.parse(localStorage.getItem(k)) || {}).ts || 0; }
+                catch (e2) { ts = 0; }
+                entries.push([k, Number.isFinite(ts) ? ts : 0]);
+              }
             }
-          }
-          entries.sort((a, b) => a[1] - b[1]);
-          for (const [k] of entries.slice(0, Math.ceil(entries.length / 3)))
-            localStorage.removeItem(k);
-          save(fullKey, { ts: now, data });
-          return { data, offline: false, ts: now };
-        } catch (e3) { throw quotaErr; }
+            entries.sort((a, b) => a[1] - b[1]);
+            for (const [k] of entries.slice(0, Math.ceil(entries.length / 3)))
+              localStorage.removeItem(k);
+            localStorage.setItem(fullKey, JSON.stringify({ ts: now, data }));
+          } catch (e3) { /* full/blocked storage must not discard fresh API data */ }
+        }
       }
+      return { data, offline: false, ts: now };
     } catch (e) {
       if (cached) return { data: cached.data, offline: true, ts: cached.ts };
       throw e;

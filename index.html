@@ -1461,9 +1461,9 @@
   <!-- v1.16.0: tap-the-hole-map satellite sheet (Prep) — must load after
        leaflet (it uses L) and before prep.js (prep opens it). -->
   <script src="./holeSat.js"></script>
-  <!-- v1.18.0: headless green-brief builder (USGS + putt sim without the
-       3D tool) — needs caddy-elev.js + greenmap.js GreenMapCore; prep.js
-       triggers it on sheet open. -->
+  <!-- Prep uses the existing GreenMapCore math; greenmap.js skips its
+       screen initialization when this page has no gm-canvas. -->
+  <script src="./greenmap.js"></script>
   <script src="./greenBriefCore.js"></script>
   <!-- v1.23.0: per-green outline store — loaded before prep.js (the cartoon
        and GreenBriefCore.build read OutlineStore.chosenRing). -->

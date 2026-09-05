@@ -1226,8 +1226,10 @@
 
   window.GreenMapCore = GreenMapCore;
 
-  // Headless (node) runs stop here — pure core is all tests need.
-  if (typeof document === 'undefined') return;
+  // The app's Prep brief needs the same math, not the 3D screen. Stop
+  // before UI wiring, saved-location reads or network calls on other pages.
+  if (typeof document === 'undefined' ||
+      !document.getElementById('gm-canvas')) return;
 
   /* ======================================================================
      2. DATA LOADING
@@ -1349,16 +1351,54 @@
     }
 
   async function fetchGreenPolygon(lat, lng, signal) {
+    window.__osmGreenNearby = false;
+    window.__osmGreenDistM = null;
+    window.__osmGreenLookupFailed = false;
     try {
       const q =
         `[out:json][timeout:15];` +
         `(way["golf"="green"](around:120,${lat},${lng}););` +
         `out geom;`;
-      const res = await fetch(
-        'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q),
-        { signal });
-      if (!res.ok) throw new Error('overpass ' + res.status);
-      const data = await res.json();
+      // Same mirrors as the app, without importing its UI/bootstrap.
+      // Empty replies can be transient: try each mirror, then the primary
+      // once more after backoff. Bound each attempt, including body reads.
+      const endpoints = [
+        'https://overpass.private.coffee/api/interpreter',
+        'https://overpass.osm.jp/api/interpreter',
+        'https://overpass-api.de/api/interpreter',
+      ];
+      let data = null, lastError = null, sawEmpty = false;
+      for (let attempt = 0; attempt <= endpoints.length; attempt++) {
+        if (signal && signal.aborted) throw new Error('OSM lookup cancelled');
+        if (attempt === endpoints.length)
+          await new Promise(resolve => setTimeout(resolve, 800));
+        if (signal && signal.aborted) throw new Error('OSM lookup cancelled');
+        const ctrl = new AbortController();
+        const abort = () => ctrl.abort();
+        if (signal) signal.addEventListener('abort', abort, { once: true });
+        const timer = setTimeout(abort, 10000);
+        try {
+          const res = await fetch(endpoints[attempt % endpoints.length] +
+            '?data=' + encodeURIComponent(q), { signal: ctrl.signal });
+          if (!res.ok) throw new Error('overpass ' + res.status);
+          const reply = await res.json();
+          if (ctrl.signal.aborted) throw new Error('OSM lookup timed out or cancelled');
+          if (!reply || !Array.isArray(reply.elements) || reply.remark)
+            throw new Error('Incomplete Overpass response');
+          if (reply.elements.length) { data = reply; break; }
+          sawEmpty = true;
+        } catch (e) {
+          lastError = e;
+          if (signal && signal.aborted) throw e;
+        } finally {
+          clearTimeout(timer);
+          if (signal) signal.removeEventListener('abort', abort);
+        }
+      }
+      if (!data) {
+        if (!sawEmpty) throw lastError || new Error('OSM lookup unavailable');
+        data = { elements: [] };
+      }
       // v1.3.1: remember whether OSM had ANY green near the launch point —
       // the loc badge uses it to offer "switch to OSM" when a trace wins.
       const anyGreen = !!(data.elements && data.elements.length);
@@ -1385,6 +1425,7 @@
     } catch (e) {
       console.warn('[greenmap] no OSM green polygon:', e.message);
       window.__osmGreenNearby = false;
+      window.__osmGreenLookupFailed = true;
       return null;
     }
   }
@@ -1724,11 +1765,14 @@
       state.polySource = 'none';
       setLoading(false);
       setLoading(true);
+      const lookupFailed = window.__osmGreenLookupFailed === true;
       const titleEl = document.querySelector('#gm-loading .gm-load-title');
-      if (titleEl) titleEl.textContent = "This green isn't mapped yet";
+      if (titleEl) titleEl.textContent = lookupFailed
+        ? 'Green outline lookup unavailable' : "This green isn't mapped yet";
       const line2 = document.getElementById('gm-load-status');
-      if (line2) line2.textContent =
-        'Open Check location to place the pin and detect the outline';
+      if (line2) line2.textContent = lookupFailed
+        ? 'Reopen this green to retry, or use Check location to detect the outline'
+        : 'Open Check location to place the pin and detect the outline';
       const detBtn = document.getElementById('gm-load-detect');
       if (detBtn) {
         detBtn.hidden = false;
@@ -1741,8 +1785,10 @@
           });
         }
       }
-      setStatus("This green isn't mapped yet — open Check location and " +
-        'place the pin on the green');
+      setStatus(lookupFailed
+        ? 'Green outline lookup unavailable — reopen to retry or use Check location'
+        : "This green isn't mapped yet — open Check location and " +
+          'place the pin on the green');
       syncSourceButtons();
       return;
     }

@@ -492,9 +492,11 @@ check('prep.js reads the chosen ring for the cartoon and the brief',
       try {
         const st = global.window.__gmState;
         check('no store + detect fail: polySource none', st.polySource === 'none');
-        check('honest card title shown',
-          /isn't mapped yet/.test(els['gm-loading'].textContent) ||
-          /isn't mapped yet/.test(els['gm-status'].textContent),
+        // This fixture throws on every fetch: an outage is not proof
+        // that the green is unmapped (C5 regression).
+        check('offline lookup shows unavailable, not unmapped',
+          /lookup unavailable/.test(els['gm-status'].textContent) &&
+          !/isn't mapped yet/.test(els['gm-status'].textContent),
           els['gm-status'].textContent);
         check('honest card offers the detect path',
           els['gm-load-detect'] && els['gm-load-detect'].hidden === false);
