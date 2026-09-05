@@ -18,14 +18,13 @@
 | Check | Result |
 |---|---|
 | `node --check` on all 48 kept JS files | PASS (no syntax errors) |
-| Test suites (16 kept suites) | **11/16 PASS — identical to the pre-cleanup baseline**; the 6 baseline failures are environmental and pre-existing (5 suites crash on Node 22's getter-only `global.navigator`, 1 hit a live USGS endpoint that returned HTTP 502 at baseline and passed after; see "Kept but failing" below) |
+| Test suites (16 kept suites) | **16/16 PASS** on Node 22. At cleanup time the set was identical to the pre-cleanup baseline (11/16: 5 suites crashed on Node ≥21's getter-only `global.navigator`/`crypto`, 1 hit a transient live-USGS 502 that passed on retry) — the 5 were fixed test-only immediately after, see below |
 | Local server smoke (GitHub-Pages simulation, `python -m http.server`) | All 28 production assets + `/` return HTTP 200 |
 | Entry-point integrity | `index.html`, `greenmap.html`, `sw.js` reference only kept files |
 
-### Kept but failing (pre-existing, NOT caused by cleanup — verified against baseline run *before* any deletion)
+### Test-environment fix (test files only, applied right after cleanup)
 
-- `tests/app_boot_smoke.js`, `tests/v1204_cartoon_clip.js`, `tests/v1205_cartoon_fill.js`, `tests/v1213_holesat.js`, `tests/v1215_prep_audit.js` — all crash with `TypeError: Cannot set property navigator of #<Object> which has only a getter` (Node ≥21 made `global.navigator` getter-only). Fix is a one-line test change (`Object.defineProperty(global,'navigator',...)`) — intentionally **not** made here (no code changes allowed).
-- `tests/greenmap_smoke.js` live-USGS fetch is network-dependent (was 502 at baseline, passed post-cleanup).
+The 5 suites that crashed at baseline (`tests/app_boot_smoke.js`, `tests/v1204_cartoon_clip.js`, `tests/v1205_cartoon_fill.js`, `tests/v1213_holesat.js`, `tests/v1215_prep_audit.js`) were failing on Node ≥21 because `global.navigator` and `global.crypto` became getter-only globals — plain assignment throws in strict mode (and `Object.assign(global, {...})` throws regardless of mode). Fix, confined to test boilerplate: try the assignment, and fall back to `Object.defineProperty(global, ...)` when the build-in descriptor rejects it. No assertions changed; **all 16 suites now pass**. `tests/greenmap_smoke.js`'s live-USGS fetch is network-dependent and was a transient 502 at baseline (passes; no change made).
 
 ## Removed — by category
 

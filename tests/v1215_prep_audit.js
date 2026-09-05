@@ -31,11 +31,19 @@ function fakeLayer(kind, ll0) {
 function boot({ withCourse=true, clubs=null, url='https://caddy.local/?e2e=1' }={}) {
   const dom=new JSDOM(html,{url,runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window;
-  Object.assign(global,{window:w,document:w.document,navigator:w.navigator,
+  Object.assign(global,{window:w,document:w.document,
     location:w.location,localStorage:w.localStorage,HTMLElement:w.HTMLElement,
     SVGElement:w.SVGElement,Element:w.Element,Node:w.Node,
     MutationObserver:w.MutationObserver,getComputedStyle:w.getComputedStyle,
-    requestAnimationFrame:f=>w.requestAnimationFrame(f),crypto:w.crypto});
+    requestAnimationFrame:f=>w.requestAnimationFrame(f)});
+  // Node >=21: global.navigator/crypto are getter-only — assignment throws in
+  // strict mode (so Object.assign would too); fall back to defineProperty.
+  for (const [k,v] of [['navigator',w.navigator],['crypto',w.crypto]]) {
+    try { global[k]=v; } catch {}
+    if (global[k]!==v) {
+      Object.defineProperty(global,k,{value:v,writable:true,configurable:true});
+    }
+  }
   w.alert=()=>{}; w.confirm=()=>false;
   w.fetch=async()=>{throw new Error('offline fixture');}; global.fetch=w.fetch;
   const maps=[];

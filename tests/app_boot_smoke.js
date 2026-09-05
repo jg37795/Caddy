@@ -90,7 +90,9 @@ global.window = {
 };
 global.localStorage = global.window.localStorage;
 global.location = global.window.location;
-global.navigator = {
+// Node >=21 made global.navigator getter-only: plain assignment is a silent
+// no-op in sloppy mode and throws in strict mode. Redefine via defineProperty.
+const __nav = {
   vibrate: () => true,
   onLine: true,
   language: 'en-US',
@@ -98,12 +100,19 @@ global.navigator = {
   standalone: false,
   geolocation: { watchPosition: () => 1, clearWatch() {} },
 };
+try { global.navigator = __nav; } catch {}
+if (global.navigator !== __nav) {
+  Object.defineProperty(global, 'navigator', { value: __nav, writable: true, configurable: true });
+}
 global.window.navigator = global.navigator;
 global.fetch = async () => { throw new Error('offline smoke'); };
 global.requestAnimationFrame = (f) => setImmediate(f);
 global.alert = () => {};
 global.confirm = () => false;
-global.crypto = require('crypto').webcrypto;
+try { global.crypto = require('crypto').webcrypto; } catch {}
+if (!global.crypto || !global.crypto.subtle) {
+  Object.defineProperty(global, 'crypto', { value: require('crypto').webcrypto, writable: true, configurable: true });
+}
 global.matchMedia = global.window.matchMedia;
 
 let fails = 0;

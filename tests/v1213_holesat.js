@@ -97,7 +97,11 @@ window.L = FAKE_L;
 global.L = FAKE_L;
 global.window = window;
 global.document = window.document;
-global.navigator = window.navigator;
+// Node >=21: global.navigator is getter-only — assignment throws in strict mode.
+try { global.navigator = window.navigator; } catch {}
+if (global.navigator !== window.navigator) {
+  Object.defineProperty(global, 'navigator', { value: window.navigator, writable: true, configurable: true });
+}
 global.location = window.location;
 global.localStorage = window.localStorage;
 global.HTMLElement = window.HTMLElement;
@@ -109,7 +113,10 @@ global.getComputedStyle = window.getComputedStyle;
 global.requestAnimationFrame = (f) => window.requestAnimationFrame(f);
 global.alert = () => {};
 global.confirm = () => false;
-global.crypto = window.crypto || require('crypto').webcrypto;
+try { global.crypto = window.crypto || require('crypto').webcrypto; } catch {}
+if (!global.crypto || !global.crypto.subtle) {
+  Object.defineProperty(global, 'crypto', { value: window.crypto || require('crypto').webcrypto, writable: true, configurable: true });
+}
 if (!window.crypto) window.crypto = global.crypto;
 
 window.L = global.L = window.L || window.L;
