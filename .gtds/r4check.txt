@@ -1,8 +1,0 @@
-(node:16316) ExperimentalWarning: Fetch is an experimental feature. This feature could change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-g320468252: IoU 0.716 conf 0.62 pts 16 73ms
-g320468257: IoU 0.647 conf 0.68 pts 20 67ms
-g320468261: IoU 0.646 conf 0.68 pts 16 60ms
-g320468728: IoU 0.759 conf 0.68 pts 20 15ms
-g321533712: IoU 0.821 conf 0.68 pts 38 30ms
-MEAN IoU: 0.718 | sites >= 0.70: 3/5
