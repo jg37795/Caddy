@@ -1250,7 +1250,7 @@
   // worker served a stale shell — kill + reopen the app.
   {
     const verEl = document.getElementById('gm-ver');
-    if (verEl) verEl.textContent = 'v' + (window.CADDY_VERSION || '?');
+    if (verEl) verEl.textContent = window.CADDY_VERSION || '?';
   }
   // v1.1.7: remember the last-launched green so a bare greenmap.html (Back
   // re-entry, PWA relaunch) still shows YOUR green, not a test preset.
@@ -1649,12 +1649,12 @@
 
     // (1) Store record for this green (guard: headless tests may not load
     // outlineStore.js — behave as no-store).
-    const rec = osm ? osm.get(state.lat, state.lng) : null;
+    let rec = osm ? osm.get(state.lat, state.lng) : null;
 
     // (2) ?course&hole + profile greenRingPts + no stored OSM ring →
     // adopt the course ring as this green's OSM identity (Prep cartoon,
     // satellite sheet and 3D then all draw the same green).
-    if (osm && savedRingLL && rec && !Array.isArray(rec.osmRing)) {
+    if (osm && savedRingLL && (!rec || !Array.isArray(rec.osmRing))) {
       osm.saveOsm(state.lat, state.lng,
         savedRingLL.map((p) => Array.isArray(p) ? [p[0], p[1]]
           : [p.lat, p.lng]), 0);
@@ -1665,6 +1665,8 @@
     const srcPref = qs.get('src');
     if (osm && (srcPref === 'osm' || srcPref === 'auto'))
       osm.setChosen(state.lat, state.lng, srcPref);
+    // Store operations replace records, not mutate the previously read copy.
+    if (osm) rec = osm.get(state.lat, state.lng);
 
     // (4) Resolve the chosen ring. Priority: the store's chosen source →
     // else a fresh OSM fetch (UNCAPPED query, 120 m cap, saveOsm on hit) →

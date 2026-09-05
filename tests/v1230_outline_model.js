@@ -73,8 +73,8 @@ check('index.html loads outlineStore.js before prep.js',
   const ring = (lat, lng) =>
     [[lat, lng], [lat + 0.0002, lng], [lat + 0.0001, lng + 0.0002]];
 
-  check('store keyFor is 3-decimal lat,lng', sandbox().keyFor(41.91314, -93.60971) ===
-    '41.913,-93.610');
+  check('store keyFor preserves distinct green coordinates', sandbox().keyFor(41.91314, -93.60971) ===
+    '41.913140,-93.609710');
 
   {
     const S = sandbox();
@@ -82,8 +82,7 @@ check('index.html loads outlineStore.js before prep.js',
     S.saveOsm(41.9, -93.6, r1, 12);
     // Nearest-within-100m: 0.0004° lat ≈ 44 m — same green, different pin.
     const got = S.get(41.9004, -93.6);
-    check('get resolves NEAREST record within 100 m (44 m offset)', !!got &&
-      Array.isArray(got.osmRing) && got.osmRing.length === 3);
+    check('get refuses an unrelated location outside the green (44 m offset)', got === null);
     check('get refuses beyond 100 m (0.003° ≈ 334 m)',
       S.get(41.903, -93.6) === null);
     check('saveOsm sets chosen=osm when unset',

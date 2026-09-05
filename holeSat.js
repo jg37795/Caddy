@@ -247,8 +247,8 @@
               const de = (pt[1] - cx) * 111320 * Math.cos(cy * Math.PI / 180);
               const dn = (pt[0] - cy) * 111320;
               const ang = (Math.atan2(de, dn) * 180 / Math.PI + 360) % 360;
-              const rel = ((ang - brg) + 360) % 360;
-              (rel <= 180 ? hi : lo).push(pt);
+              const rel = ((ang - brg) + 540) % 360 - 180;
+              (Math.abs(rel) <= 90 ? hi : lo).push(pt);
             });
             if (hi.length >= 3) L.polygon(hi, {
               color: 'rgba(125,255,155,0.0)', weight: 0,

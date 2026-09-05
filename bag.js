@@ -67,6 +67,19 @@
     window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // Restore replaces our source data; a normal DOM reconcile intentionally
+  // keeps local notes, so it cannot be used to reload a backup.
+  window.addEventListener('caddy:data-restored', () => {
+    const restored = readJSON(STORE_KEY, []);
+    store = (Array.isArray(restored) ? restored : []).filter(c => c && c.id != null).map(normalizeEntry);
+    const restoredUi = readJSON(UI_KEY, null);
+    ui = restoredUi && typeof restoredUi === 'object' && !Array.isArray(restoredUi)
+      ? restoredUi : { collapsed: {} };
+    if (!ui.collapsed || typeof ui.collapsed !== 'object') ui.collapsed = {};
+    openClubId = null;
+    if (root) requestAnimationFrame(() => { reconcile(); render(false); });
+  });
+
   /* ---------------- haptics (same trick app.js uses) -------------------- */
 
   const haptic = (() => {

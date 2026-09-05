@@ -88,13 +88,15 @@ check('F5 Overpass green query returns all candidates (no "out geom 1")',
     has2dDefault ? boot : 'no 2d default found');
 }
 
-// F16. Auto-brief fall bearing uses GreenMapCore.fallBearingDeg (same sign
-// convention as the 3D arrows).
-check('F16 greenBriefCore uses fallBearingDeg convention',
-  /fallBearingDeg/.test(coreSrc) ||
-  /atan2\(-gx,\s*gy\)/.test(coreSrc) ||
-  !/Math\.atan2\(gx,\s*gy\)/.test(coreSrc),
-  coreSrc.split('\n').slice(138, 148).join('\n'));
+// F16. A function-name/sign regex accepted a north/south inversion. Test
+// synthetic cardinal planes against physical downhill and high-side bearings.
+{
+  const result = require('node:child_process').spawnSync(process.execPath,
+    ['--test', '--test-name-pattern=^SYNTHETIC plane',
+      path.join(__dirname, 'green_brief_correctness.js')], { encoding: 'utf8' });
+  check('F16 cardinal-plane brief directions agree with physics (including north=0)',
+    result.status === 0, result.error || result.stderr || result.stdout);
+}
 
 // F17. A tiny mask fails THAT RUNG (v1.23.0: no ellipse demotion exists —
 // when every rung fails the honest "isn't mapped yet" card appears).

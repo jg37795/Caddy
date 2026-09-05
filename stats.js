@@ -131,7 +131,7 @@
       let splitN = 0;
       if (splits) {
         estPar = 0;
-        [3, 4, 5].forEach((p) => {
+        [3, 4, 5, 6].forEach((p) => {
           const s = splits[p];
           if (s && Number.isFinite(Number(s.n))) {
             estPar += p * Number(s.n);
@@ -141,6 +141,14 @@
         if (!splitN || !estPar) estPar = null;
       }
 
+      if (Number.isFinite(e.parPlayed)) estPar = e.parPlayed;
+      const holes = Array.isArray(e.scorecard) ? e.scorecard.map((h, index) => {
+        h = h && typeof h === 'object' ? h : {};
+        const score = Number(h.score), putts = Number(h.putts);
+        return { ...h, hole: index + 1,
+          score: Number.isInteger(score) && score > 0 && score <= 15 ? score : null,
+          putts: h.putts !== '' && h.putts != null && Number.isInteger(putts) && putts >= 0 ? putts : null };
+      }) : null;
       rounds.push({
         i,
         date: Date.parse(e.date),
@@ -157,10 +165,10 @@
         penalties: num(e.totalPen, 0) || 0,
         splits,
         estPar,
-        vsPar: estPar != null ? score - estPar : null,
-        holes: null, // joined below from caddy.stats snapshots
-        pars: null,
-        snapId: null,
+        vsPar: Number.isFinite(e.toPar) ? e.toPar : estPar != null ? score - estPar : null,
+        holes,
+        pars: Array.isArray(e.pars) ? e.pars : null,
+        snapId: e.id || null,
       });
     });
     rounds.sort((a, b) =>
@@ -219,11 +227,12 @@
 
   /** Join captured scorecards onto history entries (same total, close in time). */
   function joinSnapshots(rounds) {
-    const snaps = lsGet(K.SNAPSHOTS, []).filter((s) => s && Array.isArray(s.holes));
+    const rawSnaps = lsGet(K.SNAPSHOTS, []);
+    const snaps = (Array.isArray(rawSnaps) ? rawSnaps : []).filter((s) => s && Array.isArray(s.holes));
     if (!snaps.length) return;
     const used = new Set();
     rounds.forEach((r) => {
-      if (!Number.isFinite(r.date)) return;
+      if (r.holes || !Number.isFinite(r.date)) return;
       const hit = snaps.find((s) =>
         !used.has(s.ts) &&
         Math.abs(s.ts - r.date) <= JOIN_WINDOW_MS &&
@@ -1110,6 +1119,13 @@
       }, 120);
     }, false);
 
+    window.addEventListener('caddy:data-restored', () => {
+      expandedRounds.clear();
+      if (document.body.getAttribute('data-tab') === 'stats') renderDashboard();
+    });
+    window.addEventListener('caddy:history-updated', () => {
+      if (document.body.getAttribute('data-tab') === 'stats') renderDashboard();
+    });
     // Cross-tab / cross-window updates.
     window.addEventListener('storage', (ev) => {
       if (ev.key && (ev.key === K.HISTORY || ev.key.startsWith('caddy.stats'))) {

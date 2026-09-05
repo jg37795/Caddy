@@ -113,19 +113,21 @@
     { id: 'strong', name: 'Strong', mph: 20 },
   ];
 
-  const cond = lsLoad('cond', {
+  const COND_DEFAULTS = {
     windMph: 8,
     windFromDeg: 270,
     tempF: 70,
     altFt: 0,
     elevFt: 0,
     surface: 'medium',
-  });
-  const shot = lsLoad('shot', {
+  };
+  const SHOT_DEFAULTS = {
     greenPoint: 'middle',  // front | middle | back
     lie: 'fairway',
     shape: 'straight',
-  });
+  };
+  let cond = lsLoad('cond', { ...COND_DEFAULTS });
+  let shot = lsLoad('shot', { ...SHOT_DEFAULTS });
 
   let boundHole = null; // holeInfo object when a planner hole is open
                        // Prep ALWAYS works from a bound course hole — there
@@ -901,7 +903,28 @@
   }
 
   const GREEN_BRIEF_KEY = 'caddy:greenBrief:v1';
-  const GREEN_BRIEF_MATCH_M = 60;
+  const GREEN_BRIEF_MATCH_M = 1; // sanity cap; the core also requires exact owner identity
+
+  function greenBriefOptions(hole) {
+    if (!hole || !hole.greenLatLng) return null;
+    let polyLL = Array.isArray(hole.greenRingPts) ? hole.greenRingPts : null;
+    try {
+      const store = window.OutlineStore;
+      const chosen = store && typeof store.chosenRing === 'function'
+        ? store.chosenRing(hole.greenLatLng.lat, hole.greenLatLng.lng) : null;
+      if (chosen && Array.isArray(chosen.ring) && chosen.ring.length >= 3) polyLL = chosen.ring;
+    } catch (e) { /* no stored outline */ }
+    let stimp = 10;
+    try {
+      const saved = Number(localStorage.getItem('gm-stimp'));
+      if ([8, 10, 12].includes(saved)) stimp = saved;
+    } catch (e) { /* unavailable storage: same default as the 3D tool */ }
+    // Snapshot mutable hole geometry before any await (Move tee edits it).
+    const copyLL = p => p == null ? null : { lat: p.lat, lng: p.lng };
+    return { centerLL: copyLL(hole.greenLatLng), teeLL: copyLL(hole.teeLatLng),
+      polyLL: polyLL && polyLL.map(p => Array.isArray(p) ? p.slice() : copyLL(p)),
+      radiusM: 18, stimp };
+  }
 
   function metersApart(a, b) {
     if (!a || !b) return Infinity;
@@ -920,19 +943,23 @@
   function readGreenBrief(hole) {
     if (!hole || !hole.greenLatLng) return null;
     try {
-      if (typeof localStorage === 'undefined') return null;
-      // v1.21.7 (Grok F4): the store now holds ONE shape — a MAP of briefs
-      // keyed "lat,lng" (greenBriefCore's shape; greenmap writes it too).
-      // Legacy single-object entries are read and left alone.
+      const core = window.GreenBriefCore;
+      if (typeof localStorage === 'undefined' || !core ||
+          typeof core.matchesBrief !== 'function') return null;
+      const options = greenBriefOptions(hole);
+      // Map and legacy single-object schemas share the core's exact owner,
+      // calculation revision, age and configuration checks. Never borrow a
+      // nearby green's slope, even when this green has no saved brief.
       const raw = localStorage.getItem(GREEN_BRIEF_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
-      let best = null, bestD = Infinity;
+      let best = null;
       const consider = (brief) => {
         if (!brief || !Number.isFinite(brief.lat) ||
             !Number.isFinite(brief.lng)) return;
         const d = metersApart(hole.greenLatLng, brief);
-        if (d < bestD) { bestD = d; best = brief; }
+        if (d > GREEN_BRIEF_MATCH_M || !core.matchesBrief(brief, hole.greenLatLng, options)) return;
+        if (!best || brief.savedAt > best.savedAt) best = brief;
       };
       if (parsed && typeof parsed === 'object' && parsed.zones == null &&
           parsed.landing == null && !Number.isFinite(parsed.lat)) {
@@ -940,7 +967,6 @@
       } else {
         consider(parsed);                          // legacy single brief
       }
-      if (!best || bestD > GREEN_BRIEF_MATCH_M) return null;
       return best;
     } catch {
       return null;
@@ -2413,43 +2439,67 @@
     return (Math.atan2(de, dn) * 180 / Math.PI + 360) % 360;
   }
 
-  // v1.18.0: invisible green-brief pipeline. Runs the whole 3D-Green
-  // data path (USGS patch → gradient field → putt sim → persist in the
-  // tool's exact schema) WITHOUT opening the tool. Skips if a fresh
-  // brief already exists (< 30 days) or a build is in flight.
-  let _briefInFlight = null;
+  // One build per green, not one for the whole Prep tab. Revisions of the
+  // same green serialize/coalesce so an old tee/ring cannot overwrite the
+  // newest result; other holes need not wait for that green's network call.
+  const _briefByGreen = new Map();
+  let _briefInFlight = null; // latest promise (also useful to headless callers)
+  function briefHoleId(h) {
+    if (!h || !h.greenLatLng) return null;
+    return JSON.stringify([h.courseId || null, h.number,
+      window.GreenBriefCore.keyFor(h.greenLatLng.lat, h.greenLatLng.lng)]);
+  }
   function runGreenBriefAuto(h) {
-    if (!h || !h.greenLatLng || typeof window.GreenBriefCore ===
-      'undefined') return;
-    const existing = window.GreenBriefCore.briefFor(h.greenLatLng);
-    const FRESH_MS = 30 * 24 * 3600 * 1000;
-    if (existing && Date.now() - (existing.savedAt || 0) < FRESH_MS) return;
-    if (_briefInFlight) return;
-    _briefInFlight = (async () => {
-      try {
-        // v1.23.0: the brief builds from the store's CHOSEN ring when the
-        // green has one (same outline the 3D tool draws); else the hole's
-        // greenRingPts as today.
-        let briefPolyLL = Array.isArray(h.greenRingPts)
-          ? h.greenRingPts : null;
-        try {
-          if (window.OutlineStore &&
-              typeof window.OutlineStore.chosenRing === 'function') {
-            const cr = window.OutlineStore.chosenRing(h.greenLatLng.lat,
-              h.greenLatLng.lng);
-            if (cr && Array.isArray(cr.ring) && cr.ring.length >= 3)
-              briefPolyLL = cr.ring;
-          }
-        } catch (e) { /* headless / no store */ }
-        await window.GreenBriefCore.build({
-          teeLL: h.teeLatLng,
-          centerLL: h.greenLatLng,
-          radiusM: 18,
-          polyLL: briefPolyLL,
-        });
-      } catch (e) { /* silent: advice falls back to slope-free wording */ }
-      _briefInFlight = null;
-    })();
+    const core = window.GreenBriefCore;
+    if (!h || !h.greenLatLng || !core || typeof core.requestKey !== 'function') return null;
+    const options = greenBriefOptions(h);
+    const signature = core.requestKey(options);
+    if (!signature) return null;
+    const key = core.keyFor(options.centerLL.lat, options.centerLL.lng);
+    const request = { options, signature, owner: briefHoleId(h) };
+    const pending = _briefByGreen.get(key);
+    if (pending) {
+      pending.latest = request;
+      _briefInFlight = pending.promise;
+      return pending.promise;
+    }
+    const existing = readGreenBrief(h);
+    if (existing) return Promise.resolve(existing);
+    const job = { latest: request, promise: null };
+    _briefByGreen.set(key, job);
+    // Defer work until after the caller has painted, and register the slot
+    // before build can fail synchronously (missing/offline dependencies).
+    job.promise = Promise.resolve().then(async () => {
+      if (_briefByGreen.get(key) !== job) return null;
+      let current = job.latest;
+      for (;;) {
+        let brief = null;
+        try { brief = await core.build(current.options); }
+        catch (e) { /* unavailable: keep slope-free wording, no retry loop */ }
+        if (_briefByGreen.get(key) !== job) return null; // backup restore superseded this work
+        let next = job.latest;
+        if (boundHole && briefHoleId(boundHole) === next.owner) {
+          // Also notice settings/outline edits made while elevation loaded,
+          // even if that editor did not explicitly call this pipeline.
+          const latestOptions = greenBriefOptions(boundHole);
+          next = { options: latestOptions, signature: core.requestKey(latestOptions),
+            owner: next.owner };
+          job.latest = next;
+        }
+        if (next.signature && next.signature !== current.signature) {
+          current = next;
+          continue;
+        }
+        if (brief && boundHole && briefHoleId(boundHole) === next.owner &&
+            core.matchesBrief(brief, boundHole.greenLatLng, next.options)) recomputeNow();
+        return brief;
+      }
+    }).finally(() => {
+      if (_briefByGreen.get(key) === job) _briefByGreen.delete(key);
+      if (_briefInFlight === job.promise) _briefInFlight = null;
+    });
+    _briefInFlight = job.promise;
+    return job.promise;
   }
 
   function wireBackButton() {
@@ -2584,6 +2634,7 @@
     paintControls();
     paintTarget();
     fetchGreenDelta(); // lazy + cancellable; chip lands when it lands
+    runGreenBriefAuto(boundHole);
     setTimeout(() => {
       recompute({ pulse: true });
     }, 0);
@@ -2627,6 +2678,7 @@
     _solveMemo.clear();
     renderStrategy();
     fetchGreenDelta();
+    runGreenBriefAuto(boundHole);
     return true;
   };
 
@@ -2750,6 +2802,24 @@
       paintTarget();   // chip appears next to the yardage
     }).catch(() => { /* silent — best-effort */ });
   }
+
+  window.addEventListener('caddy:data-restored', () => {
+    cond = lsLoad('cond', { ...COND_DEFAULTS });
+    shot = lsLoad('shot', { ...SHOT_DEFAULTS });
+    _briefByGreen.clear();
+    _briefInFlight = null;
+    _solveMemo.clear();
+    clearTimeout(_rcThrottle); clearTimeout(_rcSettle);
+    _rcThrottle = _rcSettle = null;
+    boundHole = null; // the prior course snapshot is no longer authoritative
+    planShotIdx = -1;
+    _planShotYds = [];
+    if (geAbort) geAbort.abort();
+    geAbort = null;
+    geDeltaFt = geDeltaHole = null;
+    // The event precedes app.js rehydration: repaint only after that finishes.
+    queueMicrotask(() => { paintControls(); paintTarget(); recomputeNow(); });
+  });
 
   /* ---------- Boot ---------- */
   buildSkeleton();

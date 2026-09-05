@@ -198,8 +198,9 @@ const CaddyElev = require(path.join(__dirname, '..', 'caddy-elev.js'));
     const z = CaddyElev.sampleMedianZ(eg, 41.95025, -93.74975, 5);
     ok(z === 320, 'sampleMedianZ flat field');
     const [w0, s0, e0, n0] = eg.bbox;
-    const tee = { lat: s0 + (n0 - s0) * (2 / 48), lng: w0 + (e0 - w0) * (2 / 48) };
-    const green = { lat: s0 + (n0 - s0) * (20 / 48), lng: w0 + (e0 - w0) * (20 / 48) };
+    // GeoTIFF row indices increase south from the northern edge.
+    const tee = { lat: n0 - (n0 - s0) * (2.5 / 48), lng: w0 + (e0 - w0) * (2.5 / 48) };
+    const green = { lat: n0 - (n0 - s0) * (20.5 / 48), lng: w0 + (e0 - w0) * (20.5 / 48) };
     for (let y = 18; y < 23; y++) for (let x = 18; x < 23; x++) eg.grid[y * 48 + x] = 323;
     const d = CaddyElev.elevDeltaFt ? null : null;
     // use greenMap-level pieces: delta via sampleMedianZ directly

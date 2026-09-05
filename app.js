@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.17.0'; // JSON backup/restore via share sheet, shot-log CSV, remembered putts default, verdict & shot-capture haptic vocabulary
+  const APP_VERSION = '1.24.0'; // JSON backup/restore via share sheet, shot-log CSV, remembered putts default, verdict & shot-capture haptic vocabulary
   const ACCURACY_WARN_YD = 25;
   // Range-recalculation throttle (perf): GPS ticks only trigger the full
   // plays-like solve when the player has genuinely moved. Sub-yard drift in
@@ -287,16 +287,7 @@
   })();
 
   const state = {
-    prefs: load('caddy:prefs', {
-      theme: 'dark',
-      pro: false,
-      selectedClubId: '',
-      activeTab: 'range',
-      mapLayer: '',
-      gpsEnabled: false,
-      mode: 'golf',
-      dispersionZone: true,
-    }),
+    prefs: normalizePrefs(load('caddy:prefs', null)),
     nearbyCourses: [],
     courseSearchActive: false,
     courseSearchLoading: false,
@@ -354,6 +345,7 @@
     lastCalcAt: 0,     // timestamp of the last range calculation
     lastRecClubId: null,
     roundSession: load('caddy:roundSession', null),
+    roundMeta: load('caddy:roundMeta', null),
     roundScoreDraft: null,
     map: null,
     layers: {},
@@ -588,12 +580,38 @@
     }));
   }
 
+  function isValidCount(value, min, max) {
+    if (typeof value !== 'number' && typeof value !== 'string') return false;
+    if (String(value).trim() === '') return false;
+    const n = Number(value);
+    return Number.isInteger(n) && n >= min && n <= max;
+  }
+  function isValidScore(value) {
+    return isValidCount(value, 1, 15);
+  }
+  // Preserve row positions: filtering nulls would move Hole 2's score to 1.
+  function normalizeScorecard(rows, holesCount) {
+    const source = Array.isArray(rows) ? rows : [];
+    return scorecardForCourse({ holesCount }).map((blank, i) => {
+      const r = source[i] && typeof source[i] === 'object' ? source[i] : {};
+      return {
+        ...blank,
+        score: isValidScore(r.score) ? String(Number(r.score)) : '',
+        putts: isValidCount(r.putts, 0, 9) ? String(Number(r.putts)) : '',
+        fir: ['Y', 'N', 'NA'].includes(r.fir) ? r.fir : '',
+        gir: ['Y', 'N'].includes(r.gir) ? r.gir : '',
+        penalties: isValidCount(r.penalties, 0, 15) ? Number(r.penalties) : '',
+        notes: typeof r.notes === 'string' ? r.notes : '',
+      };
+    });
+  }
+
   function getCurrentHoleNumber() {
     const rs = state.roundSession;
     return clamp(
       Math.round(num(rs?.hole || rs?.currentHole, 1)),
       1,
-      18
+      getCourseHoleCount()
     );
   }
 
@@ -678,9 +696,10 @@
     const selectedCourse = normalizeCourse(course || makeCasualCourse());
 
     return {
+      id: cryptoId(),
       status: 'active',
-      hole: clamp(Math.round(num(startHole, 1)), 1, 18),
-      currentHole: clamp(Math.round(num(startHole, 1)), 1, 18),
+      hole: clamp(Math.round(num(startHole, 1)), 1, selectedCourse.holesCount),
+      currentHole: clamp(Math.round(num(startHole, 1)), 1, selectedCourse.holesCount),
 
       startedAt: Date.now(),
 
@@ -702,13 +721,48 @@
   function saveRoundSession() {
     save('caddy:roundSession', state.roundSession);
   }
+  // Keep scoring identity/pars after a session ends without retaining live
+  // GPS/shot state. History embeds this context rather than time-joining it.
+  function setRoundMeta(course, id = cryptoId(), startedAt = Date.now()) {
+    const c = course ? normalizeCourse(course) : null;
+    state.roundMeta = { id, startedAt, course: c ? {
+      id: c.id, name: c.name, teeName: c.teeName, holesCount: c.holesCount,
+      rating: c.rating, slope: c.slope,
+      holes: c.holes.map(h => ({ number: h.number, par: h.par, yards: h.yards, strokeIndex: h.strokeIndex || null })),
+    } : null };
+    save('caddy:roundMeta', state.roundMeta);
+  }
+  function saveCurrentRoundToHistory() {
+    const s = summarizeRound(state.round);
+    if (!s.played) return false;
+    if (!state.roundMeta || !state.roundMeta.id)
+      setRoundMeta(getCurrentCourse());
+    const entry = { ...s, id: state.roundMeta.id,
+      date: new Date().toISOString(), startedAt: state.roundMeta.startedAt,
+      course: state.roundMeta.course, scorecard: normalizeScorecard(state.round, s.holesCount) };
+    const history = state.history.slice();
+    const index = history.findIndex(h => h.id === entry.id);
+    if (index >= 0) history[index] = entry;
+    else history.push(entry);
+    try {
+      // Do not use the best-effort save wrapper for this destructive handoff.
+      localStorage.setItem('caddy:history', JSON.stringify(history));
+    } catch (e) {
+      setNotice('Could not save round history. Storage may be full — your round is still open. Export a backup before closing.', 'danger');
+      return false;
+    }
+    state.history = history;
+    window.dispatchEvent(new CustomEvent('caddy:history-updated'));
+    return true;
+  }
   function roundStatus() {
     return state.roundSession ? state.roundSession.status : 'idle';
   }
   // Active round's layout (9 or 18); defaults to 18 outside a round.
   function getCourseHoleCount() {
     const c = getCurrentCourse();
-    return c && Number(c.holesCount) === 9 ? 9 : 18;
+    if (c) return c.holesCount;
+    return state.roundMeta?.course?.holesCount === 9 || state.round?.length === 9 ? 9 : 18;
   }
   // Club the next shot will log against: explicit override wins,
   // otherwise follow the live recommendation, otherwise longest club.
@@ -751,6 +805,19 @@
     return (
       'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
     );
+  }
+  function normalizePrefs(value) {
+    const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    return { ...raw,
+      theme: ['light', 'dark', 'auto'].includes(raw.theme) ? raw.theme : 'dark',
+      pro: raw.pro === true,
+      selectedClubId: typeof raw.selectedClubId === 'string' ? raw.selectedClubId : '',
+      activeTab: ['range', 'round', 'clubs', 'shot', 'stats'].includes(raw.activeTab) ? raw.activeTab : 'range',
+      mapLayer: typeof raw.mapLayer === 'string' ? raw.mapLayer : '',
+      gpsEnabled: raw.gpsEnabled === true,
+      mode: ['golf', 'range'].includes(raw.mode) ? raw.mode : 'golf',
+      dispersionZone: raw.dispersionZone !== false,
+    };
   }
   function load(k, f) {
     try {
@@ -2968,7 +3035,7 @@
       if (els.clearRoundBtn.classList.contains('disabled')) return;
       if (!confirm('Clear all scorecard entries for this round?')) return;
 
-      state.round = emptyRound();
+      state.round = scorecardForCourse(getCurrentCourse());
 
       if (state.roundSession) {
         state.roundSession.scorecard = state.round;
@@ -3436,10 +3503,8 @@
   }
   function teardownRoundSession(saveToHistory) {
     const s = summarizeRound(state.round);
-    if (saveToHistory && s.played) {
-      state.history.push({ date: new Date().toISOString(), ...s });
-      save('caddy:history', state.history);
-    }
+    if (saveToHistory && s.played && !saveCurrentRoundToHistory()) return;
+    save('caddy:round', state.round);
     // Keep this round's partners for next time (and for pre-round editing).
     if (state.roundSession)
       mergePartnersIntoRoster(state.roundSession.groupPlayers);
@@ -5105,10 +5170,8 @@
     // used to fork duplicate profiles per tee box, and name-only lookups
     // then restored whichever copy came first: wrong yardages, wrong
     // tee points.
-    const existingIndex = state.courseProfiles.findIndex(
-      (item) =>
-        item.name.toLowerCase() === normalized.name.toLowerCase()
-    );
+    const existing = getSavedCourseMatch(normalized);
+    const existingIndex = existing ? state.courseProfiles.indexOf(existing) : -1;
 
     if (existingIndex >= 0) {
       normalized.id = state.courseProfiles[existingIndex].id;
@@ -5141,6 +5204,7 @@
     const normalizedCourse = normalizeCourse(course);
 
     state.roundSession = emptyRoundSession(normalizedCourse, startHole);
+    setRoundMeta(normalizedCourse, state.roundSession.id, state.roundSession.startedAt);
 
     // A group chosen in the round-options sheet rides along into the
     // fresh session (then clears — it's a one-shot handoff).
@@ -5209,20 +5273,38 @@
     return `${fmt(yd / 1760, 1)} mi away`;
   }
 
-  function getSavedCourseMatch(name) {
-    const needle = String(name || '')
-      .trim()
-      .toLowerCase();
-
-    if (!needle) return null;
-
-    return state.courseProfiles.find((course) => {
-      const candidate = String(course.name || '')
-        .trim()
-        .toLowerCase();
-
-      return candidate === needle;
+  function getSavedCourseMatch(candidate) {
+    const input = candidate && typeof candidate === 'object' ? candidate : { name: candidate };
+    const profiles = state.courseProfiles || [];
+    if (input.id) {
+      const exact = profiles.find(c => c && c.id === input.id);
+      if (exact) return exact;
+    }
+    const osmIdentity = c => c && c.osmId != null && c.osmType
+      ? String(c.osmType).toLowerCase() + ':' + String(c.osmId) : null;
+    const osm = osmIdentity(input);
+    if (osm) {
+      const exact = profiles.find(c => osmIdentity(c) === osm);
+      if (exact) return exact;
+    }
+    const name = String(input.name || '').trim().toLowerCase();
+    if (!name) return null;
+    const point = c => {
+      const p = c.location || c;
+      return Number.isFinite(p.lat) && Number.isFinite(p.lng) ? p : null;
+    };
+    const at = point(input);
+    const matches = profiles.filter(c => {
+      if (!c || String(c.name || '').trim().toLowerCase() !== name) return false;
+      const otherOsm = osmIdentity(c);
+      if (osm && otherOsm && osm !== otherOsm) return false;
+      const there = point(c);
+      if (at && there) return haversineMeters(at, there) <= 500;
+      // Authoritative identities do not fall back to an unrelated name.
+      if (osm || otherOsm) return false;
+      return true;
     });
+    return matches.length === 1 ? matches[0] : null;
   }
 
   // Tee-box chips: shown whenever a course carries ANY imported tee set
@@ -5284,7 +5366,7 @@
   // Shared option-button markup for BOTH the geo-nearby list and the
   // name-search list, so saved/selected styling stays identical everywhere.
   function courseButtonHtml(course, index) {
-    const saved = getSavedCourseMatch(course.name);
+    const saved = getSavedCourseMatch(course);
     const distance = formatNearbyCourseDistance(course);
 
     const selected =
@@ -6146,7 +6228,7 @@ out geom;`;
 
     state.selectedCourseTemplate = null;
 
-    const saved = getSavedCourseMatch(candidate.name);
+    const saved = getSavedCourseMatch(candidate);
 
     if (saved) {
       // Same path as tapping a saved-course card: tees auto-apply from
@@ -6799,6 +6881,9 @@ out geom;`;
       return;
     }
 
+    // The mini sheet edits YOUR row, never the last partner selected in
+    // the full score sheet. Keep that selection out of this draft.
+    state._scorePartnerId = '';
     state.roundMiniDraft = getRoundScoreDraftForHole(holeNumber);
     renderRoundMiniSheet();
 
@@ -7388,12 +7473,19 @@ out geom;`;
         alert('Enter at least one hole score before saving.');
         return;
       }
-      state.history.push({ date: new Date().toISOString(), ...s });
-      save('caddy:history', state.history);
+      if (!saveCurrentRoundToHistory()) return;
       if (confirm('Round saved to history. Start a fresh scorecard?')) {
-        state.round = emptyRound();
+        const course = getCurrentCourse() || state.roundMeta?.course;
+        state.round = scorecardForCourse(course);
+        setRoundMeta(course);
+        if (state.roundSession) {
+          state.roundSession.id = state.roundMeta.id;
+          state.roundSession.scorecard = state.round;
+          saveRoundSession();
+        }
         save('caddy:round', state.round);
         renderRound();
+        renderRoundShotUI();
       }
       renderStats();
     });
@@ -7611,9 +7703,21 @@ out geom;`;
     ['shotLog', 'caddy:shotLog:v1'],    // literal on purpose: SHOTLOG_KEY is declared later in the file (Block 0), and reading it here would throw a TDZ ReferenceError at startup
     ['roundSession', 'caddy:roundSession'],
     ['round', 'caddy:round'],
+    ['roundMeta', 'caddy:roundMeta'],
     ['history', 'caddy:history'],
     ['pinMemory', PIN_MEMORY_KEY],
     ['lastRoundSetup', LAST_ROUND_SETUP_KEY],
+    ['groupRoster', 'caddy:groupRoster:v1'],
+    ['courseTees', 'caddy:courseTees'],
+    ['statsSnapshots', 'caddy.stats.roundSnapshots'],
+    ['statsFilter', 'caddy.stats.filter'],
+    ['greenOutlines', 'caddy:greenOutlines:v2'],
+    ['greenBriefs', 'caddy:greenBrief:v1'],
+    ['lastGreen', 'caddy:greenmap:lastGreen'],
+    ['greenStimp', 'gm-stimp'],
+    ['lastPutts', LAST_PUTTS_KEY],
+    ['prepConditions', 'caddy.prep.cond'],
+    ['prepShot', 'caddy.prep.shot'],
   ];
 
   function buildBackupObject() {
@@ -7631,10 +7735,32 @@ out geom;`;
     };
   }
 
-  function describeBackup(obj) {
-    if (!obj || obj.app !== 'caddy' || !obj.data)
-      throw new Error('Not a Caddy backup file.');
+  function validateBackup(obj) {
+    const record = v => v && typeof v === 'object' && !Array.isArray(v);
+    if (!record(obj) || obj.app !== 'caddy' || !record(obj.data) ||
+        (obj.schema != null && obj.schema !== 1)) throw new Error('Invalid Caddy backup file or schema.');
     const d = obj.data;
+    const arrayNames = ['clubs', 'bagClubs', 'courseProfiles', 'round', 'history', 'groupRoster', 'statsSnapshots'];
+    const recordNames = ['prefs', 'bagUi', 'shotLog', 'roundMeta', 'pinMemory', 'lastRoundSetup',
+      'courseTees', 'greenOutlines', 'greenBriefs', 'lastGreen'];
+    for (const name of arrayNames) {
+      if (Object.hasOwn(d, name) && (!Array.isArray(d[name]) || !d[name].every(record)))
+        throw new Error('Backup contains malformed ' + name + ' data.');
+    }
+    for (const name of recordNames) {
+      if (Object.hasOwn(d, name) && !record(d[name]))
+        throw new Error('Backup contains malformed ' + name + ' data.');
+    }
+    if (d.shotLog && !Object.values(d.shotLog).every(Array.isArray))
+      throw new Error('Backup contains malformed shotLog data.');
+    if (d.roundSession != null && (!record(d.roundSession) ||
+        (d.roundSession.scorecard != null && (!Array.isArray(d.roundSession.scorecard) ||
+          !d.roundSession.scorecard.every(record)))))
+      throw new Error('Backup contains malformed roundSession data.');
+    return d;
+  }
+  function describeBackup(obj) {
+    const d = validateBackup(obj);
     let shots = 0;
     if (d.shotLog && typeof d.shotLog === 'object') {
       for (const k of Object.keys(d.shotLog)) {
@@ -7656,24 +7782,45 @@ out geom;`;
   }
 
   function applyBackupObject(obj) {
-    const d = describeBackup(obj) && obj.data; // validates shape first
-    if (d.clubs && !Array.isArray(d.clubs))
-      throw new Error('Backup contains malformed club data.');
-    for (const [name, key] of BACKUP_KEYS) {
-      if (name === 'shotLog') continue; // handled below via saveShotLog
-      if (d[name] != null) save(key, d[name]);
+    const d = validateBackup(obj);
+    // Serialize/validate before mutating anything. Omitted keys mean absent
+    // in a replacement backup, not permission to retain an unrelated round.
+    const writes = BACKUP_KEYS.map(([name, key]) => [key,
+      Object.hasOwn(d, name) && d[name] != null ? JSON.stringify(d[name]) : null]);
+    const before = writes.map(([key]) => [key, localStorage.getItem(key)]);
+    try {
+      for (const [key, value] of writes) {
+        if (value === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+      }
+    } catch (e) {
+      // A quota/security failure must not leave a half-restored scorecard.
+      // Remove new payloads first, freeing the original storage budget.
+      try {
+        for (const [key] of writes) localStorage.removeItem(key);
+        for (const [key, value] of before) if (value !== null) localStorage.setItem(key, value);
+      } catch (rollbackError) {
+        console.error('[caddy] Backup restore rollback failed', rollbackError);
+        throw new Error('Restore failed and storage blocked recovery. Keep your backup file and do not close this app.');
+      }
+      throw new Error('Restore failed (storage may be full). Your previous data was restored.');
     }
-    if (d.shotLog != null) saveShotLog(d.shotLog);
+    _shotLogCache = null;
+    _clubStatsCache.clear();
+    // Same-document localStorage writes do not emit a storage event. Let
+    // add-ons replace their private copies before DOM observers reconcile.
+    window.dispatchEvent(new CustomEvent('caddy:data-restored'));
   }
 
   // Re-hydrate every in-memory structure from storage after a restore.
   function reloadStateFromStorage() {
-    state.prefs = load('caddy:prefs', state.prefs);
+    state.prefs = normalizePrefs(load('caddy:prefs', null));
     state.clubs = loadArr('caddy:clubs', DEFAULT_CLUBS, (c) => c && typeof c === 'object');
     state.courseProfiles = loadArr(COURSE_PROFILES_KEY, [], (c) => c && typeof c === 'object');
     state.round = loadArr('caddy:round', emptyRound());
     state.history = loadArr('caddy:history', [], (h) => h && typeof h === 'object');
     state.roundSession = load('caddy:roundSession', null);
+    state.roundMeta = load('caddy:roundMeta', null);
 
     // Invalidate every derived-data cache.
     _shotLogCache = null;
@@ -8383,7 +8530,13 @@ out geom;`;
   }
 
   function migrateRoundSession() {
-    if (!state.roundSession) return;
+    if (!state.roundSession || typeof state.roundSession !== 'object' ||
+        Array.isArray(state.roundSession)) {
+      state.roundSession = null;
+      state.round = normalizeScorecard(state.round, state.round.length === 9 ? 9 : 18);
+      if (!state.roundMeta || typeof state.roundMeta.id !== 'string') setRoundMeta(null);
+      return;
+    }
 
     if (!state.roundSession.course) {
       state.roundSession.course = makeCasualCourse();
@@ -8392,6 +8545,9 @@ out geom;`;
     state.roundSession.course = normalizeCourse(
       state.roundSession.course
     );
+    if (typeof state.roundSession.id !== 'string' || !state.roundSession.id)
+      state.roundSession.id = cryptoId();
+    setRoundMeta(state.roundSession.course, state.roundSession.id, state.roundSession.startedAt || Date.now());
 
     if (!Array.isArray(state.roundSession.scorecard)) {
       state.roundSession.scorecard = Array.isArray(state.round)
@@ -8403,15 +8559,13 @@ out geom;`;
       state.roundSession.shots = [];
     }
 
-    // Trim a legacy 18-row scorecard down to a 9-hole course layout.
-    const hcN =
-      Number(state.roundSession.course.holesCount) === 9 ? 9 : 18;
-    if (
-      Array.isArray(state.roundSession.scorecard) &&
-      state.roundSession.scorecard.length > hcN
-    ) {
-      state.roundSession.scorecard =
-        state.roundSession.scorecard.slice(0, hcN);
+    const hcN = state.roundSession.course.holesCount;
+    state.roundSession.scorecard = normalizeScorecard(state.roundSession.scorecard, hcN);
+    state.roundSession.shots = state.roundSession.shots.filter(s => s && typeof s === 'object');
+    if (state.roundSession.status !== 'pending' || !state.roundSession.pending ||
+        typeof state.roundSession.pending !== 'object') {
+      state.roundSession.status = 'active';
+      state.roundSession.pending = null;
     }
 
     state.roundSession.hole = clamp(
@@ -8423,7 +8577,7 @@ out geom;`;
         )
       ),
       1,
-      18
+      hcN
     );
 
     state.roundSession.currentHole = state.roundSession.hole;
@@ -8439,6 +8593,16 @@ out geom;`;
     ) {
       state.roundSession.groupScores = {};
     }
+    state.roundSession.groupPlayers = state.roundSession.groupPlayers.filter(p =>
+      p && typeof p.id === 'string' && typeof p.name === 'string');
+    const cleanGroupScores = {};
+    for (const p of state.roundSession.groupPlayers) {
+      const scores = state.roundSession.groupScores[p.id];
+      Object.defineProperty(cleanGroupScores, p.id, { enumerable: true, configurable: true, writable: true,
+        value: Array.from({ length: hcN }, (_, i) =>
+          Array.isArray(scores) && isValidScore(scores[i]) ? String(Number(scores[i])) : '') });
+    }
+    state.roundSession.groupScores = cleanGroupScores;
     // Adopt any existing session partners into the persistent roster so
     // upgrading doesn't orphan your current group.
     mergePartnersIntoRoster(state.roundSession.groupPlayers);
@@ -8473,6 +8637,8 @@ out geom;`;
       },
       { passive: false }
     );
+    // Normalize persisted session data before any tab or group renderer reads it.
+    migrateRoundSession();
     setManifest();
     registerServiceWorker();
     const lt = load('caddy:lastTarget', null);
@@ -8504,8 +8670,6 @@ out geom;`;
     watchBottomPills();
     positionBottomPills();
     window.addEventListener('resize', () => positionBottomPills());
-
-    migrateRoundSession();
 
     renderRound();
     renderStats();
@@ -11283,8 +11447,13 @@ out geom;`;
 
   async function updateContext() {
     const user = state.loc, target = state.target;
-    if (!user && !target) { updateWeatherUI(); return; }
     const seq = ++state.contextSeq;
+    if (!user && !target) {
+      state.context.weather = null;
+      state.context.elevation = null;
+      updateWeatherUI();
+      return;
+    }
     const isCurrent = () => seq === state.contextSeq;
 
     const p = target
@@ -11292,11 +11461,12 @@ out geom;`;
       : { lat: user.lat, lng: user.lng };
 
     // --- Weather: add pressure, gusts, and a second wind level for shear fitting ---
-    const wKey = `weather:${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+    const wKey = `weather:v2:${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
     const wUrl = 'https://api.open-meteo.com/v1/forecast' +
       `?latitude=${p.lat.toFixed(5)}&longitude=${p.lng.toFixed(5)}` +
       '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,' +
-      'wind_gusts_10m,surface_pressure,pressure_msl,wind_speed_80m,wind_direction_80m,sunset' +
+      'wind_gusts_10m,surface_pressure,pressure_msl,wind_speed_80m,wind_direction_80m' +
+      '&daily=sunset&forecast_days=1&timeformat=unixtime' +
       '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto';
     try {
       const w = await cachedJSON(wKey, wUrl, WEATHER_TTL);
@@ -11314,7 +11484,10 @@ out geom;`;
           pHpa = stationPressureFromMSL(msl * 100, e0.userFt * FT_TO_M,
             (num(cur.temperature_2m, 70) - 32) / 1.8) / 100;
       }
-      const sunsetMs = cur.sunset ? Date.parse(cur.sunset) : NaN;
+      // Unix seconds avoid interpreting the course's local time in the
+      // phone's timezone (and sunset is a daily, not current, variable).
+      const sunsetSeconds = w.data.daily?.sunset?.[0];
+      const sunsetMs = Number.isFinite(sunsetSeconds) ? sunsetSeconds * 1000 : NaN;
       state.context.weather = {
         tempF: num(cur.temperature_2m, STD_TEMP_F),
         rh: num(cur.relative_humidity_2m, STD_RH),
@@ -11336,12 +11509,10 @@ out geom;`;
 
     // --- Elevation: 9-point profile along the shot line ---
     if (user && target) {
-      // Key rounded to ~110 m (toFixed(3)) instead of ~11 m: terrain deltas
-      // at that scale are a few feet, irrelevant next to shot dispersion,
-      // and the coarse grid lets adjacent holes share cached profiles
-      // instead of triggering a fresh fetch on every hole change.
-      const eKey = `elev:${user.lat.toFixed(3)},${user.lng.toFixed(3)}:` +
-        `${target.lat.toFixed(3)},${target.lng.toFixed(3)}`;
+      // Match the requested endpoint precision. Adjacent tees/greens can
+      // have different slopes; a 110m bucket must not reuse another shot.
+      const eKey = `elev:v2:${user.lat.toFixed(5)},${user.lng.toFixed(5)}:` +
+        `${target.lat.toFixed(5)},${target.lng.toFixed(5)}`;
       const g = geodesicInverse(user, target);
       const pts = [];
       for (let i = 0; i < ELEV_PROFILE_N; i++)
@@ -11755,6 +11926,20 @@ out geom;`;
       return;
     }
     const p = rs.pending;
+    if (discard && (!state.loc || !Number.isFinite(state.loc.lat) || !Number.isFinite(state.loc.lng))) {
+      // Discard is a recovery path, not a measurement: it must work after
+      // a relaunch or denied GPS without inventing a zero-yard shot.
+      if (!Array.isArray(rs.shots)) rs.shots = [];
+      rs.shots.push({ clubId: p.clubId, startPt: p.startPt, endPt: null,
+        distanceYd: null, hole: rs.hole, ts: Date.now(), discarded: true, counted: false });
+      rs.pending = null;
+      rs.status = 'active';
+      saveRoundSession();
+      releaseWakeLock();
+      renderRoundShotUI();
+      setNotice('Shot discarded — no distance recorded without GPS.', 'greenish');
+      return;
+    }
     const endPt = { lat: state.loc.lat, lng: state.loc.lng };
     const distanceYd = haversineMeters(p.startPt, endPt) * M_TO_YD;
     const bearingDeg = initialBearingDeg(p.startPt, endPt);
@@ -11951,11 +12136,12 @@ out geom;`;
    * SIGNATURE PRESERVED: summarizeRound(round) -> all original keys, plus extras.
    * Original keys: played, totalScore, puttRows, totalPutts, firRows, firMade, girRows, girMade.
    */
-  function summarizeRound(round) {
-    const rows = Array.isArray(round) ? round : [];
-    const played = rows.filter((r) => r.score !== '' && Number.isFinite(Number(r.score)));
+  function summarizeRound(round, course = state.roundSession?.course || state.roundMeta?.course || null) {
+    const rows = (Array.isArray(round) ? round : []).map(r =>
+      r && typeof r === 'object' ? r : {});
+    const played = rows.filter((r) => isValidScore(r.score));
     const totalScore = played.reduce((s, r) => s + num(r.score, 0), 0);
-    const puttRows = rows.filter((r) => r.putts !== '' && Number.isFinite(Number(r.putts)));
+    const puttRows = rows.filter((r) => isValidCount(r.putts, 0, 9));
     const totalPutts = puttRows.reduce((s, r) => s + num(r.putts, 0), 0);
     const firRows = rows.filter((r) => r.fir === 'Y' || r.fir === 'N');
     const firMade = firRows.filter((r) => r.fir === 'Y').length;
@@ -11964,15 +12150,15 @@ out geom;`;
 
     // Putts split by whether the green was hit — the single most diagnostic split available
     // from this scorecard, because putts on missed greens conflate chipping with putting.
-    const girHoles = rows.filter((r) => r.gir === 'Y' && r.putts !== '' && Number.isFinite(Number(r.putts)));
-    const nonGirHoles = rows.filter((r) => r.gir === 'N' && r.putts !== '' && Number.isFinite(Number(r.putts)));
+    const girHoles = rows.filter((r) => r.gir === 'Y' && isValidCount(r.putts, 0, 9));
+    const nonGirHoles = rows.filter((r) => r.gir === 'N' && isValidCount(r.putts, 0, 9));
     const puttsOnGir = girHoles.length ? girHoles.reduce((s, r) => s + num(r.putts, 0), 0) / girHoles.length : null;
     const puttsOffGir = nonGirHoles.length ? nonGirHoles.reduce((s, r) => s + num(r.putts, 0), 0) / nonGirHoles.length : null;
     const scores = played.map((r) => num(r.score, 0));
     const scoreSd = scores.length >= 2
       ? Math.sqrt(scores.reduce((a, b) => a + (b - totalScore / scores.length) ** 2, 0) / (scores.length - 1)) : null;
     // Unbiased full-round projection (over the course's hole count) with SE.
-    const roundLen = getCourseHoleCount();
+    const roundLen = course?.holesCount === 9 || (!course && rows.length === 9) ? 9 : 18;
     const proj = played.length ? (totalScore / played.length) * roundLen : null;
     const projSe = played.length >= 2 && scoreSd != null
       ? roundLen * (scoreSd / Math.sqrt(played.length)) *
@@ -11981,8 +12167,10 @@ out geom;`;
 
     // Scoring averages by par. Outside a live session the course lookup
     // falls back to par 4 — legacy scorecards get approximate splits.
-    const courseNow = getCurrentCourse();
+    const courseNow = course;
     const parSplits = {};
+    const pars = rows.map((_, i) => clamp(Math.round(num(courseNow?.holes?.[i]?.par, 4)), 3, 6));
+    const parPlayed = rows.reduce((sum, r, i) => sum + (isValidScore(r.score) ? pars[i] : 0), 0);
     rows.forEach((r, i) => {
       const sc = Number(r.score);
       if (!Number.isFinite(sc) || sc <= 0) return;
@@ -11991,14 +12179,14 @@ out geom;`;
         3,
         6
       );
-      if (par > 5) return;
       parSplits[par] = parSplits[par] || { n: 0, total: 0 };
       parSplits[par].n += 1;
       parSplits[par].total += sc;
     });
 
     return {
-      played: played.length, totalScore,
+      played: played.length, totalScore, toPar: totalScore - parPlayed,
+      parPlayed, pars, holesCount: roundLen,
       puttRows: puttRows.length, totalPutts,
       firRows: firRows.length, firMade,
       girRows: girRows.length, girMade,
@@ -13487,7 +13675,7 @@ out geom;`;
     const myMapSeq = ++planMapSeq;
 
     // Already saved under this exact name? Just select the profile.
-    const saved = getSavedCourseMatch(candidate.name);
+    const saved = getSavedCourseMatch(candidate);
     if (saved) {
       prepEphemeralCourse = null;
       state.planCourseId = saved.id;
@@ -13629,7 +13817,7 @@ out geom;`;
       fresh.osmType = candidate.osmType;
       fresh.osmId = candidate.osmId;
       saveCourseProfile(fresh);
-      const saved = getSavedCourseMatch(fresh.name);
+      const saved = getSavedCourseMatch(fresh);
       if (saved) state.planCourseId = saved.id;
       renderPlanner();
       renderPlannerCourse();
@@ -13921,7 +14109,13 @@ out geom;`;
     els.groupTableWrap.querySelectorAll('input[data-pid]').forEach((inp) => {
       inp.addEventListener('change', () => {
         const arr = partnerScoreArray(inp.dataset.pid);
-        arr[Number(inp.dataset.i)] = sanitizeInt(inp.value);
+        const value = inp.value.trim();
+        if (value !== '' && !isValidScore(value)) {
+          setNotice('Enter a whole-number score from 1 to 15, or clear the cell.', 'danger');
+          inp.value = arr[Number(inp.dataset.i)] || '';
+          return;
+        }
+        arr[Number(inp.dataset.i)] = value === '' ? '' : String(Number(value));
         saveRoundSession();
         renderGroupTable();
       });

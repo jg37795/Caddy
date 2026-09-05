@@ -1,0 +1,6 @@
+'use strict';
+const assert=require('assert/strict');const {test}=require('node:test');const {boot,course}=require('./helpers/app-harness');
+const names=['saveCourseProfile','getSavedCourseMatch'];
+test('same-named courses with different OSM identity never overwrite each other',()=>{const h=boot({},names);try{const a={...course(),id:'osm:way:10',osmType:'way',osmId:10,name:'Lakeside Golf Club',location:{lat:40,lng:-100}};const b={...a,id:'osm:way:20',osmId:20,location:{lat:41,lng:-100}};h.api.saveCourseProfile(a);h.api.saveCourseProfile(b);assert.equal(h.api.state.courseProfiles.length,2);assert.equal(h.api.getSavedCourseMatch(b).id,b.id);assert.equal(h.api.getSavedCourseMatch({...b,id:'osm:way:30',osmId:30}),null);}finally{h.close();}});
+test('same course updated for different tees retains one profile',()=>{const h=boot({},names);try{const a={...course(),id:'osm:way:10',osmType:'way',osmId:10};h.api.saveCourseProfile(a);h.api.saveCourseProfile({...a,teeName:'Blue'});assert.equal(h.api.state.courseProfiles.length,1);assert.equal(h.api.state.courseProfiles[0].teeName,'Blue');}finally{h.close();}});
+test('legacy name-only matching refuses ambiguous saved courses',()=>{const h=boot({},names);try{h.api.state.courseProfiles=[{...course(),id:'one'},{...course(),id:'two'}];assert.equal(h.api.getSavedCourseMatch(course().name),null);}finally{h.close();}});

@@ -59,7 +59,8 @@
     // v1.23.0: the marked pin IS today's greenCenter readout — pass it
     // through so greenmap renders the flag exactly there.
     const pin = g ? { lat: g.lat, lng: g.lng } : null;
-    return { lat: g.lat, lng: g.lng, tee: t, pin, hole: holeNum };
+    return { lat: g.lat, lng: g.lng, tee: t, pin, hole: holeNum,
+      courseId: course && course.id ? String(course.id) : null };
   }
 
   function pill() {
@@ -102,7 +103,7 @@
       // "Load this green" can persist a manual tee — the same contract the
       // Prep and satellite-sheet launches use. Without these the editor
       // could not remember tee placements made from a Round launch.
-      const courseId = course && course.id ? String(course.id) : null;
+      const courseId = g.courseId;
       if (courseId) url += '&course=' + encodeURIComponent(courseId) +
         '&hole=' + g.hole;
       // Same-tab navigation (not window.open) so the tool's ‹ Back returns

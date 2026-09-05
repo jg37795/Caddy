@@ -6,7 +6,8 @@
    gone. Rings are [[lat,lng],...] arrays. All pure/sync so tests run headless.
 
    Storage: localStorage 'caddy:greenOutlines:v2' — a map of
-   `${lat.toFixed(3)},${lng.toFixed(3)}` → record. Every WRITE is try/caught
+   `${lat.toFixed(6)},${lng.toFixed(6)}` → record. Legacy keys are read by
+   their stored coordinates; writes migrate the matched record. Every WRITE is try/caught
    (quota / private mode = silent no-op); reads still work from memory.
    ========================================================================== */
 
@@ -14,7 +15,7 @@
   'use strict';
 
   const KEY = 'caddy:greenOutlines:v2';
-  const NEAR_M = 100;          // nearest-record scan radius (matches legacy store)
+  const NEAR_M = 3;            // coordinate noise only; NOT adjacent greens
   const M_LAT = 111320;        // metres per degree latitude
 
   function mPerLng(lat) {
@@ -22,14 +23,15 @@
   }
 
   function keyFor(lat, lng) {
-    return `${Number(lat).toFixed(3)},${Number(lng).toFixed(3)}`;
+    return `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
   }
 
   // Raw map read. Corrupt JSON / absent storage → empty map.
   function readAll() {
     try {
       if (typeof localStorage === 'undefined' || !localStorage) return {};
-      return JSON.parse(localStorage.getItem(KEY) || '{}') || {};
+      const data = JSON.parse(localStorage.getItem(KEY) || '{}');
+      return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
     } catch (e) { return {}; }
   }
 
@@ -44,13 +46,27 @@
   function validRing(ring) {
     return Array.isArray(ring) && ring.length >= 3 &&
       ring.every((p) => Array.isArray(p) &&
-        Number.isFinite(p[0]) && Number.isFinite(p[1]));
+        Number.isFinite(p[0]) && Number.isFinite(p[1]) &&
+        Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180);
   }
 
-  // NEAREST record within 100 m — never first-hit (Grok F21 lesson).
+  // Moving a pin inside its known outline keeps identity; mere proximity
+  // to a different green never does. Rings use x=longitude, y=latitude.
+  function contains(ring, lat, lng) {
+    if (!validRing(ring)) return false;
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [yi, xi] = ring[i], [yj, xj] = ring[j];
+      if (((yi > lat) !== (yj > lat)) &&
+          lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  // Precise coordinate match, or containment in this green's own ring.
   function get(lat, lng) {
     const la = Number(lat), ln = Number(lng);
-    if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
+    if (!Number.isFinite(la) || !Number.isFinite(ln) || Math.abs(la) > 90 || Math.abs(ln) > 180) return null;
     const store = readAll();
     const mLng = mPerLng(la);
     let best = null, bestD = Infinity;
@@ -58,18 +74,26 @@
       const o = store[k];
       if (!o || !Number.isFinite(o.lat) || !Number.isFinite(o.lng)) continue;
       const d = Math.hypot((o.lat - la) * M_LAT, (o.lng - ln) * mLng);
-      if (d < bestD) { bestD = d; best = o; }
+      const matches = d <= NEAR_M || contains(o.osmRing, la, ln) || contains(o.autoRing, la, ln);
+      if (matches && d < bestD) { bestD = d; best = o; }
     }
-    return bestD <= NEAR_M ? best : null;
+    return best;
   }
 
   function put(lat, lng, patch) {
+    const la = Number(lat), ln = Number(lng);
+    if (!Number.isFinite(la) || !Number.isFinite(ln) || Math.abs(la) > 90 || Math.abs(ln) > 180) return null;
     const store = readAll();
-    const k = keyFor(lat, lng);
-    const prev = store[k] || { lat: Number(lat), lng: Number(lng) };
+    const prev = get(la, ln) || { lat: la, lng: ln };
+    const k = keyFor(prev.lat, prev.lng);
+    // The old bucket can collide with another green. Match the record's
+    // coordinates, never the rounded key, and preserve a moved pin's owner.
+    for (const oldKey of Object.keys(store)) {
+      const rec = store[oldKey];
+      if (oldKey !== k && rec && rec.lat === prev.lat && rec.lng === prev.lng) delete store[oldKey];
+    }
     const next = Object.assign({}, prev, patch, {
-      lat: Number(lat), lng: Number(lng),
-      updatedAt: Date.now(),
+      lat: prev.lat, lng: prev.lng, updatedAt: Date.now(),
     });
     store[k] = next;
     writeAll(store);

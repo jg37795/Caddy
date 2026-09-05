@@ -1,6 +1,6 @@
 /* sw.js — offline-first service worker for Caddy. */
 // v1.23.1: functional repairs for Prep briefs, OSM lookup and API caching.
-const CACHE_VERSION = 'v1.23.1'; // OUTLINE MODEL REBUILD (James-approved design): one remembered outline per green from a named source — OutlineStore (per-green OSM ring + Auto ring + chosen + locked, nearest-key 100 m); ellipse fallback DELETED (honest "isn't mapped yet" card + Check location CTA); 3D dock gets its own OSM|Auto source row (exists = instant switch via ?src=, missing = greyed with prompt, Auto deep-links Check location &armdetect); Slope/Elev + single Arrows toggle replaces Both/Shading/Arrows; Hole view shows only the chosen outline with a source chip; Check location gains "Use this outline" (saves + locks); high-bar auto-save (conf>=0.75); greenlink passes today's pin (?pinlat/pinlng) so the flag renders there; prep cartoon + green brief read the chosen ring.
+const CACHE_VERSION = 'v1.24.0'; // OUTLINE MODEL REBUILD (James-approved design): one remembered outline per green from a named source — OutlineStore (per-green OSM ring + Auto ring + chosen + locked, nearest-key 100 m); ellipse fallback DELETED (honest "isn't mapped yet" card + Check location CTA); 3D dock gets its own OSM|Auto source row (exists = instant switch via ?src=, missing = greyed with prompt, Auto deep-links Check location &armdetect); Slope/Elev + single Arrows toggle replaces Both/Shading/Arrows; Hole view shows only the chosen outline with a source chip; Check location gains "Use this outline" (saves + locks); high-bar auto-save (conf>=0.75); greenlink passes today's pin (?pinlat/pinlng) so the flag renders there; prep cartoon + green brief read the chosen ring.
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';
@@ -130,34 +130,35 @@ self.addEventListener('fetch', (event) => {
 async function handleNavigation(request) {
   const cache = await caches.open(SHELL_CACHE);
   const shellRequest = new Request('./index.html');
+  const rootRequest = new Request('./');
+  const greenmapRequest = new Request('./greenmap.html');
+  const pageURL = new URL(request.url);
+  pageURL.search = '';
+  pageURL.hash = '';
+
+  // Only known static entry documents share a queryless cache key. Keep
+  // request itself unchanged so the page still receives its deep-link data.
+  const isMain = pageURL.href === rootRequest.url || pageURL.href === shellRequest.url;
+  const cacheKey = isMain ? shellRequest :
+    pageURL.href === greenmapRequest.url ? greenmapRequest : request;
 
   try {
     // cache:'reload' bypasses the HTTP cache — python's http.server (and
     // some hosts) send no Cache-Control, and heuristic caching otherwise
     // serves stale app.js/app.css against fresh HTML after an update.
     const response = await fetch(request, { cache: 'reload' });
+    if (!response.ok) throw new Error(`Navigation failed: ${response.status}`);
 
-    // v-fix(nav-cache) v1.5.2 (Grok audit #2): cache the response under its
-    // OWN url — the old code always put it under ./index.html, so loading
-    // greenmap.html while online overwrote the cached app shell and an
-    // offline relaunch of / served the 3D Green tool as the app.
-    if (cacheable(response)) {
-      const url = new URL(request.url);
-      if (url.pathname.endsWith('/') || url.pathname.endsWith('/index.html')) {
-        await cache.put(shellRequest, response.clone());
-      } else {
-        await cache.put(new Request(request.url), response.clone());
-      }
-    }
+    // Greenmap and the main app must never overwrite or fall back to one
+    // another. All query variants of each entry use that entry's key.
+    try { await cache.put(cacheKey, response.clone()); }
+    catch { /* storage failure must not discard a valid network page */ }
 
     return response;
   } catch {
-    const url = new URL(request.url);
     const cached =
-      (url.pathname.endsWith('/') || url.pathname.endsWith('/index.html')
-        ? await cache.match(shellRequest)
-        : await cache.match(request)) ||
-      (await cache.match('./')) ||
+      (await cache.match(cacheKey)) ||
+      (isMain ? await cache.match(rootRequest) : null) ||
       (await caches.match(request));
 
     if (cached) return cached;
@@ -180,10 +181,9 @@ async function networkFirstAsset(request, cacheName) {
   try {
     // See handleNavigation — always revalidate shell assets from network.
     const response = await fetch(request, { cache: 'reload' });
-
-    if (cacheable(response)) {
-      await cache.put(request, response.clone());
-    }
+    if (!response.ok) throw new Error(`Asset failed: ${response.status}`);
+    try { await cache.put(request, response.clone()); }
+    catch { /* best-effort caching; the fetched asset is still usable */ }
 
     return response;
   } catch {

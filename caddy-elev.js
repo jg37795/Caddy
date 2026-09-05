@@ -323,7 +323,8 @@
      3. FETCH — two-step href flow, timeout, retry-once, cancellable
      ====================================================================== */
 
-  async function fetchWithTimeout(url, ms, signal) {
+  async function fetchWithTimeout(url, ms, signal, bodyType) {
+    if (signal && signal.aborted) throw new DOMException('aborted', 'AbortError');
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), ms);
     const relay = () => ctrl.abort();
@@ -334,7 +335,9 @@
     try {
       const res = await fetch(url, { signal: ctrl.signal });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res;
+      // Keep both timeout and caller abort relay alive until the payload
+      // finishes; headers alone are not a completed JSON/GeoTIFF request.
+      return await res[bodyType]();
     } finally {
       clearTimeout(timer);
       if (signal) signal.removeEventListener('abort', relay);
@@ -370,11 +373,9 @@
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const r1 = await fetchWithTimeout(step1Url, FETCH_TIMEOUT_MS, signal);
-        const meta = await r1.json();
+        const meta = await fetchWithTimeout(step1Url, FETCH_TIMEOUT_MS, signal, 'json');
         if (!meta || !meta.href) throw new Error('no href' + (meta && meta.error ? ' (' + JSON.stringify(meta.error).slice(0, 120) + ')' : ''));
-        const r2 = await fetchWithTimeout(meta.href, FETCH_TIMEOUT_MS, signal);
-        const buf = await r2.arrayBuffer();
+        const buf = await fetchWithTimeout(meta.href, FETCH_TIMEOUT_MS, signal, 'arrayBuffer');
         const parsed = parseGeoTIFF(buf);
         if (!parsed) throw new Error('parse failed');
         const cellX = (e - w) / parsed.W;                       // deg
@@ -410,7 +411,7 @@
   function gridCellFor(eg, lat, lng) {
     const [w, s, e, n] = eg.bbox;
     const fx = ((lng - w) / (e - w)) * eg.W - 0.5;
-    const fy = ((lat - s) / (n - s)) * eg.H - 0.5;
+    const fy = ((n - lat) / (n - s)) * eg.H - 0.5; // north-up TIFF: row 0 is north
     return { cx: Math.round(fx), cy: Math.round(fy) };
   }
 
