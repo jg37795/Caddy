@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.24.0'; // JSON backup/restore via share sheet, shot-log CSV, remembered putts default, verdict & shot-capture haptic vocabulary
+  const APP_VERSION = '1.24.1'; // JSON backup/restore via share sheet, shot-log CSV, remembered putts default, verdict & shot-capture haptic vocabulary
   const ACCURACY_WARN_YD = 25;
   // Range-recalculation throttle (perf): GPS ticks only trigger the full
   // plays-like solve when the player has genuinely moved. Sub-yard drift in
@@ -265,7 +265,6 @@
     courseSearchInput: $('courseSearchInput'),
     // Group scoring
     groupCountChip: $('groupCountChip'),
-    groupEditorList: $('groupEditorList'),
     addPartnerBtn: $('addPartnerBtn'),
     groupTableWrap: $('groupTableWrap'),
     roundScoreChips: $('roundScoreChips'),
@@ -532,10 +531,6 @@
         return holeOut;
       }),
     };
-  }
-
-  function cloneCourse(course) {
-    return JSON.parse(JSON.stringify(normalizeCourse(course)));
   }
 
   function saveCourseProfiles() {
@@ -6713,10 +6708,6 @@ out geom;`;
     };
   }
 
-  function getRoundScoreDraft() {
-    return getRoundScoreDraftForHole(getCurrentHoleNumber());
-  }
-
   function renderRoundScoreSheet() {
     if (!els.roundScoreSheet || !state.roundScoreDraft) return;
 
@@ -9249,13 +9240,6 @@ out geom;`;
   }
   const RHO_STD = airDensity({ tempF: STD_TEMP_F, rh: STD_RH, altitudeFt: STD_ALT_FT }); // ≈1.1943 kg/m³
 
-  const SUTH_MU0 = 1.716e-5;     // dynamic viscosity of air at 273.15 K, Pa·s — White, Viscous Fluid Flow 3rd ed. Table 1-2
-  const SUTH_S = 110.4;          // Sutherland constant for air, K — White (2006) Table 1-2
-  function kinematicViscosity(tempC, rho) {
-    const T = tempC + KELVIN_0C;
-    const mu = SUTH_MU0 * Math.pow(T / KELVIN_0C, 1.5) * ((KELVIN_0C + SUTH_S) / (T + SUTH_S));
-    return mu / Math.max(0.4, rho);
-  }
 
   // --- Surface-layer wind profile ---
   // The single largest wind-modelling error in consumer golf apps is using the 10 m model wind
@@ -9323,6 +9307,7 @@ out geom;`;
    * env    : { rho, gravity, windAt(z)->{wx,wz}, coriolis:{ox,oy,oz}, targetDropM }
    * Returns the state at the moment the ball first descends through targetDropM.
    */
+  // NOTE: OVERRIDDEN below by PATCH B (zero-allocation versions). Edits here are dead code.
   function integrateTrajectory(launch, env) {
     const m = BALL.massKg, A = BALL.areaM2, r = BALL.radiusM;
     const halfRhoA = 0.5 * env.rho * A;
@@ -9579,6 +9564,7 @@ out geom;`;
   });
 
   // Build the integration environment for a set of on-course conditions.
+  // NOTE: OVERRIDDEN below by PATCH B (zero-allocation versions). Edits here are dead code.
   function buildEnv(cond) {
     const tempF = num(cond.tempF, STD_TEMP_F);
     const altFt = num(cond.courseAltitudeFt, 0);
@@ -10331,12 +10317,6 @@ out geom;`;
     return out;
   }
 
-  function loadShotLog() {
-    const v = load(SHOTLOG_KEY, {});
-    return sanitizeShotLog(v);
-  }
-  function saveShotLog(log) { save(SHOTLOG_KEY, log); }
-
   // Normalize either schema to { d, c, l, t, a }.
   function normalizeShotEntry(e) {
     if (Number.isFinite(e)) return { d: e, c: null, l: null, t: null, a: null };
@@ -10350,24 +10330,6 @@ out geom;`;
       t: Number.isFinite(e.t) ? Number(e.t) : null,
       a: Number.isFinite(e.a) ? Number(e.a) : null,
     };
-  }
-
-  // Estimate the carry component of a measured TOTAL distance by modelling the rollout
-  // for that club's launch conditions in the CURRENT conditions. This fixes a real
-  // inconsistency: the log measured total, but club.yards is a carry number.
-  function estimateCarryFromTotal(totalYd, firmness = 'medium') {
-    const D = Math.max(0, num(totalYd, 0));
-    if (D < 15) return D;
-    let carry = D * 0.94;                                  // seed
-    for (let i = 0; i < 6; i++) {
-      const L = launchForStandardCarry(carry);
-      const t = integrateTrajectory(L, STILL_AIR_ENV);
-      const roll = rolloutYd(t.landSpeedMps, t.descentDeg, firmness, STILL_AIR_ENV.gravity);
-      const next = clamp(D - roll, 0.55 * D, D);
-      if (Math.abs(next - carry) < 0.05) { carry = next; break; }
-      carry = next;
-    }
-    return carry;
   }
 
   /**
@@ -10403,8 +10365,6 @@ out geom;`;
     }
     return { total, clubs };
   }
-  function clearShotData() { try { localStorage.removeItem(SHOTLOG_KEY); } catch { } }
-
   function priorRelSigma(carryYd) {
     const t = smoothstep(DISP_REL_KNEE_LO, DISP_REL_KNEE_HI, num(carryYd, 150));
     return (DISP_REL_SHORT + t * (DISP_REL_LONG - DISP_REL_SHORT)) * DISP_AMATEUR_MULT;
@@ -11584,7 +11544,6 @@ out geom;`;
 
   function updateWeatherUI() {
     const w = getWeatherOrNeutral(), e = getElevationOrNeutral();
-    const windArrow = $('windArrow');
     const windCompass = $('windCompass');
     if (state.context.weather && w.windMph >= 1) {
       const gust = Number.isFinite(w.gustMph) && w.gustMph > w.windMph + 2
@@ -13968,85 +13927,6 @@ out geom;`;
         : 'Solo';
     }
     renderGroupTable();
-  }
-
-  function renderGroupEditor() {
-    if (!els.groupEditorList) return;
-    const partners = groupPartners();
-    els.groupEditorList.innerHTML = partners
-      .map(
-        (p) => `
-        <div class="group-editor-row" data-id="${escapeHtml(p.id)}">
-          <input type="text" maxlength="24" value="${escapeHtml(p.name)}"
-            aria-label="Partner name" />
-          <button class="group-editor-remove" type="button"
-            aria-label="Remove ${escapeHtml(p.name)}">✕</button>
-        </div>`
-      )
-      .join('');
-
-    els.groupEditorList
-      .querySelectorAll('.group-editor-row')
-      .forEach((row) => {
-        const id = row.dataset.id;
-        const input = row.querySelector('input');
-        input.addEventListener('change', () => {
-          const name = input.value.trim() || 'Player';
-          // QA-003: renames must not collide with another partner either.
-          if (partnerNameTaken(name, id)) {
-            setNotice(`"${name}" is already in the group.`, 'danger');
-            haptic(12);
-            input.value =
-              groupPartners().find((x) => x.id === id)?.name || name;
-            return;
-          }
-          const rs = state.roundSession;
-          const inSession =
-            rs && Array.isArray(rs.groupPlayers)
-              ? rs.groupPlayers.find((x) => x.id === id)
-              : null;
-          if (inSession) {
-            inSession.name = name;
-            saveRoundSession();
-          }
-          const roster = loadGroupRoster();
-          const inRoster = roster.find((x) => x.id === id);
-          if (inRoster) {
-            inRoster.name = name;
-            saveGroupRoster(roster);
-          }
-          renderGroupUI();
-        });
-        row
-          .querySelector('.group-editor-remove')
-          .addEventListener('click', () => {
-            const p = groupPartners().find((x) => x.id === id);
-            if (
-              !p ||
-              !confirm(
-                `Remove ${p.name}${
-                  state.roundSession ? ' and their scores from this round' : ''
-                }?`
-              )
-            ) {
-              return;
-            }
-            if (
-              state.roundSession &&
-              Array.isArray(state.roundSession.groupPlayers)
-            ) {
-              state.roundSession.groupPlayers =
-                state.roundSession.groupPlayers.filter((x) => x.id !== id);
-              delete state.roundSession.groupScores[id];
-              if (state._scorePartnerId === id) state._scorePartnerId = '';
-              saveRoundSession();
-            }
-            saveGroupRoster(loadGroupRoster().filter((x) => x.id !== id));
-            renderGroupUI();
-            renderRound();
-            haptic(8);
-          });
-      });
   }
 
   function renderGroupTable() {
