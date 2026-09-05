@@ -3502,6 +3502,12 @@
     }
   }
   function teardownRoundSession(saveToHistory) {
+    // Refresh the retained meta from the session so a mid-round tee switch
+    // (or any course mutation) is reflected in the saved/summarized round.
+    if (state.roundSession) {
+      setRoundMeta(state.roundSession.course, state.roundSession.id,
+        state.roundSession.startedAt || Date.now());
+    }
     const s = summarizeRound(state.round);
     if (saveToHistory && s.played && !saveCurrentRoundToHistory()) return;
     save('caddy:round', state.round);
@@ -3816,6 +3822,9 @@
         const updated = applyTeeSet(course, chip.dataset.tee);
         state.roundSession.course = updated;
         saveRoundSession();
+        // The retained meta (used to summarize this round after it ends)
+        // must follow the tees the player is actually playing.
+        setRoundMeta(updated, state.roundSession.id, state.roundSession.startedAt);
         rememberCourseTees(updated);
         state.holeGeoKey = null; // force this hole's geometry to re-apply
         renderRoundShotUI();
@@ -8533,7 +8542,15 @@ out geom;`;
     if (!state.roundSession || typeof state.roundSession !== 'object' ||
         Array.isArray(state.roundSession)) {
       state.roundSession = null;
-      state.round = normalizeScorecard(state.round, state.round.length === 9 ? 9 : 18);
+      // A retained completed round pins its layout; without meta, trust the
+      // saved card's own hole numbering (legacy blank cards stay 18).
+      const retained = state.roundMeta && state.roundMeta.course;
+      const legacyRows = Array.isArray(state.round) ? state.round : [];
+      const lastHole = legacyRows.reduce((n, r) =>
+        r && r.score !== '' && Number.isInteger(r.hole) ? Math.max(n, r.hole) : n, 0);
+      const size = retained?.holesCount === 9 || state.round?.length === 9 ||
+        (!retained && lastHole > 0 && lastHole <= 9) ? 9 : 18;
+      state.round = normalizeScorecard(state.round, size);
       if (!state.roundMeta || typeof state.roundMeta.id !== 'string') setRoundMeta(null);
       return;
     }
