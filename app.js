@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.24.1'; // JSON backup/restore via share sheet, shot-log CSV, remembered putts default, verdict & shot-capture haptic vocabulary
+  const APP_VERSION = '1.24.2'; // JSON backup/restore via share sheet, shot-log CSV, remembered putts default, verdict & shot-capture haptic vocabulary
   const ACCURACY_WARN_YD = 25;
   // Range-recalculation throttle (perf): GPS ticks only trigger the full
   // plays-like solve when the player has genuinely moved. Sub-yard drift in
