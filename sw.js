@@ -1,6 +1,6 @@
 /* sw.js — offline-first service worker for Caddy. */
 // v1.23.1: functional repairs for Prep briefs, OSM lookup and API caching.
-const CACHE_VERSION = 'v1.24.4'; // feat(green3d): F/M/B guided green outline for unmapped holes; persist front/back/center coords; lockstep version bump
+const CACHE_VERSION = 'v1.24.5'; // fix(detect): Chaikin corner-cutting smoothing for LiDAR polygons; unified Auto outline flow; lockstep version bump
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.24.4'; // feat(green3d): F/M/B guided green outline for unmapped holes; persist front/back/center coords; lockstep version bump
+  const APP_VERSION = '1.24.5'; // fix(detect): Chaikin corner-cutting smoothing for LiDAR polygons; unified Auto outline flow; lockstep version bump
   const ACCURACY_WARN_YD = 25;
   // Range-recalculation throttle (perf): GPS ticks only trigger the full
   // plays-like solve when the player has genuinely moved. Sub-yard drift in

@@ -1722,8 +1722,8 @@
     // (5) NOTHING mapped → ONE auto-detect attempt at the high bar
     // (confidence >= 0.75 AND mask cells >= 30). Pass → OutlineStore
     // .saveAuto + use it.
-    // If Front & Back are provided (set by user or course), use them to
-    // guide auto-detection and construct a real-proportioned green outline!
+    // When Front & Back are provided, use them directly to define the
+    // smooth auto green outline matching the hole's physical axis!
     const frontLat = parseFloat(qs.get('frontlat'));
     const frontLng = parseFloat(qs.get('frontlng'));
     const backLat = parseFloat(qs.get('backlat'));
@@ -1733,25 +1733,22 @@
 
     if (!chosenSrc && hasFB) {
       stageDetect();
-      // Distance and bearing from front to back
       const dyM = (backLat - frontLat) * mLat;
       const dxM = (backLng - frontLng) * mLng;
       const depthM = Math.hypot(dxM, dyM);
       if (depthM >= 10 && depthM <= 80) {
-        // Center of F/B axis in local coordinates
         const cLat = (frontLat + backLat) / 2;
         const cLng = (frontLng + backLng) / 2;
         const cXM = (cLng - state.lng) * mLng;
         const cYM = (cLat - state.lat) * mLat;
         const halfDepth = depthM / 2;
-        const halfWidth = Math.max(7, halfDepth * 0.72); // typical green aspect ratio
-        const angle = Math.atan2(dyM, dxM); // orientation of green axis
+        const halfWidth = Math.max(7, halfDepth * 0.72);
+        const angle = Math.atan2(dyM, dxM);
         const cosA = Math.cos(angle), sinA = Math.sin(angle);
-        const nPts = 24;
+        const nPts = 32;
         const fcbPoly = [];
         for (let k = 0; k < nPts; k++) {
           const t = (k / nPts) * 2 * Math.PI;
-          // Ellipse aligned with Front-Back vector
           const ex = halfDepth * Math.cos(t);
           const ey = halfWidth * Math.sin(t);
           const rx = ex * cosA - ey * sinA;
@@ -1764,7 +1761,6 @@
         if (fcbCells >= 30) {
           chosenSrc = 'auto';
           chosenDetectPoly = fcbPoly;
-          state.__fcbGuided = true;
           if (osm) {
             osm.saveAuto(state.lat, state.lng,
               fcbPoly.map(([mx, my]) =>
@@ -1962,7 +1958,7 @@
     // v1.23.0 status copy — the chosen source, named. Auto is honest that
     // it is machine-detected; OSM cites its distance from the pin.
     const SRC_LABEL = state.polySource === 'auto'
-      ? (state.__fcbGuided ? 'Outline: Auto (F/B green)' : 'Outline: Auto (detected — verify)')
+      ? 'Outline: Auto (detected — verify)'
       : `Outline: OSM${Number.isFinite(osmDistM)
         ? ` · ${osmDistM} m from pin` : ''}`;
     status.textContent = `${SRC_LABEL} · ` +
@@ -5511,7 +5507,7 @@
     const src = polySource === 'osm'
       ? '✓ OSM green outline'
       : polySource === 'auto'
-        ? (state.__fcbGuided ? '✓ Front/Back aligned green outline' : '⚠ detected outline — verify via Check location')
+        ? '⚠ detected outline — verify via Check location'
         : 'no outline mapped yet';
     el.textContent = `${la}, ${ln} · ${src}` +
       (polySource === 'osm' && window.__osmGreenDistM != null

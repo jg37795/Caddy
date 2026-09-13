@@ -451,6 +451,27 @@ window.GreenDetect.detect = function (data) {
     for (let i = 0; i < 64; i++) t.push(simp[((i * simp.length) / 64) | 0]);
     simp = t;
   }
+  // Smooth jagged raster cell boundaries via 2 passes of Chaikin corner-cutting
+  if (simp.length >= 8) {
+    for (let pass = 0; pass < 2; pass++) {
+      const smoothed = [];
+      const m = simp.length;
+      for (let i = 0; i < m; i++) {
+        const p0 = simp[i];
+        const p1 = simp[(i + 1) % m];
+        smoothed.push([0.75 * p0[0] + 0.25 * p1[0], 0.75 * p0[1] + 0.25 * p1[1]]);
+        smoothed.push([0.25 * p0[0] + 0.75 * p1[0], 0.25 * p0[1] + 0.75 * p1[1]]);
+      }
+      simp = smoothed;
+    }
+    // Downsample back to clean polygon size (~32-48 points)
+    if (simp.length > 40) {
+      const t = [];
+      const targetN = 36;
+      for (let i = 0; i < targetN; i++) t.push(simp[((i * simp.length) / targetN) | 0]);
+      simp = t;
+    }
+  }
   if (simp.length < 8 || simp.length > 64) { console.log("EXIT simp", simp.length); return null; }
 
   const area = best.length * ca;
