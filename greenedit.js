@@ -438,6 +438,24 @@
       syncOutlineBtns();
       runAutoAt(pin.getLatLng());
     });
+    // Fallback: double-tap or tap when no detection found places an estimated 30 yd circle
+    const gelHintClick = () => {
+      if (gelOutlineMode === 'auto' && !gelPreviewRingLL) {
+        const ll = pin.getLatLng();
+        const DEFAULT_R = 14;
+        const nPts = 24;
+        const estRing = [];
+        const mLat = 111320;
+        const mLng = 111320 * Math.cos(ll.lat * Math.PI / 180);
+        for (let k = 0; k < nPts; k++) {
+          const th = (k / nPts) * 2 * Math.PI;
+          estRing.push([ll.lat + (DEFAULT_R * Math.sin(th)) / mLat, ll.lng + (DEFAULT_R * Math.cos(th)) / mLng]);
+        }
+        drawPreviewRing(estRing, '#ffd166');
+        setOutlineHint('Placed standard 30 yd green outline — tap Use this outline to keep');
+      }
+    };
+    if (autoBtn) autoBtn.addEventListener('contextmenu', (e) => { e.preventDefault(); gelHintClick(); });
     if (osmBtn) osmBtn.addEventListener('click', () => {
       if (gelOutlineMode === 'osm') { clearOutline(); return; }
       gelOutlineMode = 'osm';

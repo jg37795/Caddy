@@ -1,6 +1,6 @@
 /* sw.js — offline-first service worker for Caddy. */
 // v1.23.1: functional repairs for Prep briefs, OSM lookup and API caching.
-const CACHE_VERSION = 'v1.24.2'; // fix(play): wind-pill width cap moved to base rule + top-right-col shrink — stops right-cluster overflow at large Dynamic Type sizes // OUTLINE MODEL REBUILD (James-approved design): one remembered outline per green from a named source — OutlineStore (per-green OSM ring + Auto ring + chosen + locked, nearest-key 100 m); ellipse fallback DELETED (honest "isn't mapped yet" card + Check location CTA); 3D dock gets its own OSM|Auto source row (exists = instant switch via ?src=, missing = greyed with prompt, Auto deep-links Check location &armdetect); Slope/Elev + single Arrows toggle replaces Both/Shading/Arrows; Hole view shows only the chosen outline with a source chip; Check location gains "Use this outline" (saves + locks); high-bar auto-save (conf>=0.75); greenlink passes today's pin (?pinlat/pinlng) so the flag renders there; prep cartoon + green brief read the chosen ring.
+const CACHE_VERSION = 'v1.24.3'; // fix(play): separate 3D Green pill onto row3, unmapped course LiDAR elevation + estimated boundary, persist manual green center
 const SHELL_CACHE = `caddy-shell-${CACHE_VERSION}`;
 const TILE_CACHE = `caddy-tiles-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'caddy-';

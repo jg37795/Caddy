@@ -1317,6 +1317,12 @@ body.dark .range-wrap:not(.is-sat) .brand-mark {
   gap: 8px;
 }
 
+.top-right-row3 {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .top-cluster {
   display: flex;
   align-items: center;

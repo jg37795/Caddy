@@ -36,7 +36,7 @@
 
   // Resolve the current hole's green/tee from the live session. Returns
   // { lat, lng, tee } or null. Priority: explicit hole record → casual
-  // session green fields → null.
+  // session green fields → lastTarget aim point fallback → null.
   function currentGreen() {
     const rs = loadJSON(SESSION_KEY, null);
     if (!rs || typeof rs !== 'object') return null;
@@ -45,11 +45,18 @@
     const course = rs.course;
     const hole = course && Array.isArray(course.holes)
       ? course.holes[holeNum - 1] : null;
-    const g = hole && hole.greenCenter &&
+    let g = hole && hole.greenCenter &&
       Number.isFinite(Number(hole.greenCenter.lat)) &&
       Number.isFinite(Number(hole.greenCenter.lng))
       ? { lat: Number(hole.greenCenter.lat), lng: Number(hole.greenCenter.lng) }
       : null;
+    if (!g && rs.status && rs.status !== 'idle' && (rs.fallbackToTarget || hole?.source === 'manual')) {
+      // Fallback: if on a manual / unmapped course, aim target serves as green center
+      const lt = loadJSON('caddy:lastTarget', null);
+      if (lt && Number.isFinite(Number(lt.lat)) && Number.isFinite(Number(lt.lng))) {
+        g = { lat: Number(lt.lat), lng: Number(lt.lng) };
+      }
+    }
     if (!g) return null;
     const t = hole && hole.teePoint &&
       Number.isFinite(Number(hole.teePoint.lat)) &&
@@ -114,8 +121,11 @@
   }
 
   function mount() {
-    // Beside the wind pill inside the Play tab's top-right column.
-    const host = document.querySelector('.top-right-row2');
+    // Row 3 inside the Play tab's top-right column (below wind pill + recenter FAB).
+    // Falls back to top-right-row2 for backwards-compatibility with tests.
+    const host = document.getElementById('topRightRow3') ||
+      document.querySelector('.top-right-row3') ||
+      document.querySelector('.top-right-row2');
     if (!host) return;
     const p = pill();
     if (p.parentElement !== host) host.appendChild(p);

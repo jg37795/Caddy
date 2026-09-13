@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.24.2'; // JSON backup/restore via share sheet, shot-log CSV, remembered putts default, verdict & shot-capture haptic vocabulary
+  const APP_VERSION = '1.24.3'; // fix(play): separate 3D Green pill onto row3, unmapped course LiDAR elevation + estimated boundary, persist manual green center
   const ACCURACY_WARN_YD = 25;
   // Range-recalculation throttle (perf): GPS ticks only trigger the full
   // plays-like solve when the player has genuinely moved. Sub-yard drift in
@@ -1567,6 +1567,7 @@
         state.backPt = latlng;
       } else if (state.placeMode === 'center') {
         state.greenCenter = latlng;
+        setHoleGreenCenter(state.greenCenter);
         if (!state.markers.greenCenter)
           state.markers.greenCenter = L.marker([latlng.lat, latlng.lng], {
             icon: greenCenterIcon(),
@@ -3902,6 +3903,26 @@
     return true;
   }
 
+  // Persist a marked green center for the current hole into the live round course.
+  function setHoleGreenCenter(pt) {
+    const course = getCurrentCourse();
+    if (!course || !state.roundSession) return false;
+    const idx = getCurrentHoleNumber() - 1;
+    if (!course.holes[idx]) return false;
+    course.holes[idx].greenCenter = pt
+      ? { lat: pt.lat, lng: pt.lng }
+      : null;
+    state.roundSession.course = course;
+    saveRoundSession();
+    if (
+      state.selectedCourseTemplate &&
+      state.selectedCourseTemplate.id === course.id
+    ) {
+      state.selectedCourseTemplate = course;
+    }
+    return true;
+  }
+
   function renderTeeMarker() {
     if (!state.mapReady) return;
     if (!state.teePt) {
@@ -4108,7 +4129,7 @@
     const rightCol = document.querySelector('.top-right-col');
     const rightW = rightCol ? rightCol.offsetWidth : 0;
     const available = window.innerWidth - rightW - 12 - 8 - 12;
-    hud.style.maxWidth = `${Math.max(176, Math.round(available))}px`;
+    hud.style.maxWidth = `${Math.round(available)}px`;
     if (!_roundHudResizeBound) {
       _roundHudResizeBound = true;
       window.addEventListener('resize', constrainRoundHud);
