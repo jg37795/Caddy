@@ -35,8 +35,8 @@
   };
 
   // Resolve the current hole's green/tee from the live session. Returns
-  // { lat, lng, tee } or null. Priority: explicit hole record → casual
-  // session green fields → lastTarget aim point fallback → null.
+  // { lat, lng, tee, pin, front, back, hole, courseId } or null. Priority:
+  // explicit hole record → casual session green fields → null.
   function currentGreen() {
     const rs = loadJSON(SESSION_KEY, null);
     if (!rs || typeof rs !== 'object') return null;
@@ -50,23 +50,27 @@
       Number.isFinite(Number(hole.greenCenter.lng))
       ? { lat: Number(hole.greenCenter.lat), lng: Number(hole.greenCenter.lng) }
       : null;
-    if (!g && rs.status && rs.status !== 'idle' && (rs.fallbackToTarget || hole?.source === 'manual')) {
-      // Fallback: if on a manual / unmapped course, aim target serves as green center
-      const lt = loadJSON('caddy:lastTarget', null);
-      if (lt && Number.isFinite(Number(lt.lat)) && Number.isFinite(Number(lt.lng))) {
-        g = { lat: Number(lt.lat), lng: Number(lt.lng) };
-      }
-    }
     if (!g) return null;
     const t = hole && hole.teePoint &&
       Number.isFinite(Number(hole.teePoint.lat)) &&
       Number.isFinite(Number(hole.teePoint.lng))
       ? { lat: Number(hole.teePoint.lat), lng: Number(hole.teePoint.lng) }
       : null;
+    const front = hole && hole.front &&
+      Number.isFinite(Number(hole.front.lat)) &&
+      Number.isFinite(Number(hole.front.lng))
+      ? { lat: Number(hole.front.lat), lng: Number(hole.front.lng) }
+      : null;
+    const back = hole && hole.back &&
+      Number.isFinite(Number(hole.back.lat)) &&
+      Number.isFinite(Number(hole.back.lng))
+      ? { lat: Number(hole.back.lat), lng: Number(hole.back.lng) }
+      : null;
     // v1.23.0: the marked pin IS today's greenCenter readout — pass it
     // through so greenmap renders the flag exactly there.
     const pin = g ? { lat: g.lat, lng: g.lng } : null;
-    return { lat: g.lat, lng: g.lng, tee: t, pin, hole: holeNum,
+    return { lat: g.lat, lng: g.lng, tee: t, pin, front, back, hole: holeNum,
+      isManual: !hole?.source || hole?.source === 'manual',
       courseId: course && course.id ? String(course.id) : null };
   }
 
@@ -86,11 +90,18 @@
       '<span>3D Green</span>';
     p.addEventListener('click', () => {
       const g = currentGreen();
+      const t = document.querySelector('.rx-toast');
       if (!g) {
-        // Reuse the range layer's toast if present, else alert-free no-op.
-        const t = document.querySelector('.rx-toast');
         if (t && window.__rxRangePremium) {
-          t.textContent = 'No green marked for this hole yet — mark the green on the map first.';
+          t.textContent = 'No green marked for this hole yet — mark Front, Middle, and Back on the map.';
+          t.classList.add('show');
+          setTimeout(() => t.classList.remove('show'), 2600);
+        }
+        return;
+      }
+      if (g.isManual && (!g.front || !g.back)) {
+        if (t && window.__rxRangePremium) {
+          t.textContent = 'Mark Front, Middle, and Back on the green to unlock 3D Green.';
           t.classList.add('show');
           setTimeout(() => t.classList.remove('show'), 2600);
         }
@@ -100,6 +111,10 @@
         '&lng=' + g.lng.toFixed(6);
       if (g.tee) url += '&teelat=' + g.tee.lat.toFixed(6) +
         '&teelng=' + g.tee.lng.toFixed(6);
+      if (g.front) url += '&frontlat=' + g.front.lat.toFixed(6) +
+        '&frontlng=' + g.front.lng.toFixed(6);
+      if (g.back) url += '&backlat=' + g.back.lat.toFixed(6) +
+        '&backlng=' + g.back.lng.toFixed(6);
       // v1.23.0: carry the MARKED PIN (the green centre the app recorded —
       // the same point the flag sits on in the app's map) so the 3D flag
       // and putt solver aim there, not at a re-derived centre.

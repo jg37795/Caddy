@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.24.3'; // fix(play): separate 3D Green pill onto row3, unmapped course LiDAR elevation + estimated boundary, persist manual green center
+  const APP_VERSION = '1.24.4'; // feat(green3d): F/M/B guided green outline for unmapped holes; persist front/back/center coords; lockstep version bump
   const ACCURACY_WARN_YD = 25;
   // Range-recalculation throttle (perf): GPS ticks only trigger the full
   // plays-like solve when the player has genuinely moved. Sub-yard drift in
@@ -1563,8 +1563,10 @@
     if (state.placeMode && state.loc) {
       if (state.placeMode === 'front') {
         state.frontPt = latlng;
+        setHoleFrontPoint(state.frontPt);
       } else if (state.placeMode === 'back') {
         state.backPt = latlng;
+        setHoleBackPoint(state.backPt);
       } else if (state.placeMode === 'center') {
         state.greenCenter = latlng;
         setHoleGreenCenter(state.greenCenter);
@@ -3910,6 +3912,46 @@
     const idx = getCurrentHoleNumber() - 1;
     if (!course.holes[idx]) return false;
     course.holes[idx].greenCenter = pt
+      ? { lat: pt.lat, lng: pt.lng }
+      : null;
+    state.roundSession.course = course;
+    saveRoundSession();
+    if (
+      state.selectedCourseTemplate &&
+      state.selectedCourseTemplate.id === course.id
+    ) {
+      state.selectedCourseTemplate = course;
+    }
+    return true;
+  }
+
+  // Persist a marked green front for the current hole into the live round course.
+  function setHoleFrontPoint(pt) {
+    const course = getCurrentCourse();
+    if (!course || !state.roundSession) return false;
+    const idx = getCurrentHoleNumber() - 1;
+    if (!course.holes[idx]) return false;
+    course.holes[idx].front = pt
+      ? { lat: pt.lat, lng: pt.lng }
+      : null;
+    state.roundSession.course = course;
+    saveRoundSession();
+    if (
+      state.selectedCourseTemplate &&
+      state.selectedCourseTemplate.id === course.id
+    ) {
+      state.selectedCourseTemplate = course;
+    }
+    return true;
+  }
+
+  // Persist a marked green back for the current hole into the live round course.
+  function setHoleBackPoint(pt) {
+    const course = getCurrentCourse();
+    if (!course || !state.roundSession) return false;
+    const idx = getCurrentHoleNumber() - 1;
+    if (!course.holes[idx]) return false;
+    course.holes[idx].back = pt
       ? { lat: pt.lat, lng: pt.lng }
       : null;
     state.roundSession.course = course;
@@ -8458,6 +8500,9 @@ out geom;`;
       state.frontPt = null;
       state.backPt = null;
       state.greenCenter = null;
+      setHoleFrontPoint(null);
+      setHoleBackPoint(null);
+      setHoleGreenCenter(null);
 
       disarmPlaceMode();
       clearFbMarkers();

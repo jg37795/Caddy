@@ -436,6 +436,34 @@
       if (gelOutlineMode === 'auto') { clearOutline(); return; }
       gelOutlineMode = 'auto';
       syncOutlineBtns();
+      const fLat = parseFloat(new URLSearchParams(location.search).get('frontlat'));
+      const fLng = parseFloat(new URLSearchParams(location.search).get('frontlng'));
+      const bLat = parseFloat(new URLSearchParams(location.search).get('backlat'));
+      const bLng = parseFloat(new URLSearchParams(location.search).get('backlng'));
+      if (Number.isFinite(fLat) && Number.isFinite(bLat)) {
+        const dyM = (bLat - fLat) * 111320;
+        const dxM = (bLng - fLng) * 111320 * Math.cos(pin.getLatLng().lat * Math.PI / 180);
+        const depthM = Math.hypot(dxM, dyM);
+        if (depthM >= 10 && depthM <= 80) {
+          const p = pin.getLatLng();
+          const halfDepth = depthM / 2;
+          const halfWidth = Math.max(7, halfDepth * 0.72);
+          const angle = Math.atan2(dyM, dxM);
+          const cosA = Math.cos(angle), sinA = Math.sin(angle);
+          const mLat = 111320, mLng = 111320 * Math.cos(p.lat * Math.PI / 180);
+          const ring = [];
+          for (let k = 0; k < 24; k++) {
+            const t = (k / 24) * 2 * Math.PI;
+            const ex = halfDepth * Math.cos(t), ey = halfWidth * Math.sin(t);
+            const rx = ex * cosA - ey * sinA, ry = ex * sinA + ey * cosA;
+            ring.push([p.lat + ry / mLat, p.lng + rx / mLng]);
+          }
+          drawPreviewRing(ring, '#ffd166');
+          if (OS) OS.saveAuto(p.lat, p.lng, ring, 0.88);
+          setOutlineHint('Outline: Auto (F/B aligned — saved)');
+          return;
+        }
+      }
       runAutoAt(pin.getLatLng());
     });
     // Fallback: double-tap or tap when no detection found places an estimated 30 yd circle
@@ -587,6 +615,12 @@
       } else {
         qs2.delete('teelat'); qs2.delete('teelng');
       }
+      const fLat = new URLSearchParams(location.search).get('frontlat');
+      const fLng = new URLSearchParams(location.search).get('frontlng');
+      const bLat = new URLSearchParams(location.search).get('backlat');
+      const bLng = new URLSearchParams(location.search).get('backlng');
+      if (fLat && fLng) { qs2.set('frontlat', fLat); qs2.set('frontlng', fLng); }
+      if (bLat && bLng) { qs2.set('backlat', bLat); qs2.set('backlng', bLng); }
       const courseId = qs2.get('course');
       if (courseId) {
         try {
