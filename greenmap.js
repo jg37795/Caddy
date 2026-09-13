@@ -4226,19 +4226,14 @@
     // polygon — wall top, lip and surface edge all sample surfZ3 on the same
     // grown ring.
 
-    // 18Birdies dressing: contour iso-lines on the surface…
-    // v1.4.1: contours clipped to the GREEN polygon — on steep falling
-    // flanks they projected BELOW the rim onto the wall/background as
-    // floating dark dashes (the "teeth" misdiagnosed twice).
-    if (state.polyLocal && state.polyLocal.length > 2) {
-      const contourRing = growPolyLocal(state.polyLocal, -0.05);
-      drawContours3D(cam, contourRing,
-        state.viewMode === 'hole' && state.datasets.hole
-          ? state.datasets.hole.texMode : null);   // v1.14.0 (R6-D1): mode-aware ink
-    } else {
-      drawContours3D(cam, null,
-        state.viewMode === 'hole' && state.datasets.hole
-          ? state.datasets.hole.texMode : null);
+    // 18Birdies dressing: contour iso-lines on the surface (3D green view only)…
+    if (state.viewMode !== 'hole') {
+      if (state.polyLocal && state.polyLocal.length > 2) {
+        const contourRing = growPolyLocal(state.polyLocal, -0.05);
+        drawContours3D(cam, contourRing, null);
+      } else {
+        drawContours3D(cam, null, null);
+      }
     }
     // v1.4.1: the second drawGridFloor call HERE (after the surface) was
     // re-painting translucent floor lines OVER the near wall — the actual
@@ -5028,7 +5023,6 @@
   function setStatus(msg) {
     const el = document.getElementById('gm-status');
     if (el) el.textContent = msg;
-    syncTopInset();
   }
 
   // v1.23.0: outline chrome — the dock source row (exists / greyed /
@@ -5226,6 +5220,11 @@
   }
 
   function wireChrome() {
+    const syncBallVis = () => {
+      const bb = document.getElementById('gm-ball');
+      if (bb) bb.style.display = state.viewMode === 'hole' ? 'none' : '';
+    };
+    syncBallVis();
     // v1.1.7: preset dropdown REMOVED — the tool is app-integrated and loads
     // the green passed by the Play tab (or the app's own saved default).
     // Test presets deleted with it (James: no prototype chrome).
@@ -5257,8 +5256,9 @@
 
     function syncFlyoverBtn() {
       const fb = document.getElementById('gm-flyover');
-      if (!fb) return;
-      fb.style.display = state.viewMode === 'hole' ? '' : 'none';
+      if (fb) fb.style.display = state.viewMode === 'hole' ? '' : 'none';
+      const bb = document.getElementById('gm-ball');
+      if (bb) bb.style.display = state.viewMode === 'hole' ? 'none' : '';
     }
 
     function setViewModeInternal(v) {

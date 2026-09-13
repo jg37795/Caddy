@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = '1.24.5'; // fix(detect): Chaikin corner-cutting smoothing for LiDAR polygons; unified Auto outline flow; lockstep version bump
+  const APP_VERSION = '1.24.6'; // fix(green3d): clean whole-hole satellite render, auto-hide drop ball in hole view, compact 2-row dock, drop-ball re-render fix
   const ACCURACY_WARN_YD = 25;
   // Range-recalculation throttle (perf): GPS ticks only trigger the full
   // plays-like solve when the player has genuinely moved. Sub-yard drift in

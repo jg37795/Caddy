@@ -9,7 +9,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>3D Green — Caddy</title>
-<script>window.CADDY_VERSION = 'v1.24.5';</script>
+<script>window.CADDY_VERSION = 'v1.24.6';</script>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="greenmap.css">
 <link rel="stylesheet" href="leaflet.css">
@@ -86,10 +86,6 @@
     </span>
     <button class="gm-btn" id="gm-flyover" title="Replay the tee-to-green flyover" style="display:none">Flyover</button>
   </div>
-  <!-- v1.23.0: outline SOURCE row — its own dock row (never inside the
-       scrolling data row; that hid the OSM button on iPhone). Tap = set the
-       store's chosen source and reload with ?src=. Missing source = greyed
-       with an honest prompt. -->
   <div class="gm-dock-row" id="gm-src-row" role="radiogroup" aria-label="Outline source">
     <button class="gm-btn gm-src-btn" id="gm-src-osm" aria-pressed="false">OSM</button>
     <button class="gm-btn gm-src-btn" id="gm-src-auto" aria-pressed="false">Auto</button>
@@ -99,11 +95,7 @@
       <button class="gm-btn gm-mode-btn active" data-mode="slope">Slope</button>
       <button class="gm-btn gm-mode-btn" data-mode="elev">Elev</button>
     </div>
-    <!-- v1.23.0: the Both/Shading/Arrows trio collapsed to ONE arrows
-         toggle — 3D/Hole always shade; this only gates the flow arrows. -->
     <button class="gm-btn" id="gm-arrows" aria-pressed="true" title="Flow arrows on the surface">Arrows</button>
-  </div>
-  <div class="gm-dock-row">
     <div class="gm-dock-group" id="gm-action-group">
       <button class="gm-btn" id="gm-ball">Drop ball</button>
       <select id="gm-stimp" class="gm-select" title="Green speed (Stimpmeter)" style="display:none">

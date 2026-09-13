@@ -100,15 +100,15 @@ body:not(.dark) #gm-stage {
 /* v1.2.5: bottom dock. v1.5.1: cohesive instrument bar — the dock is THE
    control surface, spaced like a console, not floating pill clutter. */
 #gm-dock {
-  bottom: calc(var(--safe-bottom) + 12px);
-  left: 10px;
-  right: 10px;
+  bottom: calc(var(--safe-bottom) + 8px);
+  left: 8px;
+  right: 8px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 12px 12px 13px;
-  border-radius: 26px;
+  gap: 5px;
+  padding: 6px 8px 8px;
+  border-radius: 20px;
 }
 
 .gm-dock-group {
@@ -595,8 +595,8 @@ body:not(.dark) #gm-stage {
    Stylized/Photo reads as attached to the same instrument bar. */
 #gm-dock {
   flex-direction: column;
-  gap: 6px;
-  padding: 9px 10px;
+  gap: 4px;
+  padding: 6px 8px;
 }
 .gm-dock-row {
   display: flex;
